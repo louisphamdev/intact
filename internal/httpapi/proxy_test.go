@@ -164,3 +164,30 @@ func TestProxyRefusesUnsupportedProvider(t *testing.T) {
 		t.Errorf("status = %d, want 404 for a provider this build cannot serve", rec.Code)
 	}
 }
+
+// Passthrough is not a POST-only idea. A provider exposes GET endpoints too
+// (model listings, quota), and a proxy that refuses them is not transparent.
+func TestProxyForwardsNonPostMethods(t *testing.T) {
+	var gotMethod, gotPath string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		w.Write([]byte(`{"data":[]}`))
+	}))
+	defer up.Close()
+
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	c, _ := s.CreateConnection("groq", "test", "gsk-abc")
+
+	h := New(s, map[string]string{"groq": up.URL})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/p/"+c.ID+"/models", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: GET must pass through", rec.Code)
+	}
+	if gotMethod != "GET" || gotPath != "/models" {
+		t.Errorf("upstream saw %s %s, want GET /models", gotMethod, gotPath)
+	}
+}

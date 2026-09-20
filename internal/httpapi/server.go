@@ -18,7 +18,9 @@ type api struct {
 func New(s *store.Store, baseOverride map[string]string) http.Handler {
 	a := &api{store: s, baseOverride: baseOverride}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /p/{id}/{path...}", a.proxy)
+	// No method prefix: a provider exposes GET endpoints too, and a passthrough
+	// that only accepts POST is not a passthrough.
+	mux.HandleFunc("/p/{id}/{path...}", a.proxy)
 	mux.HandleFunc("GET /accounts", a.accounts)
 	// "{$}" matches the root and nothing else. A bare "/" would be a catch-all
 	// and would answer every mistyped path with the dashboard.

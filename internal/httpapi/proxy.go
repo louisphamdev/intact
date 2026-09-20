@@ -70,6 +70,17 @@ func (a *api) proxy(w http.ResponseWriter, r *http.Request) {
 			out.Header.Add(k, v)
 		}
 	}
+	// A default fills a header the caller left out; it never overrules a choice the
+	// caller made. Identity is the opposite: it always wins, so the upstream sees
+	// the tool this provider impersonates and not whoever called this proxy.
+	for k, v := range p.Defaults {
+		if out.Header.Get(k) == "" {
+			out.Header.Set(k, v)
+		}
+	}
+	for k, v := range p.Identity {
+		out.Header.Set(k, v)
+	}
 	out.Header.Set(p.AuthHeader, p.AuthPrefix+secret)
 
 	resp, err := upstream.Do(r.Context(), out, 3)

@@ -134,6 +134,55 @@ func TestProxyStreamsWithoutBuffering(t *testing.T) {
 	close(release)
 }
 
+// A class A provider only works when the upstream believes it is talking to the
+// genuine tool. Identity headers must therefore survive a caller that sends its
+// own, and feature headers must not be overwritten when the caller did send one.
+func TestProxyAppliesClassAIdentityAndDefaults(t *testing.T) {
+	var gotUA, gotApp, gotVersion, gotBeta string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		gotApp = r.Header.Get("X-App")
+		gotVersion = r.Header.Get("Anthropic-Version")
+		gotBeta = r.Header.Get("Anthropic-Beta")
+		w.Write([]byte(`{}`))
+	}))
+	defer up.Close()
+
+	s, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	c, err := s.CreateConnection("claude", "test", "oauth-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := New(s, map[string]string{"claude": up.URL})
+	req := httptest.NewRequest("POST", "/p/"+c.ID+"/messages", strings.NewReader(`{}`))
+	// The caller sends its own identity and its own feature selection.
+	req.Header.Set("User-Agent", "some-other-client/1.0")
+	req.Header.Set("Anthropic-Beta", "caller-chose-this")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if gotUA != "claude-cli/2.1.278 (external, sdk-cli)" {
+		t.Errorf("User-Agent = %q: identity must replace whatever the caller sent", gotUA)
+	}
+	if gotApp != "cli" {
+		t.Errorf("X-App = %q, want cli", gotApp)
+	}
+	if gotVersion != "2023-06-01" {
+		t.Errorf("Anthropic-Version = %q: a missing default must be filled", gotVersion)
+	}
+	if gotBeta != "caller-chose-this" {
+		t.Errorf("Anthropic-Beta = %q: a default must not overwrite the caller's choice", gotBeta)
+	}
+}
+
 func TestProxyRejectsUnknownConnection(t *testing.T) {
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()

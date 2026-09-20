@@ -87,6 +87,35 @@ intact           17.6 MB RSS
    `intact` returned the provider's 404 body verbatim, which is how the cause was
    identified in one request.
 
+## Repeated on a reproducible binary
+
+The first run above used a binary built from a dirty working tree. `go version -m`
+reported `3a6e510e9923+dirty`, so the code that ran was not the code in any commit.
+
+The binary was built again from a clean `15aa927` with `-trimpath`, which makes the
+build reproducible: two builds of the same commit gave the same SHA-256, and the
+file on the VPS has that same digest. `go version -m` now reports
+`vcs.revision=15aa927070c9` and `vcs.modified=false`.
+
+The live check was repeated on that binary:
+
+```
+POST /p/<id>/chat/completions   http=200
+top-level keys: choices, created, id, model, object, service_tier,
+                system_fingerprint, usage, usage_breakdown, x_groq
+message keys  : content, reasoning, role
+usage         : queue_time, prompt_tokens, prompt_time, completion_tokens,
+                completion_time, total_tokens, total_time,
+                completion_tokens_details.reasoning_tokens
+RSS           : 13.7 MB
+```
+
+`message.reasoning` is the field that the 9router hub removes. It arrives here.
+
+CAUTION: Build a release with `-trimpath`. Without it the build embeds the path of
+the source directory, so the same commit gives a different digest on each machine
+and you cannot prove which code runs.
+
 ## Not yet covered
 
 - Class A providers (antigravity, codex, github, claude). They need captured

@@ -1,0 +1,5 @@
+/intact
+/intact.exe
+/*.db
+/*.db-shm
+/*.db-wal

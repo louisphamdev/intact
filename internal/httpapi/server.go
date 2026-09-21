@@ -22,6 +22,7 @@ func New(s *store.Store, baseOverride map[string]string) http.Handler {
 	// that only accepts POST is not a passthrough.
 	mux.HandleFunc("/p/{id}/{path...}", a.proxy)
 	mux.HandleFunc("GET /accounts", a.accounts)
+	mux.HandleFunc("GET /usage", a.usage)
 	// "{$}" matches the root and nothing else. A bare "/" would be a catch-all
 	// and would answer every mistyped path with the dashboard.
 	mux.HandleFunc("GET /{$}", a.dashboard)

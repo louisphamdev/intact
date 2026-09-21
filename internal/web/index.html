@@ -28,23 +28,66 @@
     <thead><tr><th>Provider</th><th>Label</th><th>Connection id</th><th>Active</th></tr></thead>
     <tbody id="rows"><tr><td colspan="4">Loading…</td></tr></tbody>
   </table>
+
+  <h1 style="margin-top:2rem">Usage</h1>
+  <p class="sub">Daily token totals per account and model, read from the responses that passed through.</p>
+  <table>
+    <thead><tr><th>Day</th><th>Connection id</th><th>Model</th><th>Input</th><th>Output</th><th>Requests</th></tr></thead>
+    <tbody id="usage"><tr><td colspan="6">Loading…</td></tr></tbody>
+  </table>
 </main>
 <script>
-fetch('/accounts')
-  .then(r => r.json())
-  .then(d => {
-    const rows = (d.accounts || []).map(a =>
-      '<tr><td>' + a.provider + '</td><td>' + a.label +
-      '</td><td><code>' + a.id + '</code></td><td class="' + (a.isActive ? 'yes' : 'no') + '">' +
-      (a.isActive ? 'yes' : 'no') + '</td></tr>'
-    ).join('');
-    document.getElementById('rows').innerHTML =
-      rows || '<tr><td colspan="4">No accounts yet.</td></tr>';
-  })
-  .catch(() => {
-    document.getElementById('rows').innerHTML =
-      '<tr><td colspan="4">Could not reach /accounts.</td></tr>';
-  });
+// Values come from provider responses, so every cell is set with textContent.
+// A model string like `<img src=x onerror=...>` must render as text, never as
+// markup, or a hostile upstream runs script in this origin.
+function message(tbody, span, text) {
+  tbody.replaceChildren();
+  const tr = document.createElement('tr');
+  const td = document.createElement('td');
+  td.colSpan = span;
+  td.textContent = text;
+  tr.append(td);
+  tbody.append(tr);
+}
+
+// cols: each entry is a value, or {code:value} to wrap it in <code>, or
+// {cls, text} to set a class. Every value is written as text.
+function renderRows(tbody, items, span, empty, toCols) {
+  if (!items.length) { message(tbody, span, empty); return; }
+  tbody.replaceChildren();
+  for (const item of items) {
+    const tr = document.createElement('tr');
+    for (const col of toCols(item)) {
+      const td = document.createElement('td');
+      if (col && col.code !== undefined) {
+        const code = document.createElement('code');
+        code.textContent = col.code;
+        td.append(code);
+      } else if (col && col.cls !== undefined) {
+        td.className = col.cls;
+        td.textContent = col.text;
+      } else {
+        td.textContent = col;
+      }
+      tr.append(td);
+    }
+    tbody.append(tr);
+  }
+}
+
+function load(url, tbody, span, empty, toCols) {
+  fetch(url)
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(d => renderRows(tbody, d[Object.keys(d)[0]] || [], span, empty, toCols))
+    .catch(() => message(tbody, span, 'Could not reach ' + url + '.'));
+}
+
+load('/accounts', document.getElementById('rows'), 4, 'No accounts yet.',
+  a => [a.provider, a.label, {code: a.id},
+    {cls: a.isActive ? 'yes' : 'no', text: a.isActive ? 'yes' : 'no'}]);
+
+load('/usage', document.getElementById('usage'), 6, 'No usage recorded yet.',
+  u => [u.day, {code: u.connectionId}, u.model, u.inputTokens, u.outputTokens, u.requests]);
 </script>
 </body>
 </html>

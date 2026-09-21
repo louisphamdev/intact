@@ -22,6 +22,16 @@ CREATE TABLE IF NOT EXISTS connections (
 	is_active   INTEGER NOT NULL DEFAULT 1,
 	created_at  TEXT NOT NULL,
 	updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS usage_daily (
+	day           TEXT NOT NULL,
+	connection_id TEXT NOT NULL,
+	model         TEXT NOT NULL,
+	input_tokens  INTEGER NOT NULL DEFAULT 0,
+	output_tokens INTEGER NOT NULL DEFAULT 0,
+	requests      INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (day, connection_id, model)
 );`
 
 // Open opens the database at path and applies the schema.

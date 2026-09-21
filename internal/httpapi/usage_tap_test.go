@@ -154,3 +154,33 @@ func TestProxyRecordsUsageOnStreamLargerThanTapLimit(t *testing.T) {
 		t.Fatalf("usage on large stream wrong: %+v", rows)
 	}
 }
+
+// Bug (live-found): the proxy forwarded the client's Accept-Encoding, so a
+// client asking for br/zstd got a compressed upstream body the tap could not
+// read, and usage was lost. The proxy must ask the upstream for identity.
+func TestProxyForcesIdentityEncodingUpstream(t *testing.T) {
+	var gotAE string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAE = r.Header.Get("Accept-Encoding")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"model":"m","usage":{"prompt_tokens":78,"completion_tokens":51}}`))
+	}))
+	defer up.Close()
+
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	c, _ := s.CreateConnection("groq", "test", "gsk-abc")
+
+	h := New(s, map[string]string{"groq": up.URL})
+	req := httptest.NewRequest("POST", "/p/"+c.ID+"/chat/completions", strings.NewReader("{}"))
+	req.Header.Set("Accept-Encoding", "br, gzip, zstd") // what curl --compressed sends
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	if gotAE != "identity" {
+		t.Fatalf("upstream Accept-Encoding = %q, want identity so the body is never compressed", gotAE)
+	}
+	rows, _ := s.Usage()
+	if len(rows) != 1 || rows[0].InputTokens != 78 || rows[0].OutputTokens != 51 {
+		t.Fatalf("usage not recorded: %+v", rows)
+	}
+}

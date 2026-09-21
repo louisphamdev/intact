@@ -78,13 +78,19 @@ func (a *api) proxy(w http.ResponseWriter, r *http.Request) {
 	// Authorization: the stored credential must win, so a caller can never send a
 	// request on an account using a token of their own choosing.
 	for k, vs := range r.Header {
-		if hopByHop[k] || k == "Authorization" || k == "Host" {
+		// Accept-Encoding is dropped here and forced to identity below: a caller
+		// that asks for br or zstd would get a body the usage tap cannot read,
+		// and the counts would be lost.
+		if hopByHop[k] || k == "Authorization" || k == "Host" || k == "Accept-Encoding" {
 			continue
 		}
 		for _, v := range vs {
 			out.Header.Add(k, v)
 		}
 	}
+	// Ask the upstream for an uncompressed body so the tap always reads plain
+	// bytes, whatever the caller advertised.
+	out.Header.Set("Accept-Encoding", "identity")
 	// A default fills a header the caller left out; it never overrules a choice the
 	// caller made. Identity is the opposite: it always wins, so the upstream sees
 	// the tool this provider impersonates and not whoever called this proxy.

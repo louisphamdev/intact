@@ -52,3 +52,23 @@ func TestConnectionRoundTripAndSecretIsolation(t *testing.T) {
 		t.Error("Secret on an unknown id returned no error")
 	}
 }
+
+func TestDeleteConnection(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "d.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	c, _ := s.CreateConnection("groq", "temp", "secret")
+	if err := s.DeleteConnection(c.ID); err != nil {
+		t.Fatalf("DeleteConnection: %v", err)
+	}
+	list, _ := s.ListConnections()
+	if len(list) != 0 {
+		t.Errorf("connection still present after delete: %+v", list)
+	}
+	// deleting an unknown id is reported, not silent.
+	if err := s.DeleteConnection("no-such-id"); err == nil {
+		t.Error("DeleteConnection on unknown id returned no error")
+	}
+}

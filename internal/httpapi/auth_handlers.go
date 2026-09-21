@@ -1,0 +1,112 @@
+package httpapi
+
+import (
+	"net/http"
+	"strings"
+	"time"
+)
+
+// loginPage is a single screen: six segmented boxes for the TOTP code. There is
+// no password. It auto-advances, accepts a paste, and submits on the sixth
+// digit. %s is the error line (a fixed internal string, never caller input).
+const loginPage = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>intact — sign in</title>
+<style>
+:root{color-scheme:dark;--bg:#0f1115;--card:#161a22;--line:#2a3040;--fg:#e6e9ef;--muted:#8b94a5;--accent:#3b82f6;--err:#f87171}
+*{box-sizing:border-box}
+body{font:15px system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:var(--bg);color:var(--fg);display:grid;place-items:center;min-height:100vh;padding:1rem}
+.card{background:var(--card);border:1px solid var(--line);padding:2rem 1.75rem;border-radius:14px;width:min(23rem,94vw);text-align:center}
+h1{font-size:1.05rem;font-weight:600;margin:0 0 .3rem}
+p{color:var(--muted);font-size:.85rem;margin:0 0 1.5rem}
+.otp{display:flex;gap:.5rem;justify-content:center}
+.otp input{width:3rem;height:3.5rem;text-align:center;font-size:1.4rem;font-weight:600;color:var(--fg);
+  background:var(--bg);border:1px solid var(--line);border-radius:10px;transition:border-color .15s,box-shadow .15s}
+.otp input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(59,130,246,.25)}
+.otp.err input{border-color:var(--err)}
+.msg{color:var(--err);font-size:.82rem;min-height:1.2em;margin-top:1rem}
+@media (prefers-reduced-motion:no-preference){.otp.err{animation:shake .3s}}
+@keyframes shake{25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+</style></head><body>
+<div class="card">
+  <h1>intact</h1>
+  <p>Enter the 6-digit code from your authenticator</p>
+  <form id="f" method="post" action="/login">
+    <div class="otp" id="otp">
+      <input aria-label="digit 1" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" autofocus>
+      <input aria-label="digit 2" inputmode="numeric" pattern="[0-9]*" maxlength="1">
+      <input aria-label="digit 3" inputmode="numeric" pattern="[0-9]*" maxlength="1">
+      <input aria-label="digit 4" inputmode="numeric" pattern="[0-9]*" maxlength="1">
+      <input aria-label="digit 5" inputmode="numeric" pattern="[0-9]*" maxlength="1">
+      <input aria-label="digit 6" inputmode="numeric" pattern="[0-9]*" maxlength="1">
+    </div>
+    <input type="hidden" name="totp" id="totp">
+    <div class="msg">{{ERR}}</div>
+  </form>
+</div>
+<script>
+const boxes=[...document.querySelectorAll('.otp input')],wrap=document.getElementById('otp'),
+  hidden=document.getElementById('totp'),form=document.getElementById('f');
+function collect(){return boxes.map(b=>b.value).join('')}
+function submit(){const v=collect();if(v.length===6){hidden.value=v;form.submit()}}
+boxes.forEach((b,i)=>{
+  b.addEventListener('input',()=>{b.value=b.value.replace(/\D/g,'').slice(0,1);
+    if(b.value&&i<5)boxes[i+1].focus();submit()});
+  b.addEventListener('keydown',e=>{if(e.key==='Backspace'&&!b.value&&i>0)boxes[i-1].focus()});
+  b.addEventListener('paste',e=>{e.preventDefault();
+    const d=(e.clipboardData.getData('text')||'').replace(/\D/g,'').slice(0,6);
+    d.split('').forEach((c,j)=>{if(boxes[j])boxes[j].value=c});
+    (boxes[Math.min(d.length,5)]||b).focus();submit()});
+});
+</script>
+</body></html>`
+
+func (a *api) loginForm(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(renderLogin("")))
+}
+
+func (a *api) loginSubmit(w http.ResponseWriter, r *http.Request) {
+	if a.auth == nil {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeError(w, http.StatusBadRequest, "bad form")
+		return
+	}
+	if !a.auth.CheckCode(r.PostFormValue("totp")) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(renderLogin("Wrong or expired code. Try again.")))
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookie,
+		Value:    a.auth.IssueSession(),
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   a.auth.TTLSeconds(),
+	})
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+func (a *api) logout(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name: sessionCookie, Value: "", Path: "/", HttpOnly: true,
+		Secure: true, SameSite: http.SameSiteLaxMode, Expires: time.Unix(0, 0), MaxAge: -1,
+	})
+	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
+func renderLogin(errMsg string) string {
+	// errMsg is a fixed internal string, never caller input, so no escaping is
+	// needed. The page carries literal % in its CSS, so it is filled with a
+	// string replace, never fmt.Sprintf, which would read those as verbs.
+	page := loginPage
+	if errMsg != "" {
+		page = strings.Replace(page, `class="otp" id="otp"`, `class="otp err" id="otp"`, 1)
+	}
+	return strings.Replace(page, "{{ERR}}", errMsg, 1)
+}

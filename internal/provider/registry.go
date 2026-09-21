@@ -37,6 +37,29 @@ var registry = map[string]Provider{
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
 	},
+	// Class B, documented OpenAI-compatible APIs: a plain Bearer credential.
+	"nvidia": {
+		ID:         "nvidia",
+		BaseURL:    "https://integrate.api.nvidia.com/v1",
+		AuthHeader: "Authorization",
+		AuthPrefix: "Bearer ",
+	},
+	"openrouter": {
+		ID:         "openrouter",
+		BaseURL:    "https://openrouter.ai/api/v1",
+		AuthHeader: "Authorization",
+		AuthPrefix: "Bearer ",
+	},
+	// TypeSafe AI is not OpenAI-shaped (POST /systemone with a state+questions
+	// body), but it uses a Bearer token and returns a usage object, so the
+	// passthrough carries it without a translation layer. Captured from
+	// docs.typesafe.ai on 2026-09-21.
+	"typesafe": {
+		ID:         "typesafe",
+		BaseURL:    "https://api.typesafe.ai/v1",
+		AuthHeader: "Authorization",
+		AuthPrefix: "Bearer ",
+	},
 	"claude": {
 		ID:         "claude",
 		BaseURL:    "https://api.anthropic.com/v1",

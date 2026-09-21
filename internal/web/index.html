@@ -5,89 +5,156 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>intact</title>
 <style>
-  :root { color-scheme: dark; }
-  body { font: 14px system-ui, -apple-system, Segoe UI, sans-serif;
-         margin: 0; padding: 2rem 1.25rem; background: #0f1115; color: #e6e9ef; }
-  main { max-width: 60rem; margin: 0 auto; }
-  h1 { font-size: 1.05rem; font-weight: 600; margin: 0 0 .25rem; }
-  p.sub { margin: 0 0 1.5rem; color: #8b94a5; font-size: .82rem; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { text-align: left; padding: .55rem .6rem; border-bottom: 1px solid #262b36; }
-  th { color: #8b94a5; font-weight: 500; font-size: .75rem;
-       text-transform: uppercase; letter-spacing: .04em; }
-  code { font-family: ui-monospace, Consolas, monospace; color: #7dd3fc; font-size: .82rem; }
-  .yes { color: #4ade80; }
-  .no  { color: #8b94a5; }
+  :root{color-scheme:dark;--bg:#0f1115;--card:#161a22;--line:#2a3040;--fg:#e6e9ef;
+        --muted:#a5adba;--accent:#2563eb;--accent-fg:#fff;--ok:#5ee08a;--err:#f98a8a}
+  *{box-sizing:border-box}
+  body{font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;margin:0;
+       background:var(--bg);color:var(--fg)}
+  header{display:flex;align-items:center;justify-content:space-between;
+         padding:1rem 1.25rem;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg)}
+  header .brand{font-weight:600}
+  main{max-width:64rem;margin:0 auto;padding:1.5rem 1.25rem;display:grid;gap:1.5rem}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1.25rem}
+  h2{font-size:.95rem;font-weight:600;margin:0 0 .25rem}
+  p.sub{margin:0 0 1rem;color:var(--muted);font-size:.82rem}
+  table{border-collapse:collapse;width:100%}
+  th,td{text-align:left;padding:.55rem .6rem;border-bottom:1px solid var(--line);vertical-align:middle}
+  th{color:var(--muted);font-weight:500;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  code{font-family:ui-monospace,Consolas,monospace;color:#7dd3fc;font-size:.8rem}
+  .yes{color:var(--ok)}.no{color:var(--muted)}
+  form.add{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem}
+  form.add select,form.add input{padding:.55rem .6rem;border:1px solid var(--line);border-radius:8px;
+       background:var(--bg);color:var(--fg);font:inherit;min-height:44px}
+  form.add input{flex:1;min-width:9rem}
+  select:focus,input:focus,button:focus-visible{outline:none;border-color:var(--accent);
+       box-shadow:0 0 0 3px rgba(59,130,246,.25)}
+  button{font:inherit;min-height:44px;padding:.55rem .9rem;border:0;border-radius:8px;cursor:pointer}
+  button.primary{background:var(--accent);color:var(--accent-fg);font-weight:600}
+  button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line);min-height:36px;padding:.35rem .7rem}
+  button.danger{background:transparent;color:var(--err);border:1px solid var(--line);min-height:36px;padding:.35rem .7rem}
+  .empty{color:var(--muted)}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;padding:1rem}
+  .modal{background:var(--card);border:1px solid var(--line);border-radius:12px;
+         width:min(28rem,94vw);max-height:80vh;display:flex;flex-direction:column}
+  .modal header{padding:1rem 1.25rem}
+  .modal .body{padding:0 1.25rem 1.25rem;overflow:auto}
+  .modal ul{list-style:none;margin:0;padding:0}
+  .modal li{padding:.4rem 0;border-bottom:1px solid var(--line);font-family:ui-monospace,Consolas,monospace;font-size:.82rem}
 </style>
 </head>
 <body>
+<header>
+  <span class="brand">intact</span>
+  <form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form>
+</header>
 <main>
-  <h1>Accounts</h1>
-  <p class="sub">Credentials stay on this host. Responses from a provider are passed through unchanged.</p>
-  <table>
-    <thead><tr><th>Provider</th><th>Label</th><th>Connection id</th><th>Active</th></tr></thead>
-    <tbody id="rows"><tr><td colspan="4">Loading…</td></tr></tbody>
-  </table>
+  <section class="card">
+    <h2>Accounts</h2>
+    <p class="sub">Credentials stay on this host. Call one account at <code>/p/&lt;id&gt;/…</code>, or let intact pick and fail over across a provider's accounts at <code>/r/&lt;provider&gt;/…</code> — both with your bearer token.</p>
+    <form class="add" method="post" action="/accounts">
+      <select name="provider" aria-label="Provider" required>
+        <option value="groq">groq</option>
+        <option value="claude">claude</option>
+      </select>
+      <input name="label" placeholder="Label (e.g. Work key)" aria-label="Label">
+      <input name="secret" type="password" placeholder="API key / secret" aria-label="Secret" required autocomplete="off">
+      <button class="primary" type="submit">Add connection</button>
+    </form>
+    <table>
+      <thead><tr><th>Provider</th><th>Label</th><th>Connection id</th><th>Active</th><th></th></tr></thead>
+      <tbody id="rows"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </section>
 
-  <h1 style="margin-top:2rem">Usage</h1>
-  <p class="sub">Daily token totals per account and model, read from the responses that passed through.</p>
-  <table>
-    <thead><tr><th>Day</th><th>Connection id</th><th>Model</th><th>Input</th><th>Output</th><th>Requests</th></tr></thead>
-    <tbody id="usage"><tr><td colspan="6">Loading…</td></tr></tbody>
-  </table>
+  <section class="card">
+    <h2>Usage</h2>
+    <p class="sub">Daily token totals per account and model, read from the responses that passed through.</p>
+    <table>
+      <thead><tr><th>Day</th><th>Connection id</th><th>Model</th>
+        <th class="num">Input</th><th class="num">Output</th><th class="num">Requests</th></tr></thead>
+      <tbody id="usage"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </section>
 </main>
+<div id="modal" class="overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-label="Models">
+    <header style="display:flex;justify-content:space-between;align-items:center">
+      <strong id="modalTitle">Models</strong>
+      <button class="ghost" type="button" onclick="closeModal()">Close</button>
+    </header>
+    <div class="body" id="modalBody"></div>
+  </div>
+</div>
 <script>
-// Values come from provider responses, so every cell is set with textContent.
-// A model string like `<img src=x onerror=...>` must render as text, never as
-// markup, or a hostile upstream runs script in this origin.
-function message(tbody, span, text) {
+const modal=document.getElementById('modal');
+function closeModal(){modal.hidden=true;document.getElementById('modalBody').replaceChildren()}
+modal.addEventListener('click',e=>{if(e.target===modal)closeModal()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+function showModels(id,provider){
+  document.getElementById('modalTitle').textContent='Models · '+provider;
+  const body=document.getElementById('modalBody');
+  body.replaceChildren(); const p=document.createElement('p'); p.className='empty'; p.textContent='Loading…'; body.append(p);
+  modal.hidden=false;
+  fetch('/accounts/'+id+'/models').then(r=>r.json().then(d=>({ok:r.ok,d}))).then(({ok,d})=>{
+    let ids=[];
+    if(Array.isArray(d.data)) ids=d.data.map(m=>m.id||m.name).filter(Boolean);
+    else if(Array.isArray(d.models)) ids=d.models.map(m=>typeof m==='string'?m:(m.id||m.name)).filter(Boolean);
+    else if(d.error) { body.replaceChildren(); const e=document.createElement('p'); e.className='empty'; e.textContent='Provider error: '+(d.error.message||d.error); body.append(e); return; }
+    body.replaceChildren();
+    if(!ids.length){const e=document.createElement('p');e.className='empty';e.textContent='No models returned (provider may not support a model list).';body.append(e);return}
+    const ul=document.createElement('ul');
+    for(const m of ids.sort()){const li=document.createElement('li');li.textContent=m;ul.append(li)}
+    body.append(ul);
+  }).catch(()=>{body.replaceChildren();const e=document.createElement('p');e.className='empty';e.textContent='Could not reach the models endpoint.';body.append(e)});
+}
+// Every cell comes from a provider response or stored data, so it is written
+// with textContent, never innerHTML, to keep a model string from injecting HTML.
+function cell(tr, text, cls){
+  const td=document.createElement('td');
+  if(cls) td.className=cls;
+  td.textContent=text;
+  tr.append(td); return td;
+}
+function codeCell(tr, text){
+  const td=document.createElement('td'), c=document.createElement('code');
+  c.textContent=text; td.append(c); tr.append(td); return td;
+}
+function message(tbody, span, text){
   tbody.replaceChildren();
-  const tr = document.createElement('tr');
-  const td = document.createElement('td');
-  td.colSpan = span;
-  td.textContent = text;
-  tr.append(td);
-  tbody.append(tr);
+  const tr=document.createElement('tr'), td=document.createElement('td');
+  td.colSpan=span; td.className='empty'; td.textContent=text; tr.append(td); tbody.append(tr);
 }
 
-// cols: each entry is a value, or {code:value} to wrap it in <code>, or
-// {cls, text} to set a class. Every value is written as text.
-function renderRows(tbody, items, span, empty, toCols) {
-  if (!items.length) { message(tbody, span, empty); return; }
-  tbody.replaceChildren();
-  for (const item of items) {
-    const tr = document.createElement('tr');
-    for (const col of toCols(item)) {
-      const td = document.createElement('td');
-      if (col && col.code !== undefined) {
-        const code = document.createElement('code');
-        code.textContent = col.code;
-        td.append(code);
-      } else if (col && col.cls !== undefined) {
-        td.className = col.cls;
-        td.textContent = col.text;
-      } else {
-        td.textContent = col;
-      }
-      tr.append(td);
-    }
-    tbody.append(tr);
+fetch('/accounts').then(r=>{if(!r.ok)throw 0;return r.json()}).then(d=>{
+  const tb=document.getElementById('rows'), items=d.accounts||[];
+  if(!items.length){message(tb,5,'No connections yet. Add one above.');return}
+  tb.replaceChildren();
+  for(const a of items){
+    const tr=document.createElement('tr');
+    cell(tr,a.provider); cell(tr,a.label||''); codeCell(tr,a.id);
+    cell(tr,a.isActive?'yes':'no',a.isActive?'yes':'no');
+    const act=document.createElement('td'); act.style.whiteSpace='nowrap';
+    const mb=document.createElement('button'); mb.className='ghost'; mb.type='button'; mb.textContent='Models';
+    mb.style.marginRight='.4rem'; mb.onclick=()=>showModels(a.id,a.provider);
+    const f=document.createElement('form'); f.method='post'; f.action='/accounts/'+a.id+'/delete';
+    f.style.display='inline'; f.onsubmit=()=>confirm('Delete this connection?');
+    const b=document.createElement('button'); b.className='danger'; b.type='submit'; b.textContent='Delete';
+    f.append(b); act.append(mb,f); tr.append(act); tb.append(tr);
   }
-}
+}).catch(()=>message(document.getElementById('rows'),5,'Could not reach /accounts.'));
 
-function load(url, tbody, span, empty, toCols) {
-  fetch(url)
-    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-    .then(d => renderRows(tbody, d[Object.keys(d)[0]] || [], span, empty, toCols))
-    .catch(() => message(tbody, span, 'Could not reach ' + url + '.'));
-}
-
-load('/accounts', document.getElementById('rows'), 4, 'No accounts yet.',
-  a => [a.provider, a.label, {code: a.id},
-    {cls: a.isActive ? 'yes' : 'no', text: a.isActive ? 'yes' : 'no'}]);
-
-load('/usage', document.getElementById('usage'), 6, 'No usage recorded yet.',
-  u => [u.day, {code: u.connectionId}, u.model, u.inputTokens, u.outputTokens, u.requests]);
+fetch('/usage').then(r=>{if(!r.ok)throw 0;return r.json()}).then(d=>{
+  const tb=document.getElementById('usage'), items=d.usage||[];
+  if(!items.length){message(tb,6,'No usage recorded yet.');return}
+  tb.replaceChildren();
+  for(const u of items){
+    const tr=document.createElement('tr');
+    cell(tr,u.day); codeCell(tr,u.connectionId); cell(tr,u.model);
+    cell(tr,u.inputTokens,'num'); cell(tr,u.outputTokens,'num'); cell(tr,u.requests,'num');
+    tb.append(tr);
+  }
+}).catch(()=>message(document.getElementById('usage'),6,'Could not reach /usage.'));
 </script>
 </body>
 </html>

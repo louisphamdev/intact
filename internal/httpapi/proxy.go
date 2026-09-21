@@ -53,34 +53,65 @@ func (a *api) proxy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "provider not supported in this build")
 		return
 	}
-	secret, err := a.store.Secret(id)
+	secret, err := a.secretFor(r.Context(), id)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "unknown connection")
 		return
 	}
+	// Buffer the body so a 401 on an OAuth account can be retried after a forced
+	// refresh (the token was revoked before its recorded expiry).
+	body, err := io.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "cannot read body")
+		return
+	}
+	resp, err := a.callUpstream(r, p, conn.Provider, secret, body)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "upstream unreachable")
+		return
+	}
+	if resp.StatusCode == http.StatusUnauthorized && a.isOAuth(id) {
+		if fresh, ok := a.forceRefresh(r.Context(), id); ok {
+			resp.Body.Close()
+			resp, err = a.callUpstream(r, p, conn.Provider, fresh, body)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, "upstream unreachable")
+				return
+			}
+		}
+	}
+	defer resp.Body.Close()
+	a.relay(w, resp, id)
+}
 
+// callUpstream builds and sends one upstream request for a connection.
+func (a *api) callUpstream(r *http.Request, p provider.Provider, providerID, secret string, body []byte) (*http.Response, error) {
+	out, err := a.newOutbound(r, p, providerID, secret, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	return upstream.Do(r.Context(), out, 3)
+}
+
+// newOutbound builds the upstream request for one connection: the target URL,
+// the caller's headers minus this hop's, the provider identity and defaults, and
+// the stored credential. Accept-Encoding is forced to identity so the usage tap
+// always reads plain bytes.
+func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, secret string, body io.Reader) (*http.Request, error) {
 	base := p.BaseURL
-	if over, ok := a.baseOverride[conn.Provider]; ok {
+	if over, ok := a.baseOverride[providerID]; ok {
 		base = over
 	}
 	target := base + "/" + r.PathValue("path")
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}
-
-	out, err := http.NewRequestWithContext(r.Context(), r.Method, target, r.Body)
+	out, err := http.NewRequestWithContext(r.Context(), r.Method, target, body)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "bad upstream target")
-		return
+		return nil, err
 	}
-
-	// Copy the caller's headers, minus the ones that belong to this hop and minus
-	// Authorization: the stored credential must win, so a caller can never send a
-	// request on an account using a token of their own choosing.
 	for k, vs := range r.Header {
-		// Accept-Encoding is dropped here and forced to identity below: a caller
-		// that asks for br or zstd would get a body the usage tap cannot read,
-		// and the counts would be lost.
 		if hopByHop[k] || k == "Authorization" || k == "Host" || k == "Accept-Encoding" {
 			continue
 		}
@@ -88,12 +119,7 @@ func (a *api) proxy(w http.ResponseWriter, r *http.Request) {
 			out.Header.Add(k, v)
 		}
 	}
-	// Ask the upstream for an uncompressed body so the tap always reads plain
-	// bytes, whatever the caller advertised.
 	out.Header.Set("Accept-Encoding", "identity")
-	// A default fills a header the caller left out; it never overrules a choice the
-	// caller made. Identity is the opposite: it always wins, so the upstream sees
-	// the tool this provider impersonates and not whoever called this proxy.
 	for k, v := range p.Defaults {
 		if out.Header.Get(k) == "" {
 			out.Header.Set(k, v)
@@ -103,14 +129,12 @@ func (a *api) proxy(w http.ResponseWriter, r *http.Request) {
 		out.Header.Set(k, v)
 	}
 	out.Header.Set(p.AuthHeader, p.AuthPrefix+secret)
+	return out, nil
+}
 
-	resp, err := upstream.Do(r.Context(), out, 3)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "upstream unreachable")
-		return
-	}
-	defer resp.Body.Close()
-
+// relay streams the upstream response to the caller unchanged and records the
+// usage for connID.
+func (a *api) relay(w http.ResponseWriter, resp *http.Response, connID string) {
 	for k, vs := range resp.Header {
 		if hopByHop[k] {
 			continue
@@ -121,7 +145,7 @@ func (a *api) proxy(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(resp.StatusCode)
 	tapped := streamBody(w, resp)
-	a.recordUsage(id, tapped, resp.Header.Get("Content-Encoding"))
+	a.recordUsage(connID, tapped, resp.Header.Get("Content-Encoding"))
 }
 
 // recordUsage reads the token counts out of a response the proxy already sent

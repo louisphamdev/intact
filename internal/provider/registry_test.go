@@ -53,3 +53,16 @@ func TestClaudeCarriesTheIdentityOfTheRealTool(t *testing.T) {
 		t.Error("Anthropic-Beta must not be identity: it selects features and the caller must keep control of it")
 	}
 }
+
+func TestNewProvidersRegistered(t *testing.T) {
+	for _, id := range []string{"nvidia", "openrouter", "typesafe"} {
+		p, ok := Lookup(id)
+		if !ok {
+			t.Errorf("provider %q not registered", id)
+			continue
+		}
+		if p.BaseURL == "" || p.AuthHeader != "Authorization" || p.AuthPrefix != "Bearer " {
+			t.Errorf("provider %q has an incomplete entry: %+v", id, p)
+		}
+	}
+}

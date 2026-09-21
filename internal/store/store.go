@@ -46,7 +46,12 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	return &Store{DB: db}, nil
+	st := &Store{DB: db}
+	if err := st.migrateOAuth(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return st, nil
 }
 
 // Close releases the database handle.

@@ -81,3 +81,21 @@ func (s *Store) Secret(id string) (string, error) {
 	}
 	return secret, nil
 }
+
+// DeleteConnection removes one connection and its credential. It reports
+// ErrNotFound when no row matched, so a caller can tell a real delete from a
+// no-op.
+func (s *Store) DeleteConnection(id string) error {
+	res, err := s.DB.Exec(`DELETE FROM connections WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete connection: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

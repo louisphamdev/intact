@@ -69,6 +69,14 @@
   .status{display:inline-flex;align-items:center;gap:.3rem;font-size:.72rem;color:var(--faint)}
   .status.on{color:var(--ok)}
   .status.on::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+  /* Effort chips: cool to hot as the level rises; the default is filled. */
+  .eff{display:inline-flex;align-items:center;font-size:.7rem;font-weight:600;border-radius:999px;padding:.08rem .5rem;
+    color:var(--c);background:color-mix(in srgb,var(--c) 15%,transparent);border:1px solid color-mix(in srgb,var(--c) 40%,transparent);white-space:nowrap}
+  .eff.def{background:var(--c);color:#fff;border-color:var(--c)}
+  .eff-none{--c:#8b93a7}.eff-minimal,.eff-extra-low{--c:#60a5fa}.eff-low{--c:#38bdf8}.eff-medium{--c:#2dd4bf}
+  .eff-high{--c:#f59e0b}.eff-xhigh{--c:#f97316}.eff-max{--c:#ef4444}.eff-ultra{--c:#d946ef}.eff-tiered{--c:#8b7cf6}
+  @media (prefers-color-scheme:light){.eff-none{--c:#6b7280}.eff-minimal,.eff-extra-low{--c:#2563eb}.eff-low{--c:#0284c7}.eff-medium{--c:#0d9488}
+    .eff-high{--c:#d97706}.eff-xhigh{--c:#ea580c}.eff-max{--c:#dc2626}.eff-ultra{--c:#c026d3}.eff-tiered{--c:#7c6cf6}}
   .badge{display:inline-flex;align-items:center;gap:.25rem;font-size:.7rem;font-weight:500;border-radius:6px;
          padding:.05rem .45rem;background:var(--card2);color:var(--muted);white-space:nowrap}
   .badge.ok{background:var(--ok-soft);color:var(--ok)}
@@ -663,8 +671,18 @@ function thinkChips(info,variants){
   const tip=variants?'One model per level upstream; intact picks the level from the effort the request asks for. Without one: '+(info.default||'none')+'.':
     info.always?'Always thinks; it cannot be switched off.':'Supports thinking'+(info.efforts&&info.efforts.length?'; effort levels the request may ask for':'')+'.';
   return el('span',{style:'margin-left:.45rem;display:inline-flex;gap:.3rem;align-items:center;flex-wrap:wrap',title:tip},
-    el('span',{class:'badge ok'},info.always?'thinking · always':'thinking'),
-    ...(info.efforts||[]).map(e=>el('span',{class:'small '+(e===info.default?'':'faint'),style:e===info.default?'font-weight:700':''},e||'none')),paid);
+    el('span',{class:'badge ok'},info.always?'thinking · always':'thinking'),paid);
+}
+// effortChips: the levels a request may ask for, coloured by level; the
+// default is filled.
+function effortChips(info,variants){
+  const list=(info&&info.efforts)||[];
+  if(!list.length)return el('span',{class:'faint small',text:'—'});
+  return el('span',{style:'display:inline-flex;gap:.25rem;flex-wrap:nowrap'},...list.map(e=>{
+    const v=e||'none',def=e===info.default;
+    return el('span',{class:'eff eff-'+(/^[a-z-]+$/.test(v)?v:'none')+(def?' def':''),
+      title:(def?'Default':'')+(variants?(def?' — used when the request names no effort':'Variant '+v):(def?' when the request names none':''))},v);
+  }));
 }
 function modelTable(p){
   const st={q:'',view:'all',rows:[],ok:true,sel:new Set(),policy:{},running:false,variants:{},info:{}};
@@ -719,7 +737,7 @@ function modelTable(p){
       act('Test',async()=>{let i=0;const list=sel;const next=async()=>{while(i<list.length)await test(list[i++])};await Promise.all([next(),next(),next()])}),
       el('span',{style:'flex:1'}),
       act('Clear',()=>{st.sel.clear();render()}));
-    if(!list.length){body.replaceChildren(el('tr',{},el('td',{colspan:5,class:'empty',text:st.rows.length?'No model matches.':'No models yet.'})));return}
+    if(!list.length){body.replaceChildren(el('tr',{},el('td',{colspan:6,class:'empty',text:st.rows.length?'No model matches.':'No models yet.'})));return}
     body.replaceChildren(...list.map(r=>{
       const pick=el('input',{type:'checkbox',checked:st.sel.has(r.model),'aria-label':'Select '+r.model,style:'width:auto;min-height:0'});
       pick.onchange=()=>{pick.checked?st.sel.add(r.model):st.sel.delete(r.model);render()};
@@ -732,6 +750,7 @@ function modelTable(p){
         el('td',{style:'width:3.5rem'},el('label',{class:'switch',title:r.active?'On':'Off'},sw,el('span'))),
         el('td',{},el('button',{class:'plain mono',type:'button',title:'Copy '+p+'/'+r.model,style:'min-height:0;padding:.1rem .2rem;text-align:left',onclick:()=>copy(p+'/'+r.model)},r.model),
           thinkChips(st.info[r.model],!!st.variants[r.model])),
+        el('td',{style:'white-space:nowrap'},effortChips(st.info[r.model],!!st.variants[r.model])),
         el('td',{style:'max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'},res),
         el('td',{class:'num',style:'white-space:nowrap'},
           el('button',{class:'ghost',type:'button',style:'min-height:28px;padding:.15rem .6rem;font-size:.78rem',disabled:!!r.testing,onclick:()=>test(r)},'Test')));
@@ -772,7 +791,7 @@ function modelTable(p){
     }finally{fetchBtn.disabled=false;fetchBtn.lastChild.textContent='Fetch now'}
   }},svg(ICON.fetch),el('span',{},'Fetch now'));
   const load=async refresh=>{
-    if(!st.rows.length)body.replaceChildren(el('tr',{},el('td',{colspan:5,class:'empty',text:refresh?'Fetching…':'Loading…'})));
+    if(!st.rows.length)body.replaceChildren(el('tr',{},el('td',{colspan:6,class:'empty',text:refresh?'Fetching…':'Loading…'})));
     try{const d=await api('/providers/'+p+'/model-table'+(refresh?'?refresh=1':''));
       const testing=new Set(st.rows.filter(r=>r.testing).map(r=>r.model));
       st.rows=d.models;st.ok=d.ok;st.fetchedAt=d.fetchedAt;st.variants=d.variants||{};st.info=d.info||{};st.policy=d.policy||{};st.running=d.running;
@@ -781,7 +800,7 @@ function modelTable(p){
       clearTimeout(poll);
       if(st.running)poll=setTimeout(()=>{if(card.isConnected&&!document.hidden)load(false)},10000);
     }
-    catch(e){body.replaceChildren(el('tr',{},el('td',{colspan:5,class:'empty',text:e.message})))}
+    catch(e){body.replaceChildren(el('tr',{},el('td',{colspan:6,class:'empty',text:e.message})))}
   };
   let t=null;q.oninput=()=>{clearTimeout(t);t=setTimeout(()=>{st.q=q.value;render()},120)};
   const chip=(label,val)=>el('button',{class:'chip',type:'button',onclick:()=>{q.value=val;st.q=val;render()}},label);
@@ -792,7 +811,7 @@ function modelTable(p){
     el('div',{style:'padding:.8rem 1.25rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)'},q,chip('free','free'),chip('clear',''),seg),
     bar,
     el('div',{class:'scroll'},el('table',{},
-      el('thead',{},el('tr',{},el('th',{},all),el('th',{},'On'),el('th',{},'Model'),el('th',{},'Last test'),el('th',{}))),body)));
+      el('thead',{},el('tr',{},el('th',{},all),el('th',{},'On'),el('th',{},'Model'),el('th',{},'Effort'),el('th',{},'Last test'),el('th',{}))),body)));
   load(false);
   return card;
 }
@@ -1223,7 +1242,7 @@ const DOCS=[
       dt('tr',dt('td',dc('-preview')),dt('td','names without preview')),
       dt('tr',dt('td',dc('/^meta-llama\\//')),dt('td','a regular expression')))),
     dt('p','Tick rows (the header box ticks every row shown) and act on them from the bar that appears: turn on, turn off, keep only these on, test. A test goes through any account of the provider; the result names the account that answered. The Test button of an account tests that account alone; a TypeSafe test asks System One questions whose answers are known and checks them.'),
-    dt('p',dt('b','Thinking'),' — the chip shows a model the provider\'s own list says can think, with the effort levels a request may ask for (the default in bold). Anthropic, Codex, Copilot, OpenRouter, Groq, Cloudflare and Antigravity say it; NVIDIA, TokenHarbor and TypeSafe do not, so their models carry no chip. Cloudflare also marks the models its paid plan alone serves (paid plan).'),
+    dt('p',dt('b','Thinking'),' — the chip shows a model the provider\'s own list says can think; the Effort column lists the levels a request may ask for, coloured from cool (low) to hot (max), the default filled. Anthropic, Codex, Copilot, OpenRouter, Groq, Cloudflare and Antigravity say it; NVIDIA, TokenHarbor and TypeSafe do not, so their models carry no chip. Cloudflare also marks the models its paid plan alone serves (paid plan).'),
     dt('p',dt('b','Variants'),' — Antigravity lists one model once per thinking level (',dc('gemini-3.8-flash-high'),', ',dc('-medium'),', ',dc('-low'),', ',dc('-tiered'),'). intact lists it once, as ',dc('gemini-3.8-flash'),', and picks the level from the effort the request asks for: ',dc('reasoning_effort'),', ',dc('reasoning.effort'),', Anthropic ',dc('output_config.effort'),' or ',dc('thinking.budget_tokens'),'. Without an effort, or with ',dc('none'),', it uses the default variant (the first badge, ',dc('tiered'),' when there is one). When every account refuses the chosen level as busy (429), the request is tried once more on the default variant; the header ',dc('X-Intact-Model'),' names the model that answered. A full id such as ',dc('gemini-3.8-flash-high'),' still works.'),
     dt('p',dt('b','Only free'),' switches on only the models whose name contains ',dc('free'),'; turning it off switches every model back on. ',dt('b','Auto test'),' fetches the list, tests each model (only the free ones under Only free) and keeps on only those that answer; it runs again every 6 hours, and a new model is tested before it is switched on. A model that fails is switched off; one refused for rate limit is tested again 30 minutes later. Under auto test, pressing Test also sets the switch.'),
     dt('h2','API and MCP'),

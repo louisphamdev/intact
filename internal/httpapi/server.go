@@ -39,6 +39,8 @@ type api struct {
 	quota quotaCache
 	// auto tracks the providers whose models are being auto-tested.
 	auto autoState
+	// arena holds the model leaderboard and its name index.
+	arena arenaState
 }
 
 // New builds the route table with no authentication (loopback use and tests).
@@ -56,6 +58,8 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 		rate: rateHeaders{m: map[string]rateSnapshot{}}, quota: quotaCache{m: map[string]AccountQuota{}},
 		auto: autoState{running: map[string]*autoRun{}}}
 	go a.autoTestLoop()
+	a.loadArena()
+	go a.arenaLoop()
 	mux := http.NewServeMux()
 	// One base URL: the model in the body picks the provider and its accounts.
 	mux.HandleFunc("GET /v1/models", a.requireToken(a.models))
@@ -104,6 +108,12 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	mux.HandleFunc("POST /api/providers/{id}/model-policy", a.requireToken(a.setModelPolicy))
 	mux.HandleFunc("GET /api/providers/{id}/models", a.requireToken(a.providerModelTable))
 	mux.HandleFunc("GET /api/providers/{id}/models/raw", a.requireToken(a.providerModelsRaw))
+	mux.HandleFunc("GET /api/rankings", a.requireToken(a.rankings))
+	mux.HandleFunc("POST /api/rankings/refresh", a.requireToken(a.refreshRankings))
+	mux.HandleFunc("POST /api/rankings/alias", a.requireToken(a.setArenaAlias))
+	mux.HandleFunc("GET /rankings", a.requireSession(a.rankings))
+	mux.HandleFunc("POST /rankings/refresh", a.requireSession(a.refreshRankings))
+	mux.HandleFunc("POST /rankings/alias", a.requireSession(a.setArenaAlias))
 	mux.HandleFunc("POST /api/providers/{id}/models/active", a.requireToken(a.setModelsActive))
 	mux.HandleFunc("POST /api/providers/{id}/models/delete", a.requireToken(a.deleteModels))
 	mux.HandleFunc("POST /api/providers/{id}/models/test", a.requireToken(a.testModel))

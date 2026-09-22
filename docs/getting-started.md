@@ -31,6 +31,7 @@ never exposes credentials without a gate.
 | `INTACT_API_TOKEN` | A token machines may send to `/v1`, `/api` and `/mcp`. Keys created in the dashboard work the same way. Optional. |
 | `INTACT_SESSION_KEY` | Key that signs the session cookie. When empty, a random key is made at start, so a restart ends every session. |
 | `INTACT_SESSION_TTL` | Session lifetime in seconds (default 43200). |
+| `INTACT_ARENA_URL` | A mirror of the Hugging Face datasets server `/rows` API for the LMArena rankings (default `https://datasets-server.huggingface.co`). |
 | `INTACT_ANTIGRAVITY_CLIENT_SECRET` | The Google OAuth client secret the Antigravity sign-in needs. Needed only to add Antigravity accounts. |
 
 ### Enroll the sign-in
@@ -120,5 +121,6 @@ After start, intact runs these jobs on its own:
 - It fetches each provider's model list every hour and deletes models the
   provider dropped. See [Models](models.md#fetching-the-list).
 - It re-tests providers that have Auto test on, every 6 hours.
+- It reads the LMArena rankings once a day.
 - It refreshes OAuth tokens shortly before they expire.
 - It flushes drift observations to the database every 30 seconds.

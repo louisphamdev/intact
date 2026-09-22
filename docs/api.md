@@ -58,6 +58,17 @@ Fields of the model table:
 | `variants` | Folded variants, base → levels, default first. |
 | `info` | Per model: `thinking`, `always`, `efforts`, `default`, `paid`. |
 
+### Rankings
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/rankings` | The LMArena boards intact holds (`?q=` filters names), with `published`, `fetchedAt` and each board's top rating. |
+| `POST /api/rankings/refresh` | Read the boards now (otherwise once a day). |
+| `POST /api/rankings/alias` | `{"provider","model","name"}`: map a model to a board name by hand; `""` returns to automatic matching, `"-"` marks it as not on the board. |
+
+The model table also carries `arena` (per model: the matched entry, `how` and
+its `scores` per board: `rating`, `rank`, `votes`, `tier`) and `arenaMeta`.
+
 ### Blacklist
 
 | Method and path | Purpose |
@@ -102,6 +113,7 @@ claude mcp add --transport http intact https://intact.example/mcp \
 | `list_provider_models` | A provider's model table. |
 | `set_models_active` | Switch models on or off. |
 | `set_model_policy` | Auto test and Only free for a provider. |
+| `get_model_rankings` | LMArena rating, rank and tier of a provider's models on each board. |
 | `list_filters`, `add_filter`, `update_filter`, `delete_filter` | The blacklist. |
 | `list_drift_changes`, `ack_drift_changes`, `list_drift_fields` | Drift. |
 | `get_quota` | Quota of every active account. |
@@ -128,6 +140,7 @@ The dashboard calls these routes. They mirror the management API.
 | `GET/POST /filters`, `POST /filters/{id}/delete` | The blacklist. |
 | `GET /drift/changes`, `POST /drift/ack`, `GET /drift/fields` | Drift. |
 | `GET /quota`, `GET /usage` | Quota and usage. |
+| `GET /rankings`, `POST /rankings/refresh`, `POST /rankings/alias` | Rankings, as the API. |
 | `GET/POST /ui-settings/{key}` | Dashboard preferences stored on the server (`quota-view`). |
 
 ## Open routes

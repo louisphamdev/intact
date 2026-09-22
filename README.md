@@ -30,6 +30,8 @@ tools) and wants to use them all from any client.
   - Auto test keeps on only the models that answer.
   - Only free keeps on only the free models.
   - Antigravity's per-level models are folded into one model, picked by effort.
+  - Each model shows its LMArena rating, rank and tier (S–D) on the Overall,
+    Coding and WebDev boards, so a strong model stands out from a weak one.
 
   [Models](docs/models.md)
 - **Blacklist.** Editable rules remove what a provider refuses (a body field, a

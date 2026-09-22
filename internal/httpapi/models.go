@@ -43,11 +43,16 @@ func (a *api) providerModelTable(w http.ResponseWriter, r *http.Request) {
 	a.cat.mu.Lock()
 	e := a.cat.m[prov]
 	a.cat.mu.Unlock()
+	ids := make([]string, len(list))
+	for i, m := range list {
+		ids[i] = m.Model
+	}
 	variants := map[string][]string{}
 	for base, g := range e.groups {
 		variants[base] = g.Variants()
 	}
 	writeJSON(w, map[string]any{"models": list, "ok": e.ok, "fetchedAt": e.at.UTC().Format(time.RFC3339), "variants": variants, "info": e.info,
+		"arena": a.arenaFor(prov, ids), "arenaMeta": a.arenaMeta(),
 		"policy": a.modelPolicy(prov), "running": a.auto.isRunning(prov)})
 }
 

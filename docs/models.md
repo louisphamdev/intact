@@ -141,6 +141,46 @@ Where each provider states thinking support:
 NVIDIA, TokenHarbor-style custom endpoints and TypeSafe say nothing, so their
 models carry no chip.
 
+## Rankings
+
+The **Tier** and **Arena** columns say how strong a model is. They come from
+[LMArena](https://lmarena.ai)'s public leaderboard: an Elo-style rating from
+people voting between two anonymous answers. The data is the official
+`lmarena-ai/leaderboard-dataset` (CC-BY-4.0).
+
+intact reads three boards, **Overall**, **Coding** and **WebDev**:
+- It reads them once a day and keeps them in the database.
+- The switch above the table picks which board the columns show.
+- The Arena cell shows the rating and the rank. The tooltip gives every board
+  with its votes.
+
+The Tier grades a model by how far it is below the board's best model. A gap
+of 100 points means the stronger model wins about 64% of votes.
+
+| Tier | Below the top model |
+| --- | --- |
+| S | ≤ 25 points |
+| A | ≤ 70 points |
+| B | ≤ 130 points |
+| C | ≤ 250 points |
+| D | more |
+
+**Matching.** A provider's model id is matched to a board name after both are
+normalised:
+- the vendor path and `:free`-style tags are dropped (`openai/`, `@cf/…/`);
+- dots and underscores become dashes (`4.6` = `4-6`);
+- date and build suffixes are dropped (`-20251001`, `-instruct`, `-fp8`,
+  `-preview`…).
+
+When the board lists the model only with an effort (`-high`, `-max`,
+`-thinking`…), the most-voted of those is used. A name shown under the rating is
+the board entry the model was matched to, when it is not the same name.
+
+**Fixing a match.** Click the Arena cell to set the board name by hand. You can
+also choose **Automatic** to match by name again, or **Not on the board** to
+show no rating. Models the board does not know (embeddings, speech, guards,
+internal models) show `?`.
+
 ## Antigravity variants
 
 Antigravity's per-level models are shown as one row, and their levels appear in

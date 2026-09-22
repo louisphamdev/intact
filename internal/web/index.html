@@ -207,6 +207,10 @@
   .qwin .top{display:flex;justify-content:space-between;gap:.5rem;font-size:.82rem}
   .qwin .top b{font-weight:550}
   [hidden]{display:none!important}
+  /* Leaderboard tiers, best to worst. */
+  .tier{display:inline-grid;place-items:center;width:1.6rem;height:1.6rem;border-radius:7px;font-weight:800;font-size:.8rem;color:#fff}
+  .tier-S{background:#8b5cf6}.tier-A{background:#16a34a}.tier-B{background:#0891b2}.tier-C{background:#ca8a04}.tier-D{background:#6b7280}
+  .arena{min-height:0;padding:.1rem .2rem;text-align:right;line-height:1.25}
   /* Data tables: a sortable header and a filter row under it. */
   .dt th.sortable{padding:0}
   .th-sort{all:unset;box-sizing:border-box;display:flex;gap:.25rem;align-items:center;width:100%;padding:.6rem 1rem;cursor:pointer;
@@ -425,6 +429,14 @@ const VI={
 'Clear filters':'Xoá bộ lọc','No row matches the filters.':'Không có dòng nào khớp bộ lọc.','Nothing yet.':'Chưa có gì.','Quick filter':'Lọc nhanh',
 'Show only models whose name contains free':'Chỉ hiện model có chữ free trong tên','Tags':'Nhãn','passed':'đạt','untested':'chưa test','testing':'đang test',
 'State':'Trạng thái','gone':'đã mất','present':'còn',
+// rankings
+'Tier':'Bậc','Arena':'Arena','Overall':'Tổng','Coding':'Coding','WebDev':'WebDev','LMArena · {0}':'LMArena · {0}',
+'Tier {0} on the {1} board: {2} points below the top model':'Bậc {0} trên bảng {1}: kém model dẫn đầu {2} điểm',
+'LMArena: {0} ({1})':'LMArena: {0} ({1})','exact':'khớp đúng tên','variant':'khớp một biến thể','alias':'map tay','tier':'bậc','votes':'lượt vote',
+'Click to change the match':'Bấm để đổi model được map','Not on the leaderboard. Click to match it by hand.':'Không có trên bảng xếp hạng. Bấm để map tay.',
+'Leaderboard match · {0}':'Map bảng xếp hạng · {0}','Now: {0} ({1}).':'Hiện tại: {0} ({1}).','Not matched now.':'Hiện chưa map.',
+'LMArena name':'Tên trên LMArena','Automatic':'Tự động','Not on the board':'Không có trên bảng',
+'Forget the hand-made match and match by name again':'Bỏ map tay, khớp lại theo tên','Show only tier S and A models':'Chỉ hiện model bậc S và A',
 // docs tabs
 'Introduction':'Giới thiệu',
 };
@@ -966,7 +978,8 @@ function effortChips(info,variants){
   }));
 }
 function modelTable(p){
-  const st={rows:[],ok:true,sel:new Set(),policy:{},running:false,variants:{},info:{}};
+  const st={rows:[],ok:true,sel:new Set(),policy:{},running:false,variants:{},info:{},arena:{},arenaMeta:{},
+    board:(()=>{try{return localStorage.getItem('intact-board')||'overall'}catch(e){return 'overall'}})()};
   const acctName=id=>{const a=accountsOf(p).find(a=>a.id===id);return a?(a.label||short(a.id)):''};
   const card=el('div',{class:'card'});
   const counts=el('span',{class:'faint small'});
@@ -991,6 +1004,42 @@ function modelTable(p){
   const all=el('input',{type:'checkbox','aria-label':'Select every model shown',style:'width:auto;min-height:0'});
   all.onchange=()=>{for(const r of tbl.visible())all.checked?st.sel.add(r.model):st.sel.delete(r.model);render()};
   const info=r=>st.info[r.model]||{};
+  // Leaderboard: the entry a model maps to, its score on the chosen board.
+  const arenaScore=r=>{const m=st.arena[r.model];return m&&m.scores&&m.scores[st.board]};
+  const boardName=b=>({overall:'Overall',coding:'Coding',webdev:'WebDev'})[b]||b;
+  const topOf=b=>((st.arenaMeta||{}).top||{})[b]||0;
+  const arenaCell=r=>{
+    const m=st.arena[r.model],s=arenaScore(r);
+    const tip=m?t('LMArena: {0} ({1})',m.name,tr(m.how))+'\n'+['overall','coding','webdev'].map(b=>{const x=m.scores&&m.scores[b];
+      return boardName(b)+': '+(x?Math.round(x.rating)+' · #'+x.rank+' · '+tr('tier')+' '+x.tier+' · '+fmt(x.votes)+' '+tr('votes'):'—')}).join('\n')+'\n'+tr('Click to change the match'):tr('Not on the leaderboard. Click to match it by hand.');
+    return el('button',{class:'plain arena',type:'button',title:tip,onclick:()=>editArena(r)},
+      s?el('b',{},String(Math.round(s.rating))):el('span',{class:'faint',text:m?'—':'?'}),
+      s?el('span',{class:'faint small',text:' #'+s.rank}):null,
+      m&&m.how!=='exact'?el('span',{class:'faint small',style:'display:block;font-size:.68rem',text:m.name}):null);
+  };
+  // Match a model by hand: a leaderboard name, automatic, or not on the board.
+  const editArena=async r=>{
+    let names=[];try{names=(await api('/rankings')).list.map(m=>m.name)}catch(e){}
+    const dl=el('datalist',{id:'arenaNames'},names.map(n=>el('option',{value:n})));
+    const cur=st.arena[r.model];
+    const inp=el('input',{list:'arenaNames',value:cur&&cur.how==='alias'?cur.name:'',placeholder:cur?cur.name:'e.g. claude-opus-5-high',autocomplete:'off',spellcheck:'false'});
+    const err=el('div',{class:'err-msg'});
+    const close=()=>ov.remove();
+    const save=async name=>{try{const d=await postJSON('/rankings/alias',{provider:p,model:r.model,name});
+      if(d.match&&d.match.name)st.arena[r.model]=d.match;else delete st.arena[r.model];close();render()}catch(e){err.textContent=e.message}};
+    const ov=el('div',{class:'overlay',onclick:e=>{if(e.target===ov)close()}},el('div',{class:'modal sm',role:'dialog','aria-modal':'true'},
+      el('div',{class:'mh'},el('strong',{},t('Leaderboard match · {0}',r.model)),el('button',{class:'icon',type:'button','aria-label':'Close',onclick:close},'✕')),
+      el('div',{class:'mb'},
+        el('p',{class:'muted small',style:'margin:0'},cur?t('Now: {0} ({1}).',cur.name,tr(cur.how)):tr('Not matched now.')),
+        el('label',{class:'f'},'LMArena name',inp,dl),err),
+      el('div',{class:'mf'},
+        el('button',{class:'ghost',type:'button',title:'Forget the hand-made match and match by name again',onclick:()=>save('')},'Automatic'),
+        el('button',{class:'ghost',type:'button',onclick:()=>save('-')},'Not on the board'),
+        el('span',{style:'flex:1'}),
+        el('button',{class:'primary',type:'button',onclick:()=>{const v=inp.value.trim();if(v)save(v)}},'Save'))));
+    inp.onkeydown=e=>{if(e.key==='Enter'){const v=inp.value.trim();if(v)save(v)}if(e.key==='Escape')close()};
+    document.body.append(ov);inp.focus();
+  };
   const testState=r=>r.testing?'testing':!r.testAt?'untested':r.testOk?'passed':'failed';
   const tbl=dataTable({
     rows:()=>st.rows,
@@ -1004,8 +1053,12 @@ function modelTable(p){
         const sw=el('input',{type:'checkbox',checked:r.active,'aria-label':t('On: {0}',r.model)});
         sw.onchange=()=>setActive([r.model],sw.checked).catch(e=>{alert(e.message);sw.checked=!sw.checked});
         return el('label',{class:'switch',title:r.active?'On':'Off'},sw,el('span'))}},
-      {id:'model',label:'Model',type:'text',get:r=>r.model,td:r=>
+      {id:'model',label:'Model',type:'text',style:'min-width:14rem',get:r=>r.model,td:r=>
         el('button',{class:'plain mono',type:'button',title:t('Copy {0}',p+'/'+r.model),style:'min-height:0;padding:.1rem .2rem;text-align:left',onclick:()=>copy(p+'/'+r.model)},r.model)},
+      {id:'tier',label:'Tier',type:'chip',style:'width:4.5rem',chips:r=>{const s=arenaScore(r);return s?[s.tier]:[]},
+        order:v=>'SABCD—'.indexOf(v),sort:r=>{const s=arenaScore(r);return s?'SABCD'.indexOf(s.tier):9},
+        td:r=>{const s=arenaScore(r);return s?el('span',{class:'tier tier-'+s.tier,title:t('Tier {0} on the {1} board: {2} points below the top model',s.tier,boardName(st.board),Math.round(topOf(st.board)-s.rating))},s.tier):''}},
+      {id:'arena',label:'Arena',type:'num',cls:'num',style:'width:8rem',get:r=>{const s=arenaScore(r);return s?s.rating:-1},td:r=>arenaCell(r)},
       {id:'tags',label:'Tags',type:'chip',chipLabel:tr,chips:r=>{const i=info(r),o=[];if(i.thinking)o.push(i.always?'thinking · always':'thinking');if(i.paid)o.push('paid plan');return o},
         td:r=>thinkChips(info(r),!!st.variants[r.model])||''},
       {id:'effort',label:'Effort',type:'chip',tdStyle:'white-space:nowrap',chips:r=>(info(r).efforts||[]).map(e=>e||'none'),
@@ -1041,7 +1094,16 @@ function modelTable(p){
         act('Clear',()=>{st.sel.clear();render()}));
     },
   });
-  const render=()=>tbl.render();
+  const render=()=>{paintBoard();tbl.render()};
+  // Which leaderboard the Tier and Arena columns show.
+  const boardSeg=el('span',{style:'display:inline-flex;gap:.5rem;align-items:center'});
+  const paintBoard=()=>{
+    const meta=st.arenaMeta||{};
+    boardSeg.replaceChildren(
+      el('span',{class:'faint small',title:meta.source||'',text:meta.published?t('LMArena · {0}',meta.published):tr('LMArena')}),
+      el('span',{class:'seg sm'},...['overall','coding','webdev'].map(b=>el('button',{type:'button','aria-pressed':String(st.board===b),
+        onclick:()=>{st.board=b;try{localStorage.setItem('intact-board',b)}catch(e){}render()}},boardName(b)))));
+  };
   // Policy: auto test and only free, stored per provider.
   const polBox=el('div',{style:'padding:.6rem 1.25rem;display:flex;gap:1.2rem;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)'});
   const polSw=(key,label,title)=>{
@@ -1079,7 +1141,7 @@ function modelTable(p){
   const load=async refresh=>{
     try{const d=await api('/providers/'+p+'/model-table'+(refresh?'?refresh=1':''));
       const testing=new Set(st.rows.filter(r=>r.testing).map(r=>r.model));
-      st.rows=d.models;st.ok=d.ok;st.fetchedAt=d.fetchedAt;st.variants=d.variants||{};st.info=d.info||{};st.policy=d.policy||{};st.running=d.running;
+      st.rows=d.models;st.ok=d.ok;st.fetchedAt=d.fetchedAt;st.variants=d.variants||{};st.info=d.info||{};st.arena=d.arena||{};st.arenaMeta=d.arenaMeta||{};st.policy=d.policy||{};st.running=d.running;
       for(const r of st.rows)if(testing.has(r.model))r.testing=true;
       render();
       clearTimeout(poll);
@@ -1095,7 +1157,10 @@ function modelTable(p){
       el('span',{class:'faint small'},'Quick filter'),
       el('button',{class:'chip',type:'button',title:'Show only models whose name contains free',onclick:()=>tbl.setFilter('model','free')},'free'),
       el('button',{class:'chip',type:'button',onclick:()=>tbl.setFilter('tags',new Set(['thinking','thinking · always']))},'thinking'),
-      tbl.clearBtn),
+      el('button',{class:'chip',type:'button',title:'Show only tier S and A models',onclick:()=>tbl.setFilter('tier',new Set(['S','A']))},'S · A'),
+      tbl.clearBtn,
+      el('span',{style:'flex:1'}),
+      boardSeg),
     bar,
     el('div',{class:'scroll'},tbl.table));
   tbl.render();
@@ -1534,6 +1599,7 @@ const DOCS=[
       dt('tr',dt('td',dc('/^meta-llama\\//')),dt('td','a regular expression')))),
     dt('p','Tick rows (the header box ticks every row shown) and act on them from the bar that appears: turn on, turn off, keep only these on, test. A test goes through any account of the provider; the result names the account that answered. The Test button of an account tests that account alone; a TypeSafe test asks System One questions whose answers are known and checks them.'),
     dt('p',dt('b','Thinking'),' — the chip shows a model the provider\'s own list says can think; the Effort column lists the levels a request may ask for, coloured from cool (low) to hot (max), the default filled. Anthropic, Codex, Copilot, OpenRouter, Groq, Cloudflare and Antigravity say it; NVIDIA, TokenHarbor and TypeSafe do not, so their models carry no chip. Cloudflare also marks the models its paid plan alone serves (paid plan).'),
+    dt('p',dt('b','Tier · Arena'),' — how strong a model is, from LMArena\'s public leaderboard (people vote between two anonymous answers; an Elo-style rating), read once a day. The switch picks the board: Overall, Coding or WebDev. The tier grades the gap to the board\'s best model: S ≤ 25 points, A ≤ 70, B ≤ 130, C ≤ 250, D more (100 points ≈ the stronger wins 64% of votes). Model ids are matched to board names by name; click the Arena cell to fix a match by hand. ',dc('?'),' means the board does not list the model.'),
     dt('p',dt('b','Variants'),' — Antigravity lists one model once per thinking level (',dc('gemini-3.8-flash-high'),', ',dc('-medium'),', ',dc('-low'),', ',dc('-tiered'),'). intact lists it once, as ',dc('gemini-3.8-flash'),', and picks the level from the effort the request asks for: ',dc('reasoning_effort'),', ',dc('reasoning.effort'),', Anthropic ',dc('output_config.effort'),' or ',dc('thinking.budget_tokens'),'. Without an effort, or with ',dc('none'),', it uses the default variant (the first badge, ',dc('tiered'),' when there is one). When every account refuses the chosen level as busy (429), the request is tried once more on the default variant; the header ',dc('X-Intact-Model'),' names the model that answered. A full id such as ',dc('gemini-3.8-flash-high'),' still works.'),
     dt('p',dt('b','Only free'),' switches on only the models whose name contains ',dc('free'),'; turning it off switches every model back on. ',dt('b','Auto test'),' fetches the list, tests each model (only the free ones under Only free) and keeps on only those that answer; it runs again every 6 hours, and a new model is tested before it is switched on. A model that fails is switched off; one refused for rate limit is tested again 30 minutes later. Under auto test, pressing Test also sets the switch.'),
     dt('h2','API and MCP'),
@@ -1633,6 +1699,7 @@ const DOCS_VI={
       dt('tr',dt('td',dc('/^meta-llama\\//')),dt('td','một biểu thức chính quy')))),
     dt('p','Tick các dòng (ô ở header tick mọi dòng đang hiển thị) rồi thao tác từ thanh hiện ra: Bật, Tắt, Chỉ bật các mục này, Test. Test chạy qua bất kỳ tài khoản nào của nhà cung cấp; kết quả ghi tên tài khoản đã trả lời. Nút Test của một tài khoản chỉ test riêng tài khoản đó; test TypeSafe hỏi System One những câu đã biết trước đáp án và kiểm tra kết quả.'),
     dt('p',dt('b','Thinking'),' — chip này đánh dấu model mà chính danh sách của nhà cung cấp cho biết có thể thinking; cột Effort liệt kê các mức một request có thể yêu cầu, tô màu từ lạnh (low) tới nóng (max), mức mặc định được tô đặc. Anthropic, Codex, Copilot, OpenRouter, Groq, Cloudflare và Antigravity có cung cấp thông tin này; NVIDIA, TokenHarbor và TypeSafe thì không, nên model của họ không có chip. Cloudflare còn đánh dấu các model chỉ gói trả phí mới phục vụ (paid plan).'),
+    dt('p',dt('b','Bậc · Arena'),' — model mạnh hay yếu, theo bảng xếp hạng công khai của LMArena (người dùng bình chọn giữa hai câu trả lời ẩn danh; điểm kiểu Elo), đọc mỗi ngày một lần. Nút chuyển chọn bảng: Tổng, Coding hoặc WebDev. Bậc tính theo khoảng cách tới model dẫn đầu bảng: S ≤ 25 điểm, A ≤ 70, B ≤ 130, C ≤ 250, D hơn nữa (chênh 100 điểm ≈ model mạnh hơn thắng 64% lượt vote). Tên model được khớp với tên trên bảng theo tên; bấm vào ô Arena để map tay. ',dc('?'),' nghĩa là bảng không có model đó.'),
     dt('p',dt('b','Biến thể'),' — Antigravity liệt kê một model nhiều lần, mỗi lần một mức thinking (',dc('gemini-3.8-flash-high'),', ',dc('-medium'),', ',dc('-low'),', ',dc('-tiered'),'). intact chỉ liệt kê một lần, là ',dc('gemini-3.8-flash'),', và chọn mức theo effort mà request yêu cầu: ',dc('reasoning_effort'),', ',dc('reasoning.effort'),', ',dc('output_config.effort'),' của Anthropic hoặc ',dc('thinking.budget_tokens'),'. Không có effort, hoặc effort là ',dc('none'),', thì dùng biến thể mặc định (badge đầu tiên, là ',dc('tiered'),' nếu có). Khi mọi tài khoản đều từ chối mức đã chọn vì bận (429), request được thử thêm một lần với biến thể mặc định; header ',dc('X-Intact-Model'),' cho biết model đã trả lời. Id đầy đủ như ',dc('gemini-3.8-flash-high'),' vẫn dùng được.'),
     dt('p',dt('b','Chỉ free'),' chỉ bật các model có tên chứa ',dc('free'),'; tắt nó thì mọi model được bật lại. ',dt('b','Tự test'),' fetch danh sách, test từng model (chỉ model free khi đang Chỉ free) và chỉ giữ bật những model trả lời được; nó chạy lại mỗi 6 giờ, và model mới được test trước khi bật. Model lỗi bị tắt; model bị từ chối do rate limit được test lại sau 30 phút. Khi đang Tự test, bấm Test cũng đặt luôn công tắc.'),
     dt('h2','API và MCP'),

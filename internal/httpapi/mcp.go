@@ -122,6 +122,20 @@ var mcpTools = []mcpTool{
 			res, _, err := a.runAccountTest(context.Background(), argStr(args, "id"), argStr(args, "model"))
 			return res, err
 		}},
+	{Name: "get_model_rankings", Description: "How strong a provider's models are: each model's LMArena leaderboard entry (Elo-style rating from human votes, rank and tier S–D) on the overall, coding and webdev boards. Models not on the leaderboard are left out.",
+		InputSchema: schema(map[string]any{"provider": pString}, "provider"),
+		run: func(a *api, args map[string]any) (any, error) {
+			prov := argStr(args, "provider")
+			rows, err := a.modelRows(context.Background(), prov)
+			if err != nil {
+				return nil, err
+			}
+			ids := make([]string, len(rows))
+			for i, r := range rows {
+				ids[i] = r.Model
+			}
+			return map[string]any{"meta": a.arenaMeta(), "models": a.arenaFor(prov, ids)}, nil
+		}},
 	{Name: "set_model_policy", Description: "Set how a provider's models are switched on. autoTest: fetch the list, test every model and keep on only those that answer (re-run every 6 hours and for new models). onlyFree: only models whose name contains free are on, and only they are tested. Without autoTest, new models start on.",
 		InputSchema: schema(map[string]any{"provider": pString, "autoTest": pBool, "onlyFree": pBool}, "provider", "autoTest", "onlyFree"),
 		run: func(a *api, args map[string]any) (any, error) {

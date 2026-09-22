@@ -1,209 +1,105 @@
 # intact
 
-A small credential proxy for LLM providers. It holds each account's credential on
-one host, forwards a request to the provider unchanged, and records the token
-usage. It is a light alternative to a large gateway: it keeps the basic features
-and drops the parts that alter the payload.
+intact is a credential proxy for LLM providers. It keeps every account's
+credential on one host and serves them all behind one base URL. A request goes
+to the provider as intact received it, and the provider's answer comes back in
+full: intact does not drop fields a gateway does not know.
 
-## What it does
+It was built as a lighter, more faithful alternative to a large gateway, for one
+operator who holds many accounts (API keys and the OAuth sign-ins of coding
+tools) and wants to use them all from any client.
 
-- **Passthrough proxy.** intact adds the account's identity and credential to a
-  request, then sends the provider's bytes back to the caller unchanged. The
-  caller speaks the provider's own protocol.
-- **One base URL.** Point any client at `/v1`. The `model` in the request picks
-  the accounts: `groq/llama-3.3-70b-versatile` names the provider (intact strips
-  the prefix), a bare `llama-3.3-70b-versatile` goes to every provider whose
-  model list has it. Requests rotate across those accounts and fail over on a
-  busy status (429/500/503/409). See [Routing](#routing).
-- **Usage counter.** intact reads the `usage` object from each response and
-  keeps a daily total per account and model. It reads the response; it never
-  changes it.
-- **Both API shapes.** `/v1/chat/completions` (OpenAI) and `/v1/messages`
-  (Anthropic) reach a provider of either shape; intact translates the request
-  and the answer, streamed or whole, when they differ.
-- **Filters.** An editable blacklist removes what a provider refuses (a body
-  field, a tool-schema key, a system-prompt line, a header) before the request
-  leaves. See [Filters](#filters).
-- **Management API and MCP.** `/api/*` and an MCP server at `/mcp` let a machine
-  or an agent read accounts, models and usage and edit the filters.
-- **Model list.** The dashboard shows the models of a provider, read server-side.
-- **Authentication.** A person signs in with a TOTP code (an authenticator app).
-  A machine sends a bearer token. There is no password.
-- **OAuth refresh.** For an OAuth account, intact refreshes an expired or revoked
-  access token with the stored refresh token (see [OAuth](#oauth)).
+## Features
 
-## Status
+- **One base URL.** Every client points at `/v1`. The `model` in the body picks
+  the provider and its accounts: `groq/llama-3.3-70b-versatile`, or a bare id
+  that any provider lists. [Routing](docs/routing.md)
+- **OpenAI and Anthropic shapes.** `/v1/chat/completions` and `/v1/messages`
+  reach any provider. intact translates the request and the answer (streamed or
+  whole) when the shapes differ. When they match, the bytes pass through untouched.
+- **Rotation and failover.** Requests rotate across a model's accounts. A busy
+  answer (429, 500, 503, 409) moves to the next account. An expired OAuth token
+  is refreshed and the request retried.
+- **Providers.** API-key providers (Groq, NVIDIA, OpenRouter, Cloudflare Workers
+  AI, TypeSafe), the sign-ins of coding tools (Claude Code, Codex, Antigravity,
+  GitHub Copilot), and any custom OpenAI, Anthropic or Responses endpoint.
+  [Providers](docs/providers.md)
+- **Model management.** A table per provider shows each model with an on/off
+  switch, its thinking support and effort levels, and its last test.
+  - Lists are fetched every hour.
+  - Auto test keeps on only the models that answer.
+  - Only free keeps on only the free models.
+  - Antigravity's per-level models are folded into one model, picked by effort.
 
-| Area | State |
-| --- | --- |
-| Core proxy, one `/v1` base URL routed by model, rotation, failover | done, tested |
-| Usage counter (JSON and SSE, gzip, cache tokens) | done, tested, live |
-| TOTP login + bearer token gate | done, tested, live |
-| Connection CRUD + model list (dashboard) | done, tested, live |
-| Providers: groq, claude, nvidia, openrouter, typesafe | registered |
-| OAuth refresh mechanism (expiry, rotation, 401 self-heal) | done, tested |
-| OAuth: antigravity refresh | wired and verified safe (Google does not rotate) |
-| OAuth: claude, codex refresh | wired; live activation needs a decision (see below) |
-| OAuth: github token exchange | not built |
-| Proxy endpoints for antigravity, codex, github | not built (need captured traffic) |
-| Interactive OAuth login (add a new account) | not built |
+  [Models](docs/models.md)
+- **Blacklist.** Editable rules remove what a provider refuses (a body field, a
+  tool-schema key, a system-prompt line, a header) before the request leaves.
+  [Blacklist](docs/blacklist.md)
+- **Drift alerts.** For providers reached as a coding tool, intact learns the
+  structure of requests and answers and records when a field appears,
+  disappears or changes type. [Drift](docs/drift.md)
+- **Quota and usage.** Quota is read from each provider (rolling windows, weekly
+  pools, per-model shares). Token usage is counted per account, model and day.
+  [Quota and usage](docs/quota-and-usage.md)
+- **Management API and MCP.** Everything the dashboard does is available at
+  `/api/*`, and to an agent through an MCP server at `/mcp`. [API](docs/api.md)
+- **Dashboard.** A single embedded page with sign-in by TOTP code (no password).
+  API keys are created there. [Security](docs/security.md)
 
-The remaining OAuth work and the reasons it is blocked are in
-`temp/intact-oauth-spec.md`.
-
-## Build and run
-
-The store uses `modernc.org/sqlite`, a pure-Go driver, so `CGO_ENABLED=0` builds
-a static binary.
+## Quick start
 
 ```bash
-# build for this host
 CGO_ENABLED=0 go build -o intact ./cmd/intact
-
-# cross-build for a Linux server
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o intact-linux ./cmd/intact
-
-# run
+./intact -enroll                      # prints INTACT_TOTP_SECRET and an otpauth:// URI
+export INTACT_TOTP_SECRET=...         # add the URI to an authenticator app
 ./intact -db ./intact.db -addr 127.0.0.1:20142
 ```
 
-Flags:
-
-- `-addr` — the listen address (default `127.0.0.1:20130`).
-- `-db` — the SQLite file (default `intact.db`).
-- `-enroll` — print a new TOTP secret and its `otpauth://` URI, then exit.
-
-The server refuses a non-loopback address when no TOTP secret is set, so it never
-exposes a credential without a gate.
-
-## Configuration
-
-intact reads these environment variables. Set them in a systemd `EnvironmentFile`
-or the shell.
-
-| Variable | Meaning |
-| --- | --- |
-| `INTACT_TOTP_SECRET` | The base32 TOTP secret for the login. When empty, the server has no gate (loopback only). |
-| `INTACT_API_TOKEN` | A token a machine sends to `/v1`, `/api` and `/mcp`, as `Authorization: Bearer` or `x-api-key`. Keys made in the dashboard work the same way. |
-| `INTACT_SESSION_KEY` | The key that signs the session cookie. A random key is generated when empty, so a restart then ends every session. |
-| `INTACT_SESSION_TTL` | The session lifetime in seconds (default 43200). |
-
-To enroll:
-
-1. Run `./intact -enroll`.
-2. Add the printed `otpauth://` URI to an authenticator app.
-3. Put the printed `INTACT_TOTP_SECRET` in the environment file.
-
-## Endpoints
-
-| Method and path | Gate | Purpose |
-| --- | --- | --- |
-| `GET /v1/models` | API token | Every model of every provider, as `<provider>/<model>`. |
-| `GET /api/providers`, `GET /api/accounts`, `GET /api/usage` | API token | Read the state. |
-| `POST /api/accounts/{id}/active` | API token | Turn an account on or off. |
-| `GET /api/filters`, `POST /api/filters`, `DELETE /api/filters/{id}` | API token | Read and edit the filters. |
-| `POST /mcp` | API token | MCP over Streamable HTTP; the same operations as tools. |
-| `GET/POST /keys…` | session | Create, reveal, switch off and delete API keys. |
-| `GET/POST /filters…` | session | The filters, for the dashboard. |
-| `/v1/{path...}` | API token | Forward to the accounts that serve the body's model, with rotation and failover. |
-| `GET /` | session | The dashboard: Endpoint, Providers (accounts and models per provider), Usage. |
-| `GET /accounts` | session | The connection list as JSON. |
-| `POST /accounts` | session | Add a connection (`provider`, `label`, `secret`). |
-| `POST /accounts/{id}/delete` | session | Delete a connection. |
-| `GET /accounts/{id}/models` | session | The provider's model list for one connection. |
-| `POST /accounts/{id}/active` | session | Turn a connection on or off (`{"active":bool}`). |
-| `GET /providers` | session | The provider ids this build can proxy. |
-| `GET /usage` | session | The daily usage totals as JSON. |
-| `GET /login`, `POST /login`, `POST /logout` | open | The TOTP login. |
-
-## Routing
+Open the dashboard, sign in with the code, add an account under **Providers**,
+create an API key under **Endpoint → API keys**, then:
 
 ```bash
-curl https://intact.example/v1/chat/completions \
-  -H "Authorization: Bearer $INTACT_API_TOKEN" -H "Content-Type: application/json" \
+curl http://127.0.0.1:20142/v1/chat/completions \
+  -H "Authorization: Bearer $INTACT_KEY" -H "Content-Type: application/json" \
   -d '{"model":"groq/llama-3.3-70b-versatile","messages":[{"role":"user","content":"hi"}]}'
 ```
 
-- **Provider prefix.** When the model starts with a registered provider id and a
-  slash, that provider serves it and the prefix is removed from the body. The
-  rest of the body is sent byte for byte. A model id with its own slash
-  (`meta-llama/llama-3.3-70b-instruct`) is not mistaken for a prefix, because
-  `meta-llama` is not a provider.
-- **Bare model.** Otherwise intact looks the id up in each provider's model list
-  (cached for ten minutes) and pools the active accounts of every provider that
-  lists it. The body is sent unchanged.
-- **Path.** Everything after `/v1` goes to the provider as is, so
-  `/v1/chat/completions` reaches an OpenAI-shaped provider and `/v1/messages`
-  reaches Anthropic. intact does not translate between the two.
-- **Failover.** The pool rotates per model. A busy status moves to the next
-  account; an OAuth account that answers 401 is refreshed and retried once.
+[Getting started](docs/getting-started.md) covers configuration and a systemd
+and Cloudflare Tunnel deployment.
 
-## Filters
+## Documentation
 
-A provider that meets a field it does not know often fails the whole request.
-A filter removes it just before the request leaves, after any translation.
+| Page | Contents |
+| --- | --- |
+| [Getting started](docs/getting-started.md) | Build, flags, environment, first account, deployment |
+| [Routing](docs/routing.md) | Model resolution, translation, rotation, failover, variants |
+| [Providers](docs/providers.md) | Every built-in provider, sign-in flows, custom endpoints |
+| [Models](docs/models.md) | The model table, fetching, switches, tests, auto test, only free, thinking |
+| [Blacklist](docs/blacklist.md) | Request filters: kinds, scope, seeded rules |
+| [Drift](docs/drift.md) | Structure learning and change alerts |
+| [Quota and usage](docs/quota-and-usage.md) | Quota sources, the Quota page, usage counting |
+| [API](docs/api.md) | Every HTTP endpoint and MCP tool |
+| [Security](docs/security.md) | Sign-in, API keys, where credentials live |
 
-| Kind | Pattern | Removes |
-| --- | --- | --- |
-| `field` | `messages.*.cache_control` | A key at a dot path in the body; `*` matches any key or list item. |
-| `schema` | `$id` | A key at every depth of each tool's JSON schema (a parameter of that name is kept). |
-| `system` | `^x-anthropic-billing-header:.*$` | Lines of the system prompt matching the regex. |
-| `header` | `anthropic-beta` | A request header, including a provider default; never the credential. |
+Research notes from building the provider integrations:
+- [Claude Code protocol](docs/class-a-claude.md)
+- [Codex protocol](docs/class-a-codex.md)
+- Verification runs: [phase 1](docs/verify-phase1.md), [phase 3](docs/verify-phase3.md)
 
-A filter applies to one provider or to all (`*`), and takes effect on the next
-request. The first start seeds the fixes found against real providers (tool
-schema keys `encrypted`, `cache_control`, `$id`, `example`, and the Claude Code
-billing line for Antigravity). Add one from the dashboard, the API or MCP:
+## Layout
 
-```bash
-curl https://intact.example/api/filters -H "Authorization: Bearer $INTACT_KEY" \
-  -d '{"provider":"groq","kind":"field","pattern":"reasoning_effort","note":"groq rejects it"}'
-claude mcp add --transport http intact https://intact.example/mcp --header "Authorization: Bearer $INTACT_KEY"
 ```
-
-## Providers
-
-A provider entry holds the base URL and the auth header. `internal/provider`
-registers groq, claude, nvidia, openrouter, and typesafe. TypeSafe is not
-OpenAI-shaped, but it uses a bearer token and returns a `usage` object, so the
-passthrough carries it without a translation layer.
-
-A connection stores its credential and, for OAuth, its refresh configuration. The
-credential never leaves the host and never appears in the connection listing.
-
-## OAuth
-
-The imported accounts of a class-A provider (claude, codex, antigravity, github)
-authenticate with an OAuth token that expires. intact keeps them working with the
-refresh grant:
-
-- `internal/oauth.Refresh` runs the `refresh_token` grant. It returns a rotated
-  refresh token when the provider sends one, so intact stays valid across a
-  rotation.
-- `secretFor` refreshes a token at or near its recorded expiry before use.
-- On a provider 401 for an OAuth account, intact force-refreshes and retries once,
-  which recovers a token the provider revoked early.
-
-**antigravity** is wired and verified: a live test showed Google returns a fresh
-access token and does not rotate the refresh token, so intact refreshing an
-antigravity account does not affect another gateway that shares it.
-
-**claude and codex** are wired, but a live refresh may rotate the refresh token at
-Anthropic or OpenAI. A rotation would invalidate the same token in another gateway
-that holds it. So the live activation is a decision for the owner, not a default.
-
-## Usage tracking
-
-intact records only a daily row per account and model. A large response passes
-through, and intact reads its head and tail to find the `usage` object, which
-bounds the memory it holds. It forces `Accept-Encoding: identity` to the upstream
-so the response is never compressed in a form the reader cannot parse.
-
-## Deployment
-
-The reference deployment runs intact as a systemd service bound to loopback, and
-exposes it through a Cloudflare tunnel with the built-in TOTP login in front. See
-`temp/intact-deploy.sh` for the service unit and the tunnel ingress steps.
+cmd/intact            the binary: flags, TOTP enrollment, listener
+internal/httpapi      routes, /v1 routing and failover, dashboard API, MCP, OAuth login, quota, model tests
+internal/translate    OpenAI ⇄ Anthropic, Responses and Gemini request/answer/stream translation
+internal/provider     the provider registry (base URL, auth, identity headers, list endpoint)
+internal/filter       the blacklist engine
+internal/drift        structure learning and change detection
+internal/store        SQLite (pure Go): connections, models, filters, keys, drift, usage, settings
+internal/oauth        the refresh-token grant
+internal/upstream     the outbound HTTP client
+internal/web          the dashboard (index.html) and icons, embedded in the binary
+```
 
 ## Tests
 
@@ -212,5 +108,4 @@ go test ./...
 go vet ./...
 ```
 
-Every package passes. The tests cover the usage parser, the store, the proxy tap,
-the round-robin failover, the auth gate, and the OAuth refresh path.
+The tests run against fake upstreams. None of them calls a real provider.

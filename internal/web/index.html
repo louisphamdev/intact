@@ -172,6 +172,12 @@
   .seg{display:inline-flex;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:3px;gap:2px}
   .seg button{min-height:28px;padding:.2rem .7rem;font-size:.8rem;background:transparent;color:var(--muted);border-radius:6px}
   .seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .qgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(22rem,1fr));gap:1rem}
+  .qbar{height:8px;border-radius:99px;background:var(--card2);overflow:hidden}
+  .qbar>span{display:block;height:100%;border-radius:99px}
+  .qwin{display:grid;gap:.3rem}
+  .qwin .top{display:flex;justify-content:space-between;gap:.5rem;font-size:.82rem}
+  .qwin .top b{font-weight:550}
   [hidden]{display:none!important}
   @media (max-width:820px){
     body{grid-template-columns:1fr}
@@ -201,6 +207,7 @@
   <a href="#/blacklist" data-nav="blacklist"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>Blacklist<span class="ct" id="ctFilter"></span></a>
   <a href="#/drift" data-nav="drift"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Drift<span class="ct" id="ctDrift"></span></a>
   <a href="#/docs" data-nav="docs"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h7"/></svg>Docs</a>
+  <a href="#/quota" data-nav="quota"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 16a8 8 0 1 1 16 0"/><path d="m12 16 4-5"/></svg>Quota</a>
   <a href="#/usage" data-nav="usage"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Usage</a>
   </nav>
   <div class="spacer"></div>
@@ -412,6 +419,7 @@ function route(){
   if(page==='blacklist')return viewBlacklist(v,parts[1]);
   if(page==='docs')return viewDocs(v,parts[1]);
   if(page==='drift')return viewDrift(v,parts[1]);
+  if(page==='quota')return viewQuota(v,parts[1]);
   if(page==='providers'&&parts[1])return viewProvider(v,decodeURIComponent(parts[1]));
   if(page!=='providers'){location.hash='#/providers';return}
   viewProviders(v);
@@ -927,6 +935,57 @@ function driftFields(){
   };
   psel.onchange=render;dsel.onchange=render;render();
   return el('div',{class:'sec'},el('div',{class:'sech'},psel,dsel),box);
+}
+
+// ---- Quota
+function untilText(iso){
+  const t=Date.parse(iso);if(!t)return iso||'';
+  let d=Math.round((t-Date.now())/60000);if(d<=0)return 'resetting';
+  const days=Math.floor(d/1440);d-=days*1440;const h=Math.floor(d/60),m=d%60;
+  return 'resets in '+(days?days+'d ':'')+(h?h+'h ':'')+(days?'':m+'m');
+}
+function quotaWindow(w){
+  const pct=w.usedPct;
+  const color=w.unlimited?'var(--ok)':pct<0?'var(--faint)':pct>=90?'var(--err)':pct>=70?'var(--warn)':'var(--ok)';
+  const right=w.unlimited?'unlimited':pct<0?(w.used?w.used+(w.limit?' / '+w.limit:''):'—')
+    :Math.round(pct)+'% used'+(w.used&&w.limit?' · '+w.used+' / '+w.limit:'');
+  return el('div',{class:'qwin'},
+    el('div',{class:'top'},el('b',{text:w.name}),el('span',{class:'muted',text:right})),
+    el('div',{class:'qbar'},el('span',{style:'width:'+(w.unlimited?100:Math.max(0,Math.min(100,pct<0?0:pct)))+'%;background:'+color+(w.unlimited?';opacity:.35':'')})),
+    w.resetAt?el('div',{class:'faint small',title:w.resetAt,text:untilText(w.resetAt)}):null);
+}
+async function viewQuota(v,prov){
+  const provs=[...new Set(S.accounts.filter(a=>a.isActive).map(a=>a.provider))].filter(wired).sort((a,b)=>pname(a).localeCompare(pname(b)));
+  const sel=el('select',{style:'width:auto','aria-label':'Provider'},el('option',{value:'',text:'All providers'}),provs.map(p=>el('option',{value:p,text:pname(p)})));
+  sel.value=prov||'';sel.onchange=()=>{location.hash='#/quota'+(sel.value?'/'+sel.value:'')};
+  const grid=el('div',{class:'qgrid'},el('div',{class:'card empty',text:'Reading quota…'}));
+  const refresh=el('button',{class:'ghost',type:'button'},'Refresh');
+  header('Quota',null,sel,refresh);
+  v.append(grid);
+  const load=async force=>{
+    refresh.disabled=true;
+    try{
+      const d=await api('/quota?'+(prov?'provider='+encodeURIComponent(prov)+'&':'')+(force?'refresh=1':''));
+      if(!d.accounts.length){grid.replaceChildren(el('div',{class:'card empty',text:'No active account.'}));return}
+      grid.replaceChildren(...d.accounts.map(q=>{
+        const main=q.windows.filter(w=>!w.name.startsWith('model ')), models=q.windows.filter(w=>w.name.startsWith('model '));
+        return el('div',{class:'card'},
+          el('div',{class:'cardh'},avatar(q.provider,true),
+            el('div',{class:'grow',style:'min-width:0'},el('div',{style:'font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap',text:q.label||q.provider}),
+              el('div',{class:'faint small',text:pname(q.provider)+(q.plan?' · '+q.plan:'')})),
+            q.source==='headers'?el('span',{class:'badge',title:'From the rate-limit headers of the last answer, '+q.fetchedAt},'last answer'):null),
+          el('div',{style:'padding:1rem 1.25rem;display:grid;gap:.9rem'},
+            q.error&&!q.windows.length?el('div',{class:'err-msg',text:q.error}):null,
+            !q.error&&!q.windows.length?el('div',{class:'muted small',text:'No quota data yet. It appears after the next request through this account.'}):null,
+            ...main.map(quotaWindow),
+            models.length?el('details',{},el('summary',{class:'muted small',style:'cursor:pointer'},models.length+' per-model limits'),
+              el('div',{style:'display:grid;gap:.8rem;margin-top:.7rem'},models.map(w=>quotaWindow({...w,name:w.name.slice(6)})))):null));
+      }));
+    }catch(e){grid.replaceChildren(el('div',{class:'card empty',text:e.message}))}
+    finally{refresh.disabled=false}
+  };
+  refresh.onclick=()=>load(true);
+  load(false);
 }
 
 // ---- Docs

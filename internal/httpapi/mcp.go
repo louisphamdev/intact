@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/louisphamdev/intact/internal/filter"
 	"github.com/louisphamdev/intact/internal/provider"
@@ -204,6 +205,24 @@ var mcpTools = []mcpTool{
 		InputSchema: schema(map[string]any{"provider": pString, "direction": map[string]any{"type": "string", "enum": []string{"request", "response"}}, "endpoint": pString}),
 		run: func(a *api, args map[string]any) (any, error) {
 			return a.drift.Fields(argStr(args, "direction"), argStr(args, "provider"), argStr(args, "endpoint")), nil
+		}},
+	{Name: "get_quota", Description: "Read each active account's quota (rolling windows, weekly and monthly pools, per-model shares) from the provider, or from the rate-limit headers of its last answer.",
+		InputSchema: schema(map[string]any{"provider": pString, "refresh": pBool}),
+		run: func(a *api, args map[string]any) (any, error) {
+			conns, err := a.store.ListConnections()
+			if err != nil {
+				return nil, err
+			}
+			refresh, _ := args["refresh"].(bool)
+			out := []AccountQuota{}
+			for _, c := range conns {
+				if _, ok := a.providerFor(c); ok && c.IsActive && (argStr(args, "provider") == "" || c.Provider == argStr(args, "provider")) {
+					ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+					out = append(out, a.quotaFor(ctx, c, refresh))
+					cancel()
+				}
+			}
+			return out, nil
 		}},
 	{Name: "get_usage", Description: "Daily token totals per account and model, optionally for one day (YYYY-MM-DD).",
 		InputSchema: schema(map[string]any{"day": pString}),

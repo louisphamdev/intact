@@ -107,6 +107,7 @@ const maxTranslatedBody = 32 << 20
 // relayVia answers the caller in its own shape (to) from a response in the
 // provider's shape (via). stream is what the caller asked for.
 func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, via string, stream bool, provider, path string) {
+	a.rate.capture(connID, resp.Header)
 	for k, vs := range resp.Header {
 		if hopByHop[k] || k == "Content-Length" || k == "Content-Type" || k == "Content-Encoding" {
 			continue

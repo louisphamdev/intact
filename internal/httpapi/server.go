@@ -33,6 +33,10 @@ type api struct {
 	sigs sigStore
 	// drift learns the structure of what passes through and records changes.
 	drift *drift.Observer
+	// rate keeps the last rate-limit headers per account.
+	rate rateHeaders
+	// quota caches the quota read from each account.
+	quota quotaCache
 }
 
 // New builds the route table with no authentication (loopback use and tests).
@@ -46,7 +50,8 @@ func New(s *store.Store, baseOverride map[string]string) http.Handler {
 func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.Config) http.Handler {
 	a := &api{store: s, baseOverride: baseOverride, auth: authCfg, rrNext: map[string]int{},
 		cat: catalog{m: map[string]catalogEntry{}}, copilot: copilotCache{m: map[string]copilotToken{}},
-		sigs: sigStore{m: map[string]sigEntry{}}, drift: drift.New(s)}
+		sigs: sigStore{m: map[string]sigEntry{}}, drift: drift.New(s),
+		rate: rateHeaders{m: map[string]rateSnapshot{}}, quota: quotaCache{m: map[string]AccountQuota{}}}
 	mux := http.NewServeMux()
 	// One base URL: the model in the body picks the provider and its accounts.
 	mux.HandleFunc("GET /v1/models", a.requireToken(a.models))
@@ -56,6 +61,8 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	mux.HandleFunc("GET /api/accounts", a.requireToken(a.accounts))
 	mux.HandleFunc("POST /api/accounts/{id}/active", a.requireToken(a.setActive))
 	mux.HandleFunc("GET /api/usage", a.requireToken(a.usage))
+	mux.HandleFunc("GET /api/quota", a.requireToken(a.quotaList))
+	mux.HandleFunc("GET /quota", a.requireSession(a.quotaList))
 	mux.HandleFunc("GET /api/drift/changes", a.requireToken(a.driftChanges))
 	mux.HandleFunc("POST /api/drift/ack", a.requireToken(a.driftAck))
 	mux.HandleFunc("GET /api/drift/fields", a.requireToken(a.driftFields))

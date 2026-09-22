@@ -121,6 +121,7 @@ func (a *api) relay(w http.ResponseWriter, resp *http.Response, connID string) {
 
 // relayObserved relays a passthrough answer and shows it to the drift observer.
 func (a *api) relayObserved(w http.ResponseWriter, resp *http.Response, connID, provider, path string) {
+	a.rate.capture(connID, resp.Header)
 	for k, vs := range resp.Header {
 		if hopByHop[k] {
 			continue

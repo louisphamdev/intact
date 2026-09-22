@@ -39,12 +39,12 @@ var hopByHop = map[string]bool{
 // the caller's headers minus this hop's, the provider identity and defaults, and
 // the stored credential. Accept-Encoding is forced to identity so the usage tap
 // always reads plain bytes.
-func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, secret string, body io.Reader) (*http.Request, error) {
+func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, path, secret string, body io.Reader) (*http.Request, error) {
 	base := p.BaseURL
 	if over, ok := a.baseOverride[providerID]; ok {
 		base = over
 	}
-	target := base + "/" + r.PathValue("path")
+	target := base + "/" + path
 	if r.URL.RawQuery != "" {
 		target += "?" + r.URL.RawQuery
 	}

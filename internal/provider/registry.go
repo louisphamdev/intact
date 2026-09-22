@@ -25,6 +25,10 @@ type Provider struct {
 	AuthPrefix string
 	Identity   map[string]string
 	Defaults   map[string]string
+	// API is the request shape the upstream speaks: "anthropic", "typesafe", or
+	// empty for OpenAI Chat Completions. intact translates between openai and
+	// anthropic when the caller uses the other one.
+	API string
 	// Setup tells the dashboard what a new connection needs besides a label:
 	// "key" (the default), "account" (a key and an account id) or "none".
 	Setup string
@@ -106,12 +110,14 @@ var registry = map[string]Provider{
 	"typesafe": {
 		ID:         "typesafe",
 		BaseURL:    "https://api.typesafe.ai/v1",
+		API:        "typesafe",
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
 	},
 	"claude": {
 		ID:         "claude",
 		BaseURL:    "https://api.anthropic.com/v1",
+		API:        "anthropic",
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
 		Identity: map[string]string{

@@ -14,6 +14,7 @@ import (
 
 	"github.com/louisphamdev/intact/internal/provider"
 	"github.com/louisphamdev/intact/internal/store"
+	"github.com/louisphamdev/intact/internal/translate"
 	"github.com/louisphamdev/intact/internal/upstream"
 )
 
@@ -318,6 +319,9 @@ func bodyModel(body []byte) (string, bool) {
 // account that answers 401 is refreshed and retried once, which recovers a token
 // the provider revoked before its recorded expiry.
 func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targets []store.Connection, start int) {
+	client := clientShape(r.PathValue("path"))
+	stream := translate.Stream(body)
+	translated := map[string][]byte{}
 	tried := 0
 	for i := 0; i < len(targets); i++ {
 		conn := targets[(start+i)%len(targets)]
@@ -329,15 +333,29 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		if err != nil {
 			continue
 		}
+		// A caller of one shape reaching a provider of the other gets its
+		// request translated, and the answer translated back.
+		path, send, to := r.PathValue("path"), body, ""
+		if want := shapeOf(p); client != "" && want != client && (want == translate.OpenAI || want == translate.Anthropic) {
+			tb, ok := translated[want]
+			if !ok {
+				if tb, err = translateRequest(body, client); err != nil {
+					writeError(w, http.StatusBadRequest, "cannot translate the request: "+err.Error())
+					return
+				}
+				translated[want] = tb
+			}
+			path, send, to = shapePath[want], tb, client
+		}
 		tried++
-		resp, err := a.send(r, p, conn.Provider, secret, body)
+		resp, err := a.send(r, p, conn.Provider, path, secret, send)
 		if err != nil {
 			continue
 		}
 		if resp.StatusCode == http.StatusUnauthorized && a.isOAuth(conn.ID) {
 			if fresh, ok := a.forceRefresh(r.Context(), conn.ID); ok {
 				resp.Body.Close()
-				if resp, err = a.send(r, p, conn.Provider, fresh, body); err != nil {
+				if resp, err = a.send(r, p, conn.Provider, path, fresh, send); err != nil {
 					continue
 				}
 			}
@@ -348,7 +366,11 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			continue
 		}
 		defer resp.Body.Close()
-		a.relay(w, resp, conn.ID)
+		if to != "" {
+			a.relayTranslated(w, resp, conn.ID, to, stream)
+		} else {
+			a.relay(w, resp, conn.ID)
+		}
 		return
 	}
 	if tried == 0 {
@@ -359,8 +381,8 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 }
 
 // send builds and sends one upstream request for a connection.
-func (a *api) send(r *http.Request, p provider.Provider, providerID, secret string, body []byte) (*http.Response, error) {
-	out, err := a.newOutbound(r, p, providerID, secret, bytes.NewReader(body))
+func (a *api) send(r *http.Request, p provider.Provider, providerID, path, secret string, body []byte) (*http.Response, error) {
+	out, err := a.newOutbound(r, p, providerID, path, secret, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

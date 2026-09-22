@@ -566,6 +566,9 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			}
 		}
 		// Fail over on a busy status only while another account remains.
+		if retryableStatus(resp.StatusCode) {
+			log.Printf("connection %s: %s answered %d%s", conn.ID, conn.Provider, resp.StatusCode, modelNote(at.model))
+		}
 		if retryableStatus(resp.StatusCode) && i < len(attempts)-1 {
 			resp.Body.Close()
 			continue
@@ -659,3 +662,10 @@ func firstNonEmpty(ss ...string) string {
 type errSkipAccount struct{ err error }
 
 func (e errSkipAccount) Error() string { return e.err.Error() }
+
+func modelNote(m string) string {
+	if m == "" {
+		return ""
+	}
+	return " on " + m
+}

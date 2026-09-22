@@ -193,6 +193,7 @@ var registry = map[string]Provider{
 		BaseURL:    "https://api.anthropic.com/v1",
 		API:        "anthropic",
 		Watch:      true,
+		Setup:      "oauth",
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
 		Identity: map[string]string{

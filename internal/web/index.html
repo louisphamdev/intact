@@ -227,6 +227,15 @@
   </div>
 </div>
 
+<!-- oauth login -->
+<div id="lModal" class="overlay" hidden>
+  <div class="modal sm" role="dialog" aria-modal="true" aria-labelledby="lTitle">
+    <div class="mh"><strong id="lTitle">Login</strong><button class="icon" type="button" data-close aria-label="Close">✕</button></div>
+    <div class="mb" id="lBody"></div>
+    <div class="mf" id="lFoot"></div>
+  </div>
+</div>
+
 <!-- api key -->
 <div id="kModal" class="overlay" hidden>
   <div class="modal sm" role="dialog" aria-modal="true" aria-labelledby="kTitle">
@@ -506,7 +515,9 @@ function viewProvider(v,p){
   if(!ok)v.append(el('div',{class:'notice'},'intact cannot call "'+pname(p)+'" yet, so these accounts are stored but not used.'));
   if(setupOf(p)==='account'&&list.some(a=>!a.baseUrl))v.append(el('div',{class:'notice'},'A connection without an account ID cannot be used. Delete it and add it again with the account ID.'));
   if(custom(p))v.append(el('div',{class:'muted small'},'Custom OpenAI-compatible provider · ',el('code',{text:list.find(a=>a.baseUrl).baseUrl})));
-  const addBtn=ok&&setupOf(p)!=='oauth'?el('button',{class:'primary',type:'button',onclick:()=>addAccount(p)},svg(ICON.plus),'Add'):null;
+  const loginBtn=LOGIN[p]?el('button',{class:'primary',type:'button',onclick:()=>startLogin(p)},svg(ICON.plus),'Login'):null;
+  const keyBtn=ok&&setupOf(p)!=='oauth'?el('button',{class:loginBtn?'ghost':'primary',type:'button',onclick:()=>addAccount(p)},svg(ICON.plus),loginBtn?'Add token':'Add'):null;
+  const addBtn=loginBtn||keyBtn?el('span',{style:'display:inline-flex;gap:.5rem'},loginBtn,keyBtn):null;
   const rows=list.map((a,i)=>{
     const sw=el('input',{type:'checkbox',checked:a.isActive,'aria-label':'Active: '+(a.label||a.id)});
     sw.onchange=async()=>{
@@ -621,6 +632,55 @@ function createKey(){
   // only a plain Enter submits.
   go.onclick=submit;name.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing&&e.keyCode!==229)submit()};
   openModal('kModal');
+}
+
+// ---- OAuth login
+// Providers whose accounts sign in. "paste": the browser ends on a page the
+// server cannot see, so the person pastes its URL or code; "device": GitHub.
+const LOGIN={
+  claude:{kind:'paste',hint:'After signing in, the page shows a code. Copy it and paste it here.'},
+  codex:{kind:'paste',hint:'After signing in, the browser opens localhost:1455 and fails to load. Copy that whole URL from the address bar and paste it here.'},
+  antigravity:{kind:'paste',hint:'After signing in, the browser opens localhost:51121 and fails to load. Copy that whole URL from the address bar and paste it here.'},
+  github:{kind:'device'},
+};
+let loginPoll=null;
+async function startLogin(p){
+  clearTimeout(loginPoll);
+  $('lTitle').textContent='Login · '+pname(p);
+  $('lBody').replaceChildren(el('p',{class:'muted',text:'Starting…'}));$('lFoot').replaceChildren();
+  openModal('lModal');
+  let r;
+  try{r=await api('/oauth/'+p+'/start',{method:'POST'})}catch(e){$('lBody').replaceChildren(el('div',{class:'err-msg',text:e.message}));return}
+  const err=el('div',{class:'err-msg'});
+  const done=async c=>{closeModal('lModal');toast('Signed in: '+((c&&c.label)||pname(p)));delete modelCache[p];await load()};
+  if(r.device){
+    const code=el('div',{style:'font:700 1.6rem/1.2 ui-monospace,monospace;letter-spacing:.15em;text-align:center;padding:.6rem;background:var(--bg);border:1px solid var(--line);border-radius:10px',text:r.userCode});
+    $('lBody').replaceChildren(el('div',{class:'f'},'1. Copy this code',el('div',{style:'display:flex;gap:.5rem;align-items:center'},el('div',{style:'flex:1'},code),copyBtn(r.userCode,'code'))),
+      el('div',{class:'f'},'2. Enter it at GitHub',el('a',{href:r.verificationUri,target:'_blank',rel:'noopener',class:'copyline',style:'text-decoration:none'},el('code',{text:r.verificationUri}))),
+      el('p',{class:'muted small',style:'margin:0'},'Waiting for GitHub…'),err);
+    const poll=async()=>{
+      if($('lModal').hidden)return;
+      try{const x=await postJSON('/oauth/github/poll',{deviceCode:r.deviceCode});
+        if(x.status==='done'){done(x.connection);return}}
+      catch(e){err.textContent=e.message;return}
+      loginPoll=setTimeout(poll,Math.max(5,r.interval||5)*1000);
+    };
+    loginPoll=setTimeout(poll,Math.max(5,r.interval||5)*1000);
+    return;
+  }
+  const input=el('input',{placeholder:'Paste the URL or code',autocomplete:'off',spellcheck:'false'});
+  const go=el('button',{class:'primary',type:'button'},'Sign in');
+  $('lBody').replaceChildren(
+    el('div',{class:'f'},'1. Open the sign-in page',el('a',{href:r.url,target:'_blank',rel:'noopener',class:'primary',style:'display:inline-flex;justify-content:center;padding:.55rem;border-radius:8px;background:var(--accent-strong);color:#fff;text-decoration:none;font-weight:600'},'Open '+pname(p)+' sign-in')),
+    el('label',{class:'f'},'2. '+LOGIN[p].hint,input),err);
+  $('lFoot').replaceChildren(el('button',{class:'ghost',type:'button','data-close':true},'Cancel'),go);
+  let busy=false;
+  const submit=async()=>{
+    if(busy||!input.value.trim())return;busy=true;go.disabled=true;err.textContent='';
+    try{const x=await postJSON('/oauth/'+p+'/finish',{state:r.state,input:input.value.trim()});done(x.connection)}
+    catch(e){err.textContent=e.message;busy=false;go.disabled=false}
+  };
+  go.onclick=submit;input.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing)submit()};
 }
 
 // ---- Blacklist

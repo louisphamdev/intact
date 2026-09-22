@@ -33,6 +33,8 @@ type api struct {
 	sigs sigStore
 	// drift learns the structure of what passes through and records changes.
 	drift *drift.Observer
+	// logins holds OAuth sign-ins waiting for their code.
+	logins loginStore
 }
 
 // New builds the route table with no authentication (loopback use and tests).
@@ -46,7 +48,8 @@ func New(s *store.Store, baseOverride map[string]string) http.Handler {
 func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.Config) http.Handler {
 	a := &api{store: s, baseOverride: baseOverride, auth: authCfg, rrNext: map[string]int{},
 		cat: catalog{m: map[string]catalogEntry{}}, copilot: copilotCache{m: map[string]copilotToken{}},
-		sigs: sigStore{m: map[string]sigEntry{}}, drift: drift.New(s)}
+		sigs: sigStore{m: map[string]sigEntry{}}, drift: drift.New(s),
+		logins: loginStore{m: map[string]pendingLogin{}}}
 	mux := http.NewServeMux()
 	// One base URL: the model in the body picks the provider and its accounts.
 	mux.HandleFunc("GET /v1/models", a.requireToken(a.models))
@@ -76,6 +79,9 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	mux.HandleFunc("GET /accounts/{id}/models", a.requireSession(a.modelsForAccount))
 	mux.HandleFunc("POST /accounts/{id}/active", a.requireSession(a.setActive))
 	mux.HandleFunc("GET /providers", a.requireSession(a.providers))
+	mux.HandleFunc("POST /oauth/{provider}/start", a.requireSession(a.loginStart))
+	mux.HandleFunc("POST /oauth/{provider}/finish", a.requireSession(a.loginFinish))
+	mux.HandleFunc("POST /oauth/github/poll", a.requireSession(a.githubDevicePoll))
 	mux.HandleFunc("GET /keys", a.requireSession(a.listKeys))
 	mux.HandleFunc("POST /keys", a.requireSession(a.createKey))
 	mux.HandleFunc("POST /keys/{id}/reveal", a.requireSession(a.revealKey))

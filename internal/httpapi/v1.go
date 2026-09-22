@@ -69,6 +69,10 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 	prov, upstreamModel := a.splitModel(model)
 	var targets []store.Connection
 	if prov != "" {
+		if a.store.InactiveModels(prov)[upstreamModel] && r.Context().Value(modelTestKey{}) == nil {
+			writeError(w, http.StatusForbidden, "this model is switched off in intact")
+			return
+		}
 		targets = a.activeConnections(prov)
 		if upstreamModel != model {
 			if body, ok = setModel(body, upstreamModel); !ok {
@@ -227,8 +231,27 @@ func (a *api) activeProviders() []string {
 	return out
 }
 
-// providerModels returns a provider's model ids, from the cache when fresh.
+// providerModels returns the models a provider serves: what it lists, from
+// the cache when fresh, minus the ones the operator switched off.
 func (a *api) providerModels(ctx context.Context, prov string) []string {
+	ids := a.catalogIDs(ctx, prov)
+	off := a.store.InactiveModels(prov)
+	if len(off) == 0 {
+		return ids
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if !off[id] {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// catalogIDs returns everything a provider lists, fetching when the cache is
+// stale and recording the list in the database: a live list marks models
+// that are gone as stale, a fallback list does not.
+func (a *api) catalogIDs(ctx context.Context, prov string) []string {
 	a.cat.mu.Lock()
 	e, hit := a.cat.m[prov]
 	a.cat.mu.Unlock()
@@ -247,13 +270,25 @@ func (a *api) providerModels(ctx context.Context, prov string) []string {
 			ids, ok = a.fetchModelIDs(ctx, conns[0])
 		}
 	}
+	live := ok && len(ids) > 0
 	if p, known := provider.Lookup(prov); known && len(p.Models) > 0 && len(ids) == 0 {
 		ids, ok = p.Models, true
+	}
+	if len(ids) > 0 {
+		a.store.SyncModels(prov, ids, live)
 	}
 	a.cat.mu.Lock()
 	a.cat.m[prov] = catalogEntry{ids: ids, ok: ok, at: time.Now()}
 	a.cat.mu.Unlock()
 	return ids
+}
+
+// refreshCatalog drops a provider's cached list and fetches it again.
+func (a *api) refreshCatalog(ctx context.Context, prov string) []string {
+	a.cat.mu.Lock()
+	delete(a.cat.m, prov)
+	a.cat.mu.Unlock()
+	return a.catalogIDs(ctx, prov)
 }
 
 // fetchModelIDs reads one account's model list and returns its ids.

@@ -46,6 +46,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if _, err := db.Exec(modelsSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply models schema: %w", err)
+	}
 	if _, err := db.Exec(pendingSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply pending schema: %w", err)

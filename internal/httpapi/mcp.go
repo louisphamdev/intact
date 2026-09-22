@@ -97,6 +97,24 @@ var mcpTools = []mcpTool{
 			}
 			return out, nil
 		}},
+	{Name: "list_provider_models", Description: "List a provider's models with their on/off switch, whether the provider still lists them (stale), and the last test.",
+		InputSchema: schema(map[string]any{"provider": pString}, "provider"),
+		run: func(a *api, args map[string]any) (any, error) {
+			return a.modelRows(context.Background(), argStr(args, "provider"))
+		}},
+	{Name: "set_models_active", Description: "Switch models of a provider on or off. A model switched off is not listed in /v1/models nor served.",
+		InputSchema: schema(map[string]any{"provider": pString, "models": map[string]any{"type": "array", "items": pString}, "active": pBool}, "provider", "models", "active"),
+		run: func(a *api, args map[string]any) (any, error) {
+			var ms []string
+			for _, v := range list(args["models"]) {
+				if s, ok := v.(string); ok {
+					ms = append(ms, s)
+				}
+			}
+			active, _ := args["active"].(bool)
+			n, err := a.store.SetModelsActive(argStr(args, "provider"), ms, active)
+			return map[string]any{"updated": n}, err
+		}},
 	{Name: "list_filters", Description: "List the request filters (the blacklist), optionally for one provider scope.",
 		InputSchema: schema(map[string]any{"provider": pProvider}),
 		run: func(a *api, args map[string]any) (any, error) {

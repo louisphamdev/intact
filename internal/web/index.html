@@ -512,12 +512,21 @@ function mcpCard(){
 // known provider is listed only once it has an account; each group adds its
 // own way.
 const isCustom=p=>!infoOf(p).id&&accountsOf(p).some(a=>a.baseUrl);
+// chooseProvider asks for one provider from a list, in a combobox so the list
+// can grow without filling the screen.
 function chooseProvider(title,ids,onPick){
   $('chTitle').textContent=title;
-  $('chBody').replaceChildren(el('div',{style:'display:grid;gap:.5rem'},ids.map(p=>
-    el('button',{class:'pcard',type:'button',style:'width:100%;text-align:left;cursor:pointer',onclick:()=>{closeModal('chModal');onPick(p)}},
-      avatar(p),el('div',{style:'min-width:0'},el('div',{class:'nm',text:pname(p)}),
-        el('span',{class:'status',text:accountsOf(p).length?accountsOf(p).length+' connected':'No connections yet'}))))));
+  const sel=el('select',{'aria-label':'Provider'},
+    ...[['Connected',ids.filter(p=>accountsOf(p).length)],['Not connected yet',ids.filter(p=>!accountsOf(p).length)]]
+      .filter(g=>g[1].length).map(([label,list])=>el('optgroup',{label},list.map(p=>el('option',{value:p,text:pname(p)+(accountsOf(p).length?' ('+accountsOf(p).length+')':'')})))));
+  const go=el('button',{class:'primary',type:'button'},'Continue');
+  const pick=()=>{closeModal('chModal');onPick(sel.value)};
+  go.onclick=pick;sel.onkeydown=e=>{if(e.key==='Enter')pick()};
+  const preview=el('div',{style:'display:flex;align-items:center;gap:.6rem'});
+  const show=()=>preview.replaceChildren(avatar(sel.value),el('span',{class:'muted small',text:infoOf(sel.value).auth==='oauth'?'Signs in with the provider account':'Uses an API key'}));
+  sel.onchange=show;show();
+  $('chBody').replaceChildren(el('label',{class:'f'},'Provider',sel),preview,
+    el('div',{style:'display:flex;justify-content:flex-end;gap:.5rem'},el('button',{class:'ghost',type:'button','data-close':true},'Cancel'),go));
   openModal('chModal');
 }
 function viewProviders(v){

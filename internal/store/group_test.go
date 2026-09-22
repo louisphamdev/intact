@@ -89,3 +89,58 @@ func TestSetActive(t *testing.T) {
 		t.Errorf("unknown id err = %v", err)
 	}
 }
+
+func TestGroupProviderMembers(t *testing.T) {
+	s, _ := Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	a, _ := s.CreateConnection("groq", "a", "k")
+	err := s.SaveGroup(Group{Name: "mix", Strategy: StrategyRoundRobin, Members: []Member{
+		{Provider: "groq", Model: "llama"},
+		{Provider: "groq", Model: "qwen"},
+		{Provider: "groq", Model: "llama"},       // exact duplicate, dropped
+		{Provider: "nvidia", ConnectionID: a.ID}, // provider comes from the connection
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, _ := s.GetGroup("mix")
+	if len(g.Members) != 3 || g.Members[1].Model != "qwen" || g.Members[2].Provider != "groq" {
+		t.Fatalf("members = %+v", g.Members)
+	}
+	if err := s.SaveGroup(Group{Name: "bad", Strategy: StrategyRoundRobin, Members: []Member{{Model: "x"}}}); !errors.Is(err, ErrNoProvider) {
+		t.Errorf("member without provider err = %v", err)
+	}
+}
+
+func TestMigrateGroupsFromFirstRelease(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.db")
+	s, _ := Open(path)
+	c, _ := s.CreateConnection("groq", "a", "k")
+	// Recreate the first release's table and one row in it.
+	for _, q := range []string{
+		`DROP TABLE group_members`,
+		`CREATE TABLE group_members (group_name TEXT NOT NULL, connection_id TEXT NOT NULL,
+		 position INTEGER NOT NULL, model TEXT NOT NULL DEFAULT '', PRIMARY KEY (group_name, connection_id))`,
+		`INSERT INTO groups (name, strategy, created_at, updated_at) VALUES ('old', 'fallback', 'x', 'x')`,
+	} {
+		if _, err := s.DB.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.DB.Exec(`INSERT INTO group_members VALUES ('old', ?, 0, 'm')`, c.ID)
+	s.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	g, err := s.GetGroup("old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Member{Provider: "groq", ConnectionID: c.ID, Model: "m"}
+	if len(g.Members) != 1 || g.Members[0] != want {
+		t.Fatalf("migrated members = %+v, want %+v", g.Members, want)
+	}
+}

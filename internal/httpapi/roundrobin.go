@@ -37,9 +37,11 @@ func (a *api) roundRobin(w http.ResponseWriter, r *http.Request) {
 	a.failover(w, r, targets, a.nextIndex("p:"+prov, len(targets)))
 }
 
-// groupProxy forwards a request to a group: its active members, of any
-// provider, tried from a start the strategy chooses, failing over on a busy
-// status like /r does.
+// groupProxy forwards a request to a group. The strategy picks the member to
+// try first (round-robin rotates it, fallback keeps the saved order); a member
+// that stands for a whole provider expands to that provider's active accounts,
+// rotated as /r rotates them. The run fails over through every account of every
+// member on a busy status.
 func (a *api) groupProxy(w http.ResponseWriter, r *http.Request) {
 	g, err := a.store.GetGroup(r.PathValue("group"))
 	if err != nil {
@@ -51,30 +53,49 @@ func (a *api) groupProxy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "cannot read connections")
 		return
 	}
-	byID := map[string]store.Connection{}
-	for _, c := range conns {
-		byID[c.ID] = c
-	}
-	targets := []target{}
+	// Each member becomes the list of accounts it may use, in the order to try.
+	per := [][]target{}
 	for _, m := range g.Members {
-		c, ok := byID[m.ConnectionID]
-		if !ok || !c.IsActive {
+		if _, ok := provider.Lookup(m.Provider); !ok {
 			continue
 		}
-		if _, ok := provider.Lookup(c.Provider); !ok {
+		ts := []target{}
+		for _, c := range conns {
+			if !c.IsActive || c.Provider != m.Provider {
+				continue
+			}
+			if m.ConnectionID != "" && c.ID != m.ConnectionID {
+				continue
+			}
+			ts = append(ts, target{conn: c, model: m.Model})
+		}
+		if len(ts) == 0 {
 			continue
 		}
-		targets = append(targets, target{conn: c, model: m.Model})
+		if m.ConnectionID == "" && len(ts) > 1 {
+			ts = rotate(ts, a.nextIndex("p:"+m.Provider, len(ts)))
+		}
+		per = append(per, ts)
 	}
-	if len(targets) == 0 {
-		writeError(w, http.StatusNotFound, "no active member in this group")
+	if len(per) == 0 {
+		writeError(w, http.StatusNotFound, "no active account in this group")
 		return
 	}
-	start := 0
 	if g.Strategy == store.StrategyRoundRobin {
-		start = a.nextIndex("g:"+g.Name, len(targets))
+		per = rotate(per, a.nextIndex("g:"+g.Name, len(per)))
 	}
-	a.failover(w, r, targets, start)
+	targets := []target{}
+	for _, ts := range per {
+		targets = append(targets, ts...)
+	}
+	a.failover(w, r, targets, 0)
+}
+
+// rotate returns s starting at index i and wrapping around.
+func rotate[T any](s []T, i int) []T {
+	out := make([]T, 0, len(s))
+	out = append(out, s[i:]...)
+	return append(out, s[:i]...)
 }
 
 // failover tries the targets in order from start, wrapping around, and relays

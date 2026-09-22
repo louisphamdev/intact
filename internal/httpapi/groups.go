@@ -20,7 +20,9 @@ func (a *api) groups(w http.ResponseWriter, r *http.Request) {
 }
 
 // saveGroup creates or replaces a group from a JSON body:
-// {"name":"fast","strategy":"round-robin","members":[{"connectionId":"…","model":"…"}]}.
+// {"name":"fast","strategy":"round-robin","members":[{"provider":"groq","model":"…"},
+// {"connectionId":"…","model":"…"}]}. A member with a provider and no connection
+// uses every active account of that provider.
 func (a *api) saveGroup(w http.ResponseWriter, r *http.Request) {
 	var g store.Group
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&g); err != nil {
@@ -41,6 +43,10 @@ func (a *api) saveGroup(w http.ResponseWriter, r *http.Request) {
 	if err := a.store.SaveGroup(g); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusBadRequest, "a member is not a known connection")
+			return
+		}
+		if errors.Is(err, store.ErrNoProvider) {
+			writeError(w, http.StatusBadRequest, "every member needs a provider or a connection")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "cannot save group")

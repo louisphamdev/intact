@@ -8,14 +8,19 @@ import (
 	"time"
 )
 
-// A group pools connections, of one provider or several, behind one name so a
-// caller can reach them all at /g/<name>/… and let intact pick and fail over.
+// A group (a "combo" in the dashboard) pools models of one provider or several
+// behind one name, so a caller reaches them all at /g/<name>/… and lets intact
+// pick and fail over.
+//
+// A member names a provider and, optionally, one connection of it. With no
+// connection the member stands for every active account of the provider, which
+// intact rotates like /r does; with one it is pinned to that account.
 //
 // A member may carry a model. When it does, intact replaces the top-level
 // "model" of the request body for that member only, because the same model has
 // a different id at each provider (llama-3.3-70b-versatile at groq,
 // meta/llama-3.3-70b-instruct at nvidia). A member with no model forwards the
-// body untouched, which keeps the passthrough contract for a one-provider group.
+// body untouched, which keeps the passthrough contract.
 
 // Strategies a group can use.
 const (
@@ -28,6 +33,9 @@ const (
 
 // ErrGroupNotFound reports that no group has the requested name.
 var ErrGroupNotFound = errors.New("group not found")
+
+// ErrNoProvider reports a member that names neither a provider nor a connection.
+var ErrNoProvider = errors.New("member has no provider")
 
 // groupName is the shape of a name, which appears in the URL path.
 var groupName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
@@ -45,8 +53,10 @@ type Group struct {
 	Members  []Member `json:"members"`
 }
 
-// Member is one connection inside a group.
+// Member is one entry of a group: a provider, optionally pinned to one of its
+// connections, and the model to send.
 type Member struct {
+	Provider     string `json:"provider"`
 	ConnectionID string `json:"connectionId"`
 	Model        string `json:"model"`
 }
@@ -61,11 +71,53 @@ CREATE TABLE IF NOT EXISTS groups (
 
 CREATE TABLE IF NOT EXISTS group_members (
 	group_name    TEXT NOT NULL,
-	connection_id TEXT NOT NULL,
 	position      INTEGER NOT NULL,
+	provider      TEXT NOT NULL,
+	connection_id TEXT NOT NULL DEFAULT '',
 	model         TEXT NOT NULL DEFAULT '',
-	PRIMARY KEY (group_name, connection_id)
+	PRIMARY KEY (group_name, position)
 );`
+
+// migrateGroups rebuilds a group_members table from the first release, which
+// keyed a member by connection and had no provider column, so a provider-wide
+// member could not be stored. The provider is filled from the connection.
+func (s *Store) migrateGroups() error {
+	var n int
+	if err := s.DB.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('group_members') WHERE name = 'provider'`).Scan(&n); err != nil {
+		return fmt.Errorf("read group_members info: %w", err)
+	}
+	if n > 0 {
+		return nil
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback()
+	for _, q := range []string{
+		`ALTER TABLE group_members RENAME TO group_members_v1`,
+		groupMembersV2,
+		`INSERT INTO group_members (group_name, position, provider, connection_id, model)
+		 SELECT m.group_name, m.position, c.provider, m.connection_id, m.model
+		 FROM group_members_v1 m JOIN connections c ON c.id = m.connection_id`,
+		`DROP TABLE group_members_v1`,
+	} {
+		if _, err := tx.Exec(q); err != nil {
+			return fmt.Errorf("migrate group_members: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+const groupMembersV2 = `CREATE TABLE group_members (
+	group_name    TEXT NOT NULL,
+	position      INTEGER NOT NULL,
+	provider      TEXT NOT NULL,
+	connection_id TEXT NOT NULL DEFAULT '',
+	model         TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (group_name, position)
+)`
 
 // SaveGroup creates a group or replaces the strategy and members of an existing
 // one. The members are written in one transaction, so a reader never sees half
@@ -93,25 +145,35 @@ func (s *Store) SaveGroup(g Group) error {
 	if _, err := tx.Exec(`DELETE FROM group_members WHERE group_name = ?`, g.Name); err != nil {
 		return fmt.Errorf("clear members: %w", err)
 	}
-	seen := map[string]bool{}
-	for i, m := range g.Members {
-		if seen[m.ConnectionID] {
+	seen := map[Member]bool{}
+	pos := 0
+	for _, m := range g.Members {
+		if m.ConnectionID != "" {
+			// A pinned member takes its provider from the connection, so the two
+			// can never disagree.
+			var prov string
+			err := tx.QueryRow(`SELECT provider FROM connections WHERE id = ?`, m.ConnectionID).Scan(&prov)
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("member %s: %w", m.ConnectionID, ErrNotFound)
+			}
+			if err != nil {
+				return fmt.Errorf("check member: %w", err)
+			}
+			m.Provider = prov
+		}
+		if m.Provider == "" {
+			return fmt.Errorf("member %d: %w", pos, ErrNoProvider)
+		}
+		if seen[m] {
 			continue
 		}
-		seen[m.ConnectionID] = true
-		var one int
-		err := tx.QueryRow(`SELECT 1 FROM connections WHERE id = ?`, m.ConnectionID).Scan(&one)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("member %s: %w", m.ConnectionID, ErrNotFound)
-		}
-		if err != nil {
-			return fmt.Errorf("check member: %w", err)
-		}
+		seen[m] = true
 		if _, err := tx.Exec(
-			`INSERT INTO group_members (group_name, connection_id, position, model) VALUES (?, ?, ?, ?)`,
-			g.Name, m.ConnectionID, i, m.Model); err != nil {
+			`INSERT INTO group_members (group_name, position, provider, connection_id, model) VALUES (?, ?, ?, ?, ?)`,
+			g.Name, pos, m.Provider, m.ConnectionID, m.Model); err != nil {
 			return fmt.Errorf("insert member: %w", err)
 		}
+		pos++
 	}
 	return tx.Commit()
 }
@@ -139,7 +201,7 @@ func (s *Store) ListGroups() ([]Group, error) {
 	}
 
 	mrows, err := s.DB.Query(
-		`SELECT group_name, connection_id, model FROM group_members ORDER BY group_name, position`)
+		`SELECT group_name, provider, connection_id, model FROM group_members ORDER BY group_name, position`)
 	if err != nil {
 		return nil, fmt.Errorf("query members: %w", err)
 	}
@@ -147,7 +209,7 @@ func (s *Store) ListGroups() ([]Group, error) {
 	for mrows.Next() {
 		var name string
 		var m Member
-		if err := mrows.Scan(&name, &m.ConnectionID, &m.Model); err != nil {
+		if err := mrows.Scan(&name, &m.Provider, &m.ConnectionID, &m.Model); err != nil {
 			return nil, fmt.Errorf("scan member: %w", err)
 		}
 		if i, ok := idx[name]; ok {

@@ -196,7 +196,7 @@
 <aside>
   <a class="brand" href="#/providers" aria-label="intact home"><span class="logo"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c6cf6"/><stop offset="1" stop-color="#2dd4bf"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><path d="M16 6.5 24 9.6v6.1c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V9.6Z" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/><path d="m12.4 16.2 2.6 2.6 4.8-5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div><b>intact</b><small>credential proxy</small></div></a>
   <nav>
-  <a href="#/endpoint" data-nav="endpoint"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h16M12 4v16"/><circle cx="12" cy="12" r="8"/></svg>Endpoint &amp; keys</a>
+  <a href="#/endpoint" data-nav="endpoint"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h16M12 4v16"/><circle cx="12" cy="12" r="8"/></svg>Endpoint</a>
   <a href="#/providers" data-nav="providers"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/></svg>Providers<span class="ct" id="ctProv"></span></a>
   <a href="#/blacklist" data-nav="blacklist"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>Blacklist<span class="ct" id="ctFilter"></span></a>
   <a href="#/drift" data-nav="drift"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Drift<span class="ct" id="ctDrift"></span></a>
@@ -424,7 +424,7 @@ window.addEventListener('hashchange',route);
 const ENDPOINT_TABS=[['openai','OpenAI'],['anthropic','Anthropic'],['systemone','TypeSafe'],['keys','API keys'],['mcp','MCP']];
 function viewEndpoint(v,tab){
   if(!ENDPOINT_TABS.some(t=>t[0]===tab))tab='openai';
-  header('Endpoint & keys');
+  header('Endpoint');
   v.append(el('div',{class:'tabs',role:'tablist'},ENDPOINT_TABS.map(([k,n])=>
     el('a',{role:'tab',href:'#/endpoint/'+k,'aria-selected':String(k===tab),class:k===tab?'on':''},n,
       k==='keys'&&S.keys.length?el('span',{class:'ct',text:String(S.keys.length)}):null))));
@@ -956,7 +956,7 @@ const DOCS=[
       dt('h2','Rotation and failover'),
       dt('p','Requests for a model rotate across the active accounts that serve it. When an account answers 429, 500, 503 or 409, intact tries the next one. An OAuth account that answers 401 is refreshed and retried once. Turn an account off on its provider page to take it out of rotation.'),
       dt('h2','Keys'),
-      dt('p','Create API keys under Endpoint & keys. Send one as ',dc('Authorization: Bearer <key>'),' or ',dc('x-api-key: <key>'),'. The same key works for ',dc('/v1'),', the management API ',dc('/api'),' and the MCP server ',dc('/mcp'),'.'),
+      dt('p','Create API keys under Endpoint → API keys. Send one as ',dc('Authorization: Bearer <key>'),' or ',dc('x-api-key: <key>'),'. The same key works for ',dc('/v1'),', the management API ',dc('/api'),' and the MCP server ',dc('/mcp'),'.'),
     ];
   }},
   {id:'blacklist',title:'Blacklist',body:()=>{

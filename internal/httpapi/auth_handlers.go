@@ -12,22 +12,24 @@ import (
 const loginPage = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>intact — sign in</title>
 <style>
-:root{color-scheme:dark;--bg:#0f1115;--card:#161a22;--line:#2a3040;--fg:#e6e9ef;--muted:#8b94a5;--accent:#3b82f6;--err:#f87171}
+:root{color-scheme:dark;--bg:#0c1017;--card:#141a25;--line:#232d3d;--fg:#e4e9f1;--muted:#95a0b3;--accent:#8b80f9;--mint:#5eead4;--err:#fb7185}
 *{box-sizing:border-box}
 body{font:15px system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:var(--bg);color:var(--fg);display:grid;place-items:center;min-height:100vh;padding:1rem}
 .card{background:var(--card);border:1px solid var(--line);padding:2rem 1.75rem;border-radius:14px;width:min(23rem,94vw);text-align:center}
-h1{font-size:1.05rem;font-weight:600;margin:0 0 .3rem}
+h1{font-size:1.6rem;font-weight:800;letter-spacing:-.03em;margin:.6rem 0 .3rem;background:linear-gradient(90deg,var(--fg) 20%,var(--mint));-webkit-background-clip:text;background-clip:text;color:transparent}
+.logo{display:inline-block;filter:drop-shadow(0 6px 18px rgba(124,108,246,.45))}
 p{color:var(--muted);font-size:.85rem;margin:0 0 1.5rem}
 .otp{display:flex;gap:.5rem;justify-content:center}
 .otp input{width:3rem;height:3.5rem;text-align:center;font-size:1.4rem;font-weight:600;color:var(--fg);
   background:var(--bg);border:1px solid var(--line);border-radius:10px;transition:border-color .15s,box-shadow .15s}
-.otp input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(59,130,246,.25)}
+.otp input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(139,128,249,.25)}
 .otp.err input{border-color:var(--err)}
 .msg{color:var(--err);font-size:.82rem;min-height:1.2em;margin-top:1rem}
 @media (prefers-reduced-motion:no-preference){.otp.err{animation:shake .3s}}
 @keyframes shake{25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
 </style></head><body>
 <div class="card">
+  <span class="logo"><svg viewBox="0 0 32 32" width="52" height="52" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c6cf6"/><stop offset="1" stop-color="#2dd4bf"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><path d="M16 6.5 24 9.6v6.1c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V9.6Z" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/><path d="m12.4 16.2 2.6 2.6 4.8-5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
   <h1>intact</h1>
   <p>Enter the 6-digit code from your authenticator</p>
   <form id="f" method="post" action="/login">

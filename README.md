@@ -94,7 +94,7 @@ To enroll:
 | `POST/GET /p/{id}/{path...}` | bearer token | Proxy to one account. |
 | `POST/GET /r/{provider}/{path...}` | bearer token | Round-robin across a provider's active accounts, with failover. |
 | `POST/GET /g/{group}/{path...}` | bearer token | Round-robin or fallback across a group's active members, with failover. |
-| `GET /` | session | The dashboard. |
+| `GET /` | session | The dashboard: Endpoint, Providers (accounts and models per provider), Combos, Usage. |
 | `GET /accounts` | session | The connection list as JSON. |
 | `POST /accounts` | session | Add a connection (`provider`, `label`, `secret`). |
 | `POST /accounts/{id}/delete` | session | Delete a connection. |
@@ -109,17 +109,22 @@ To enroll:
 
 ## Groups
 
-A group pools connections behind one name. Its members can belong to different
-providers, so a group can spread load over, say, two groq keys, an nvidia key
-and an openrouter key.
+A group (a "combo" in the dashboard) pools models behind one name. Its members
+can belong to different providers, so a combo can spread load over groq, nvidia
+and openrouter at once.
 
 ```json
 POST /groups
 {"name": "free-llama", "strategy": "round-robin", "members": [
-  {"connectionId": "…groq-1…"},
-  {"connectionId": "…nvidia…", "model": "meta/llama-3.3-70b-instruct"}
+  {"provider": "groq", "model": "llama-3.3-70b-versatile"},
+  {"provider": "nvidia", "model": "meta/llama-3.3-70b-instruct"},
+  {"connectionId": "…one openrouter account…", "model": "meta-llama/llama-3.3-70b-instruct:free"}
 ]}
 ```
+
+- **Members.** A member with a `provider` and no `connectionId` uses every
+  active account of that provider, rotated like `/r`. A member with a
+  `connectionId` is pinned to that account.
 
 - **Strategy.** `round-robin` rotates the first member tried on each call.
   `fallback` always tries the members in order, so the first takes the load and
@@ -129,9 +134,8 @@ POST /groups
   for that member only. The value is spliced into the original bytes, so every
   other byte of the body is sent as the caller wrote it. A member with no model
   gets the body unchanged.
-- **Skipped members.** An inactive connection, or one whose provider this build
-  does not register, is skipped. Deleting a connection removes it from every
-  group.
+- **Skipped members.** An inactive connection, or a provider this build does
+  not register, is skipped. Deleting a connection removes its pinned members.
 - **Protocols.** intact does not translate between APIs. Put only members that
   accept the same request shape in one group (all OpenAI-compatible, or all
   Anthropic). The dashboard warns when a group mixes them.

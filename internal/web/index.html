@@ -4,255 +4,251 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>intact</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32' aria-hidden='true'%3E%3Cdefs%3E%3ClinearGradient id='lg' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%237c6cf6'/%3E%3Cstop offset='1' stop-color='%232dd4bf'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23lg)'/%3E%3Cpath d='M16 6.5 24 9.6v6.1c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V9.6Z' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linejoin='round'/%3E%3Cpath d='m12.4 16.2 2.6 2.6 4.8-5' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
-  :root{color-scheme:dark;--bg:#0d0f14;--card:#151922;--card2:#1b2030;--line:#262c3b;--fg:#e6e9ef;
-        --muted:#9aa3b2;--faint:#6b7486;--accent:#3b82f6;--accent-soft:rgba(59,130,246,.14);--accent-fg:#fff;
-        --ok:#4ade80;--ok-soft:rgba(74,222,128,.12);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.12);
-        --err:#f87171;--err-soft:rgba(248,113,113,.12);--code:#7dd3fc;--shadow:0 10px 30px rgba(0,0,0,.35)}
-  @media (prefers-color-scheme:light){:root{color-scheme:light;--bg:#f5f6f9;--card:#fff;--card2:#f0f2f6;
-        --line:#e1e4ea;--fg:#151922;--muted:#5b6475;--faint:#8a92a1;--accent:#2563eb;--accent-soft:rgba(37,99,235,.1);
-        --ok:#15803d;--ok-soft:rgba(21,128,61,.1);--warn:#b45309;--warn-soft:rgba(180,83,9,.1);--err:#dc2626;
-        --err-soft:rgba(220,38,38,.08);--code:#0369a1;--shadow:0 10px 30px rgba(15,23,42,.12)}}
+  :root{color-scheme:dark;--bg:#0c1017;--side:#10151e;--card:#141a25;--card2:#1b2331;--line:#232d3d;--fg:#e4e9f1;
+        --muted:#95a0b3;--faint:#657086;--accent:#8b80f9;--accent-strong:#6c5ce7;--accent-soft:rgba(139,128,249,.15);
+        --accent-fg:#fff;--mint:#5eead4;--ok:#4ade80;--ok-soft:rgba(74,222,128,.12);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.1);
+        --err:#fb7185;--err-soft:rgba(251,113,133,.12);--code:#5eead4;--shadow:0 20px 50px rgba(0,0,0,.55)}
+  @media (prefers-color-scheme:light){:root{color-scheme:light;--bg:#f3f5f9;--side:#fff;--card:#fff;--card2:#eef1f6;
+        --line:#dfe4ec;--fg:#141a25;--muted:#526076;--faint:#8591a5;--accent:#5b4bdb;--accent-strong:#5b4bdb;
+        --accent-soft:rgba(91,75,219,.1);--mint:#0f9488;--ok:#15803d;--ok-soft:rgba(21,128,61,.1);--warn:#b45309;
+        --warn-soft:rgba(180,83,9,.08);--err:#e11d48;--err-soft:rgba(225,29,72,.08);--code:#0f766e;--shadow:0 20px 50px rgba(20,26,37,.14)}}
   *{box-sizing:border-box}
-  body{font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:var(--bg);color:var(--fg)}
-  header.top{display:flex;align-items:center;gap:1rem;padding:.75rem 1.25rem;border-bottom:1px solid var(--line);
-         position:sticky;top:0;background:var(--bg);z-index:5}
-  .brand{font-weight:700;letter-spacing:.02em;margin-right:.5rem}
-  nav{display:flex;gap:.25rem;flex:1;overflow-x:auto}
-  nav button{background:transparent;color:var(--muted);border:0;border-radius:8px;padding:.45rem .8rem;min-height:36px;font-weight:500}
-  nav button[aria-selected="true"]{background:var(--accent-soft);color:var(--fg)}
-  nav .count{color:var(--faint);font-weight:400;margin-left:.3rem;font-variant-numeric:tabular-nums}
-  main{max-width:68rem;margin:0 auto;padding:1.25rem;display:grid;gap:1.25rem}
-  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.75rem}
-  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:.85rem 1rem}
-  .stat .k{color:var(--muted);font-size:.75rem}
-  .stat .v{font-size:1.35rem;font-weight:600;font-variant-numeric:tabular-nums}
-  .stat .v small{font-size:.8rem;color:var(--faint);font-weight:400}
-  .bar{display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap}
-  .bar>div:first-child{flex:1;min-width:14rem}
-  .acts{display:flex;gap:.35rem;flex:none;margin-left:auto}
-  svg.i{width:14px;height:14px;display:block}
-  h2{font-size:1rem;font-weight:600;margin:0}
-  p.sub{margin:.2rem 0 0;color:var(--muted);font-size:.82rem}
+  html,body{height:100%}
+  body{font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:var(--bg);color:var(--fg);
+       display:grid;grid-template-columns:15rem 1fr}
+  aside{background:var(--side);border-right:1px solid var(--line);padding:1.1rem .75rem;display:flex;flex-direction:column;
+        gap:.25rem;position:sticky;top:0;height:100vh}
+  .brand{display:flex;align-items:center;gap:.7rem;padding:.35rem .5rem 1.25rem;margin-bottom:.5rem;border-bottom:1px solid var(--line);text-decoration:none}
+  .logo{width:40px;height:40px;flex:none;filter:drop-shadow(0 4px 14px rgba(124,108,246,.45))}
+  .logo svg{width:100%;height:100%;display:block}
+  .brand b{display:block;font-size:1.45rem;font-weight:800;letter-spacing:-.03em;line-height:1.1;
+          background:linear-gradient(90deg,var(--fg) 20%,var(--mint));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .brand small{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.02em}
+  aside a{display:flex;align-items:center;gap:.65rem;padding:.5rem .7rem;border-radius:8px;color:var(--muted);
+          text-decoration:none;font-size:.88rem}
+  aside a:hover{color:var(--fg);background:var(--card2)}
+  aside a.brand:hover{background:none}
+  aside a[aria-current="page"]{background:var(--accent-soft);color:var(--accent)}
+  aside a .ct{margin-left:auto;font-size:.72rem;color:var(--faint);font-variant-numeric:tabular-nums}
+  aside nav{display:grid;gap:.25rem}
+  aside .spacer{flex:1}
+  aside form button{width:100%;justify-content:flex-start}
+  svg.i{width:18px;height:18px;flex:none}
+  svg.s{width:14px;height:14px;flex:none}
+  .page{min-width:0;display:flex;flex-direction:column}
+  .ph{display:flex;align-items:center;gap:.75rem;padding:1.1rem 2rem;border-bottom:1px solid var(--line);min-height:4.5rem}
+  .ph h1{font-size:1.25rem;margin:0;font-weight:650}
+  .ph p{margin:0;color:var(--muted);font-size:.85rem}
+  .crumb{color:var(--muted);text-decoration:none}
+  .crumb:hover{color:var(--fg)}
+  .content{padding:1.5rem 2rem 3rem;max-width:76rem;width:100%;display:grid;gap:1.5rem;align-content:start}
+  h2{font-size:1.02rem;margin:0;font-weight:600}
+  .sec{display:grid;gap:.85rem}
+  .sech{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px}
-  .card>.head{padding:.85rem 1rem;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
-  .card>.head .title{font-weight:600;font-size:.95rem}
-  .card>.head .grow{flex:1}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(20rem,1fr));gap:1rem}
+  .card.pad{padding:1.1rem 1.25rem}
+  .cardh{display:flex;align-items:center;gap:.75rem;padding:.9rem 1.25rem;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .cardh .grow{min-width:min(12rem,100%)}
+  .grow{flex:1}
+  .muted{color:var(--muted)}.faint{color:var(--faint)}.small{font-size:.8rem}
   code,.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.8rem}
   code{color:var(--code)}
-  .endpoint{display:inline-flex;align-items:center;gap:.35rem;background:var(--card2);border:1px solid var(--line);
-            border-radius:7px;padding:.15rem .25rem .15rem .5rem;max-width:100%}
-  .endpoint code{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .badge{display:inline-flex;align-items:center;gap:.25rem;font-size:.72rem;font-weight:500;border-radius:999px;
-         padding:.1rem .5rem;background:var(--card2);color:var(--muted);border:1px solid var(--line);white-space:nowrap}
-  .badge.accent{background:var(--accent-soft);color:var(--accent);border-color:transparent}
-  .badge.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
-  .badge.warn{background:var(--warn-soft);color:var(--warn);border-color:transparent}
-  .badge.err{background:var(--err-soft);color:var(--err);border-color:transparent}
-  ol.members{list-style:none;margin:0;padding:.35rem 0}
-  ol.members li{display:flex;align-items:center;gap:.55rem;padding:.45rem 1rem}
-  ol.members .n{width:1.3rem;height:1.3rem;border-radius:50%;background:var(--card2);color:var(--muted);font-size:.7rem;
-                display:grid;place-items:center;flex:none;font-variant-numeric:tabular-nums}
-  ol.members .who{min-width:0;flex:1}
-  ol.members .who div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .muted{color:var(--muted)}.faint{color:var(--faint)}
-  .off{opacity:.5}
-  .warnline{margin:0 1rem .8rem;padding:.5rem .7rem;border-radius:8px;background:var(--warn-soft);color:var(--warn);font-size:.8rem}
+  .pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:.75rem}
+  .pcard{display:flex;align-items:center;gap:.75rem;padding:.85rem 1rem;background:var(--card);border:1px solid var(--line);
+         border-radius:11px;text-decoration:none;color:inherit;min-width:0}
+  .pcard:hover{border-color:var(--accent)}
+  .pcard.dim{opacity:.55}
+  .pcard .nm{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .av{width:36px;height:36px;border-radius:9px;display:grid;place-items:center;font-weight:700;font-size:.85rem;color:#fff;flex:none}
+  .av.sm{width:22px;height:22px;border-radius:6px;font-size:.62rem}
+  .status{display:inline-flex;align-items:center;gap:.3rem;font-size:.72rem;color:var(--faint)}
+  .status.on{color:var(--ok)}
+  .status.on::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+  .badge{display:inline-flex;align-items:center;gap:.25rem;font-size:.7rem;font-weight:500;border-radius:6px;
+         padding:.05rem .45rem;background:var(--card2);color:var(--muted);white-space:nowrap}
+  .badge.ok{background:var(--ok-soft);color:var(--ok)}
+  .badge.warn{background:var(--warn-soft);color:var(--warn)}
+  .badge.accent{background:var(--accent-soft);color:var(--accent)}
+  .notice{padding:.7rem 1rem;border-radius:10px;background:var(--warn-soft);color:var(--warn);font-size:.85rem}
+  .row{display:flex;align-items:center;gap:.85rem;padding:.8rem 1.25rem;border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:0}
+  .row .who{flex:1;min-width:0}
+  .row .who .l{font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .meta{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-top:.15rem}
+  .row.off .who{opacity:.5}
+  .idx{color:var(--faint);font-size:.75rem;min-width:1.5rem;text-align:right;font-variant-numeric:tabular-nums;flex:none}
+  .chips{display:flex;flex-wrap:wrap;gap:.4rem}
+  .chip{display:inline-flex;align-items:center;gap:.35rem;background:var(--card2);border:1px solid var(--line);border-radius:8px;
+        padding:.25rem .55rem;font-size:.8rem;max-width:100%;color:var(--fg)}
+  .chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  button.chip{cursor:pointer;min-height:0}
+  button.chip:hover{border-color:var(--accent)}
+  button.chip.on{border-color:var(--accent);background:var(--accent-soft)}
+  .copyline{display:flex;align-items:center;gap:.5rem;background:var(--bg);border:1px solid var(--line);border-radius:9px;
+            padding:.3rem .3rem .3rem .75rem;min-width:0}
+  .copyline code{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg);font-size:.85rem}
+  .kv{display:grid;grid-template-columns:7rem 1fr;gap:.6rem 1rem;align-items:center}
+  .kv .k{color:var(--muted);font-size:.8rem}
+  pre{margin:0;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:.85rem 1rem;overflow:auto;
+      font:.8rem/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
   table{border-collapse:collapse;width:100%}
-  th,td{text-align:left;padding:.55rem 1rem;border-bottom:1px solid var(--line);vertical-align:middle}
+  th,td{text-align:left;padding:.6rem 1.25rem;border-bottom:1px solid var(--line)}
   tr:last-child td{border-bottom:0}
   th{color:var(--muted);font-weight:500;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
   .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-  tr.total td{background:var(--card2);font-weight:600}
   .scroll{overflow-x:auto}
-  button{font:inherit;min-height:36px;padding:.4rem .8rem;border:0;border-radius:8px;cursor:pointer}
-  button.primary{background:var(--accent);color:var(--accent-fg);font-weight:600}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:.75rem}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:.9rem 1.1rem}
+  .stat .k{color:var(--muted);font-size:.78rem}
+  .stat .v{font-size:1.45rem;font-weight:650;font-variant-numeric:tabular-nums}
+  .empty{display:grid;place-items:center;gap:.5rem;text-align:center;padding:2.5rem 1rem;color:var(--muted)}
+  .empty .ic{width:52px;height:52px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center}
+  .empty b{color:var(--fg)}
+  button{font:inherit;min-height:36px;padding:.4rem .85rem;border:0;border-radius:8px;cursor:pointer;display:inline-flex;
+         align-items:center;gap:.4rem;justify-content:center}
+  button.primary{background:var(--accent-strong);color:var(--accent-fg);font-weight:600}
+  button.primary:hover{filter:brightness(1.07)}
   button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
-  button.ghost:hover{color:var(--fg)}
-  button.danger{background:transparent;color:var(--err);border:1px solid var(--line)}
-  button.icon{min-height:28px;min-width:28px;padding:.15rem .4rem;background:transparent;color:var(--muted);border:1px solid transparent}
-  button.icon:hover{border-color:var(--line);color:var(--fg)}
-  button:disabled{opacity:.4;cursor:default}
-  input,select{font:inherit;padding:.5rem .6rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);min-height:38px;width:100%}
-  input:focus,select:focus,button:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-  label.f{display:grid;gap:.3rem;font-size:.8rem;color:var(--muted)}
-  .switch{position:relative;width:38px;height:22px;flex:none}
+  button.ghost:hover{color:var(--fg);border-color:var(--faint)}
+  button.plain{background:transparent;color:var(--muted)}
+  button.plain:hover{color:var(--fg);background:var(--card2)}
+  button.danger{background:transparent;color:var(--err)}
+  button.danger:hover{background:var(--err-soft)}
+  button.icon{min-height:30px;min-width:30px;padding:.2rem;background:transparent;color:var(--muted)}
+  button.icon:hover{color:var(--fg);background:var(--card2)}
+  button:disabled{opacity:.35;cursor:default;pointer-events:none}
+  input,select{font:inherit;padding:.5rem .7rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);
+               min-height:38px;width:100%}
+  input:focus,select:focus,button:focus-visible,a:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  label.f,div.f{display:grid;gap:.35rem;font-size:.82rem;font-weight:500}
+  .hint{font-size:.75rem;color:var(--faint);font-weight:400}
+  .search{position:relative;max-width:18rem;width:100%}
+  .search svg{position:absolute;left:.6rem;top:50%;transform:translateY(-50%);color:var(--faint)}
+  .search input{padding-left:2rem}
+  .switch{position:relative;width:38px;height:22px;flex:none;display:inline-block}
   .switch input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer;min-height:0}
   .switch span{position:absolute;inset:0;border-radius:999px;background:var(--line);transition:background .15s;pointer-events:none}
   .switch span::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}
-  .switch input:checked+span{background:var(--ok)}
+  .switch input:checked+span{background:var(--accent-strong)}
   .switch input:checked+span::after{transform:translateX(16px)}
   .switch input:focus-visible+span{box-shadow:0 0 0 3px var(--accent-soft)}
-  .acc{display:flex;align-items:center;gap:.75rem;padding:.6rem 1rem;border-bottom:1px solid var(--line)}
-  .acc:last-child{border-bottom:0}
-  .acc .who{flex:1;min-width:0}
-  .acc .who .l{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .acc .tags{display:flex;gap:.3rem;flex-wrap:wrap;margin-top:.2rem}
-  .acc .act{display:flex;gap:.35rem;align-items:center}
-  .empty{color:var(--muted);padding:1.5rem 1rem;text-align:center}
-  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:1rem;z-index:20}
-  .modal{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);
-         width:min(40rem,100%);max-height:88vh;display:flex;flex-direction:column}
-  .modal.sm{width:min(28rem,100%)}
-  .modal>.mh{display:flex;justify-content:space-between;align-items:center;padding:.9rem 1.1rem;border-bottom:1px solid var(--line)}
-  .modal>.mb{padding:1rem 1.1rem;overflow:auto;display:grid;gap:1rem}
-  .modal>.mf{display:flex;justify-content:flex-end;gap:.5rem;padding:.8rem 1.1rem;border-top:1px solid var(--line)}
-  .row2{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
-  .seg{display:flex;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:3px;gap:3px}
-  .seg label{flex:1;text-align:center;padding:.35rem .5rem;border-radius:6px;cursor:pointer;color:var(--muted);font-size:.82rem}
-  .seg input{position:absolute;opacity:0;width:0;height:0}
-  .seg label:has(input:checked){background:var(--accent-soft);color:var(--fg)}
-  .seg label:has(input:focus-visible){box-shadow:0 0 0 2px var(--accent)}
-  .hint{font-size:.78rem;color:var(--faint);margin:.25rem 0 0}
-  .sel{border:1px solid var(--line);border-radius:10px;overflow:hidden}
-  .sel .it{display:grid;grid-template-columns:auto 1fr 12rem auto;align-items:center;gap:.5rem;padding:.45rem .6rem;border-bottom:1px solid var(--line)}
-  .sel .it:last-child{border-bottom:0}
-  .sel .it input{min-height:32px;padding:.3rem .5rem;font-size:.8rem}
-  .sel .it .mv{display:flex}
-  .pick{border:1px solid var(--line);border-radius:10px;max-height:16rem;overflow:auto}
-  .pick .ph{display:flex;justify-content:space-between;align-items:center;padding:.4rem .7rem;background:var(--card2);
-            font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;position:sticky;top:0}
-  .pick .ph button{min-height:24px;padding:0 .5rem;font-size:.72rem;text-transform:none;letter-spacing:0}
-  .pick label{display:flex;align-items:center;gap:.55rem;padding:.4rem .7rem;cursor:pointer}
-  .pick label:hover{background:var(--card2)}
-  .pick input{width:auto;min-height:0}
+  .seg{display:inline-flex;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:3px;gap:2px}
+  .seg button{min-height:28px;padding:.2rem .7rem;font-size:.8rem;background:transparent;color:var(--muted);border-radius:6px}
+  .seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(3px);display:grid;place-items:center;padding:1rem;z-index:20}
+  .modal{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);width:min(36rem,100%);
+         max-height:90vh;display:flex;flex-direction:column}
+  .modal.sm{width:min(26rem,100%)}
+  .mh{display:flex;justify-content:space-between;align-items:center;padding:1rem 1.25rem;border-bottom:1px solid var(--line)}
+  .mh strong{font-size:1rem}
+  .mb{padding:1.1rem 1.25rem;overflow:auto;display:grid;grid-template-columns:minmax(0,1fr);gap:1rem}
+  label.f>*,div.f>*{min-width:0}
+  .mf{display:flex;justify-content:flex-end;gap:.5rem;padding:.85rem 1.25rem;border-top:1px solid var(--line)}
+  .mlist{border:1px solid var(--line);border-radius:10px}
+  .mlist .row{padding:.55rem .75rem;gap:.55rem}
+  .mlist select{min-height:30px;padding:.2rem .4rem;font-size:.78rem;width:auto;max-width:10rem}
+  .dash{border:1px dashed var(--line);border-radius:10px;padding:1.1rem;display:grid;place-items:center;gap:.3rem;color:var(--muted);font-weight:400}
+  button.add{width:100%;border:1px dashed var(--line);background:transparent;color:var(--accent);font-weight:600}
+  button.add:hover{border-color:var(--accent)}
+  .pick{display:grid;gap:1.1rem}
+  .pick .grp{display:grid;gap:.5rem}
+  .pick .gh{display:flex;align-items:center;gap:.5rem;font-weight:600;font-size:.85rem}
+  .pick .gh .ct{color:var(--faint);font-weight:400;font-size:.75rem}
+  .info{padding:.6rem .8rem;border-radius:9px;background:var(--accent-soft);color:var(--fg);font-size:.8rem}
   .err-msg{color:var(--err);font-size:.82rem;min-height:1.2em}
-  .toast{position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);background:var(--card2);border:1px solid var(--line);
-         box-shadow:var(--shadow);padding:.55rem .9rem;border-radius:10px;font-size:.85rem;z-index:30}
-  .models li{padding:.35rem 0;border-bottom:1px solid var(--line)}
-  .models ul{list-style:none;margin:0;padding:0}
+  .toast{position:fixed;bottom:1.25rem;left:50%;transform:translateX(-50%);background:var(--card2);border:1px solid var(--line);
+         box-shadow:var(--shadow);padding:.55rem 1rem;border-radius:10px;font-size:.85rem;z-index:30;max-width:90vw}
   [hidden]{display:none!important}
-  @media (max-width:640px){
-    header.top{padding:.6rem .75rem;gap:.5rem}
-    .brand{display:none}
-    nav button{padding:.45rem .6rem}
-    main{padding:1rem .75rem}
-    .row2{grid-template-columns:1fr}
-    .sel .it{grid-template-columns:auto 1fr auto}
-    .sel .it input{grid-column:2/4}
-    .acc{flex-wrap:wrap}
-    .grid{grid-template-columns:1fr}
+  @media (max-width:820px){
+    body{grid-template-columns:1fr}
+    aside{position:sticky;top:0;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;padding:.55rem .75rem .4rem;gap:.3rem;
+          border-right:0;border-bottom:1px solid var(--line);z-index:10}
+    aside nav{order:3;flex:1 0 100%;display:flex;gap:.15rem;overflow-x:auto;margin:0 -.25rem}
+    .brand{padding:0 .5rem 0 0;margin:0;border:0}.brand small{display:none}.brand b{font-size:1.15rem}.logo{width:30px;height:30px}
+    aside a{padding:.45rem .6rem;white-space:nowrap}
+    aside a .ct,aside a svg{display:none}
+    aside .spacer{flex:1}
+    aside form button{width:auto}
+    aside form button span{display:none}
+    .ph{padding:1rem;flex-wrap:wrap}
+    .content{padding:1rem 1rem 2.5rem}
+    .row{padding:.7rem 1rem;flex-wrap:wrap}
+    .mlist .row{flex-wrap:nowrap}
+    .mlist select{max-width:7.5rem}
+    .kv{grid-template-columns:1fr}
+    .kv .k{margin-bottom:-.35rem}
   }
 </style>
 </head>
 <body>
-<header class="top">
-  <span class="brand">intact</span>
-  <nav role="tablist">
-    <button role="tab" data-tab="groups" aria-selected="true">Groups<span class="count" id="nGroups"></span></button>
-    <button role="tab" data-tab="accounts" aria-selected="false">Accounts<span class="count" id="nAccounts"></span></button>
-    <button role="tab" data-tab="usage" aria-selected="false">Usage</button>
+<aside>
+  <a class="brand" href="#/providers" aria-label="intact home"><span class="logo"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c6cf6"/><stop offset="1" stop-color="#2dd4bf"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><path d="M16 6.5 24 9.6v6.1c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V9.6Z" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/><path d="m12.4 16.2 2.6 2.6 4.8-5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div><b>intact</b><small>credential proxy</small></div></a>
+  <nav>
+  <a href="#/endpoint" data-nav="endpoint"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h16M12 4v16"/><circle cx="12" cy="12" r="8"/></svg>Endpoint</a>
+  <a href="#/providers" data-nav="providers"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/></svg>Providers<span class="ct" id="ctProv"></span></a>
+  <a href="#/combos" data-nav="combos"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="m3 13 9 5 9-5"/></svg>Combos<span class="ct" id="ctCombo"></span></a>
+  <a href="#/usage" data-nav="usage"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Usage</a>
   </nav>
-  <form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form>
-</header>
+  <div class="spacer"></div>
+  <form method="post" action="/logout"><button class="plain" type="submit"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 12H4m0 0 4-4m-4 4 4 4M13 4h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5"/></svg><span>Sign out</span></button></form>
+</aside>
 
-<main>
-  <div class="stats">
-    <div class="stat"><div class="k">Active accounts</div><div class="v" id="sAcc">–</div></div>
-    <div class="stat"><div class="k">Groups</div><div class="v" id="sGrp">–</div></div>
-    <div class="stat"><div class="k">Requests today</div><div class="v" id="sReq">–</div></div>
-    <div class="stat"><div class="k">Tokens today</div><div class="v" id="sTok">–</div></div>
-  </div>
-
-  <section id="tab-groups" class="tab">
-    <div class="bar" style="margin-bottom:1rem">
-      <div>
-        <h2>Groups</h2>
-        <p class="sub">A group pools accounts from one or several providers. Call <code>/g/&lt;name&gt;/…</code> with your bearer token; intact picks a member and fails over on 429/500/503/409.</p>
-      </div>
-      <button class="primary" type="button" id="newGroup">New group</button>
-    </div>
-    <div class="grid" id="groups"><div class="empty">Loading…</div></div>
-  </section>
-
-  <section id="tab-accounts" class="tab" hidden>
-    <div class="bar" style="margin-bottom:1rem">
-      <div>
-        <h2>Accounts</h2>
-        <p class="sub">Credentials stay on this host. One account: <code>/p/&lt;id&gt;/…</code> · every active account of a provider: <code>/r/&lt;provider&gt;/…</code></p>
-      </div>
-      <button class="primary" type="button" id="newAccount">Add account</button>
-    </div>
-    <div style="display:grid;gap:1rem" id="accounts"><div class="empty">Loading…</div></div>
-  </section>
-
-  <section id="tab-usage" class="tab" hidden>
-    <div class="bar" style="margin-bottom:1rem">
-      <div>
-        <h2>Usage</h2>
-        <p class="sub">Daily token totals per account and model, read from the responses that passed through.</p>
-      </div>
-    </div>
-    <div class="card scroll">
-      <table>
-        <thead><tr><th>Day</th><th>Account</th><th>Model</th><th class="num">Input</th><th class="num">Output</th><th class="num">Requests</th></tr></thead>
-        <tbody id="usage"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
-      </table>
-    </div>
-  </section>
-</main>
-
-<!-- group editor -->
-<div id="gModal" class="overlay" hidden>
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="gTitle">
-    <div class="mh"><strong id="gTitle">New group</strong><button class="icon" type="button" data-close aria-label="Close">✕</button></div>
-    <div class="mb">
-      <div class="row2">
-        <label class="f">Name
-          <input id="gName" placeholder="e.g. fast-llama" autocomplete="off" spellcheck="false">
-          <span class="hint">Lowercase letters, digits, - and _. Used in the URL.</span>
-        </label>
-        <div class="f" style="display:grid;gap:.3rem;font-size:.8rem;color:var(--muted)">Strategy
-          <div class="seg" role="radiogroup" aria-label="Strategy">
-            <label><input type="radio" name="gStrat" value="round-robin" checked>Round-robin</label>
-            <label><input type="radio" name="gStrat" value="fallback">Fallback</label>
-          </div>
-          <span class="hint" id="gStratHint"></span>
-        </div>
-      </div>
-      <div>
-        <div class="bar" style="margin-bottom:.4rem"><strong style="font-size:.85rem">Members <span class="faint" id="gCount"></span></strong>
-          <span class="hint" style="margin:0">Model override is optional — set it when the provider names the model differently.</span></div>
-        <div class="sel" id="gSel"></div>
-      </div>
-      <div>
-        <strong style="font-size:.85rem;display:block;margin-bottom:.4rem">Add accounts</strong>
-        <div class="pick" id="gPick"></div>
-      </div>
-      <div class="err-msg" id="gErr"></div>
-    </div>
-    <div class="mf">
-      <button class="ghost" type="button" data-close>Cancel</button>
-      <button class="primary" type="button" id="gSave">Save group</button>
-    </div>
-  </div>
+<div class="page">
+  <div class="ph" id="ph"></div>
+  <div class="content" id="view"></div>
 </div>
 
 <!-- add account -->
 <div id="aModal" class="overlay" hidden>
   <div class="modal sm" role="dialog" aria-modal="true" aria-labelledby="aTitle">
-    <div class="mh"><strong id="aTitle">Add account</strong><button class="icon" type="button" data-close aria-label="Close">✕</button></div>
+    <div class="mh"><strong id="aTitle">Add connection</strong><button class="icon" type="button" data-close aria-label="Close">✕</button></div>
     <form id="aForm">
       <div class="mb">
-        <label class="f">Provider<select name="provider" id="aProv" required></select></label>
-        <label class="f">Label<input name="label" placeholder="e.g. Work key" autocomplete="off"></label>
-        <label class="f">API key / secret<input name="secret" type="password" required autocomplete="off"></label>
+        <input type="hidden" name="provider" id="aProv">
+        <label class="f">Name<input name="label" placeholder="e.g. Work key" autocomplete="off"></label>
+        <label class="f">API key<input name="secret" type="password" required autocomplete="off"></label>
         <div class="err-msg" id="aErr"></div>
       </div>
-      <div class="mf">
-        <button class="ghost" type="button" data-close>Cancel</button>
-        <button class="primary" type="submit">Add account</button>
-      </div>
+      <div class="mf"><button class="ghost" type="button" data-close>Cancel</button><button class="primary" type="submit">Save</button></div>
     </form>
   </div>
 </div>
 
-<!-- models -->
-<div id="mModal" class="overlay" hidden>
-  <div class="modal sm" role="dialog" aria-modal="true" aria-labelledby="mTitle">
-    <div class="mh"><strong id="mTitle">Models</strong><button class="icon" type="button" data-close aria-label="Close">✕</button></div>
-    <div class="mb models" id="mBody"></div>
+<!-- combo editor -->
+<div id="cModal" class="overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="cTitle">
+    <div class="mh"><strong id="cTitle">Create combo</strong><button class="icon" type="button" data-close aria-label="Close">✕</button></div>
+    <div class="mb">
+      <label class="f">Combo name
+        <input id="cName" placeholder="my-combo" autocomplete="off" spellcheck="false">
+        <span class="hint">Lowercase letters, digits, - and _. Callers use it in the URL: <code id="cUrl">/g/…/</code></span>
+      </label>
+      <div class="f">Strategy
+        <div><span class="seg" id="cStrat"></span></div>
+        <span class="hint" id="cStratHint"></span>
+      </div>
+      <div class="f">Models
+        <div id="cList"></div>
+        <button class="add" type="button" id="cAdd">+ Add model</button>
+      </div>
+      <div class="err-msg" id="cErr"></div>
+    </div>
+    <div class="mf"><button class="ghost" type="button" data-close>Cancel</button><button class="primary" type="button" id="cSave">Save</button></div>
+  </div>
+</div>
+
+<!-- model picker -->
+<div id="pModal" class="overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pTitle">
+    <div class="mh"><strong id="pTitle">Add model to combo</strong><button class="icon" type="button" id="pDone" aria-label="Done">✕</button></div>
+    <div class="mb">
+      <div class="info">Click a model to add it, click again to remove it. A model runs on every active account of its provider, in turn.</div>
+      <div class="search" style="max-width:none"><svg class="s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="pSearch" placeholder="Search models…" autocomplete="off"></div>
+      <div class="pick" id="pBody"></div>
+    </div>
+    <div class="mf"><button class="primary" type="button" id="pDone2">Done</button></div>
   </div>
 </div>
 
@@ -265,65 +261,86 @@ const $=id=>document.getElementById(id);
 function el(tag,props,...kids){
   const e=document.createElement(tag);
   for(const [k,v] of Object.entries(props||{})){
+    if(v===false||v==null)continue;
     if(k==='class')e.className=v; else if(k==='text')e.textContent=v;
-    else if(k.startsWith('on'))e.addEventListener(k.slice(2),v); else if(v!==false&&v!=null)e.setAttribute(k,v===true?'':v);
+    else if(k.startsWith('on'))e.addEventListener(k.slice(2),v); else e.setAttribute(k,v===true?'':v);
   }
   for(const c of kids.flat())if(c!=null&&c!==false)e.append(c);
   return e;
 }
+function svg(paths,cls){
+  const ns='http://www.w3.org/2000/svg',s=document.createElementNS(ns,'svg');
+  s.setAttribute('viewBox','0 0 24 24');s.setAttribute('class',cls||'s');s.setAttribute('fill','none');
+  s.setAttribute('stroke','currentColor');s.setAttribute('stroke-width','2');s.setAttribute('aria-hidden','true');
+  for(const d of paths){const p=document.createElementNS(ns,'path');p.setAttribute('d',d);s.append(p)}
+  return s;
+}
+const ICON={copy:['M9 9h11v11H9z','M5 15H4V4h11v1'],up:['m6 15 6-6 6 6'],down:['m6 9 6 6 6-6'],x:['M6 6l12 12M18 6 6 18'],
+  trash:['M4 7h16','M10 11v6M14 11v6','M6 7l1 13h10l1-13','M9 7V4h6v3'],edit:['M4 20h4L19 9l-4-4L4 16v4Z'],
+  plus:['M12 5v14M5 12h14'],back:['M19 12H5m0 0 6-6m-6 6 6 6'],layers:['M12 3 3 8l9 5 9-5-9-5Z','m3 13 9 5 9-5'],
+  search:['M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Z','m20 20-3.5-3.5']};
 const fmt=n=>Number(n||0).toLocaleString('en-US');
 const short=id=>id.slice(0,8);
+
+// Display names and colours for known providers. Anything else shows its id.
+const CATALOG={
+  groq:{name:'Groq',color:'#f55036'}, nvidia:{name:'NVIDIA NIM',color:'#76b900'},
+  openrouter:{name:'OpenRouter',color:'#6467f2'}, claude:{name:'Claude Code',color:'#d97757',api:'anthropic'},
+  typesafe:{name:'TypeSafe AI',color:'#0ea5e9',api:'typesafe'}, antigravity:{name:'Antigravity',color:'#4f7cff'},
+  codex:{name:'OpenAI Codex',color:'#10a37f'}, github:{name:'GitHub Copilot',color:'#6e40c9'},
+  'cloudflare-ai':{name:'Cloudflare AI',color:'#f38020'}, opencode:{name:'OpenCode',color:'#71717a'},
+};
+function pinfo(id){
+  if(CATALOG[id])return CATALOG[id];
+  if(id.startsWith('openai-compatible'))return {name:'OpenAI compatible',color:'#52525b'};
+  return {name:id,color:'#52525b'};
+}
+const pname=id=>pinfo(id).name;
+const papi=id=>pinfo(id).api||'openai';
+function avatar(id,sm){
+  const n=pname(id).replace(/[^A-Za-z0-9 ]/g,'').split(' ').filter(Boolean);
+  const t=(n.length>1?n[0][0]+n[1][0]:(n[0]||'?').slice(0,2)).toUpperCase();
+  return el('span',{class:'av'+(sm?' sm':''),style:'background:'+pinfo(id).color,'aria-hidden':'true',text:t});
+}
+
 let S={accounts:[],groups:[],usage:[],providers:[]};
-const byId=()=>Object.fromEntries(S.accounts.map(a=>[a.id,a]));
-const supported=p=>S.providers.includes(p);
-// Anthropic's Messages API is not OpenAI-shaped, so mixing it with the others in
-// one group sends a body some members cannot read.
-const protocol=p=>p==='claude'?'anthropic':p==='typesafe'?'typesafe':'openai';
+const modelCache={}; // provider -> {ids:[...]} or {error:"…"}
+const wired=p=>S.providers.includes(p);
+const accountsOf=p=>S.accounts.filter(a=>a.provider===p);
+const activeOf=p=>accountsOf(p).filter(a=>a.isActive);
+const accById=id=>S.accounts.find(a=>a.id===id);
 
 function toast(msg){const t=$('toast');t.textContent=msg;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,1800)}
-function copy(text){
-  const done=()=>toast('Copied '+text);
+function copy(text,what){
+  const done=()=>toast('Copied '+(what||text));
   if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(text).then(done,()=>{});
   else{const t=el('textarea',{style:'position:fixed;opacity:0'});t.value=text;document.body.append(t);t.select();document.execCommand('copy');t.remove();done()}
 }
-function copyIcon(){
-  const ns='http://www.w3.org/2000/svg',s=document.createElementNS(ns,'svg');
-  s.setAttribute('viewBox','0 0 24 24');s.setAttribute('class','i');s.setAttribute('fill','none');
-  s.setAttribute('stroke','currentColor');s.setAttribute('stroke-width','2');s.setAttribute('aria-hidden','true');
-  for(const d of ['M9 9h11v11H9z','M5 15H4V4h11v1']){const p=document.createElementNS(ns,'path');p.setAttribute('d',d);s.append(p)}
-  return s;
-}
-// endpoint shows a path and copies the full URL (which may be longer than shown).
-function endpoint(path,full){
-  const url=location.origin+(full||path);
-  return el('span',{class:'endpoint'},el('code',{text:path}),
-    el('button',{class:'icon',type:'button','aria-label':'Copy '+url,title:'Copy URL',onclick:()=>copy(url)},copyIcon()));
-}
+const copyBtn=(text,what)=>el('button',{class:'icon',type:'button',title:'Copy','aria-label':'Copy '+(what||text),onclick:()=>copy(text,what)},svg(ICON.copy));
+const copyLine=text=>el('div',{class:'copyline'},el('code',{text}),copyBtn(text));
 async function api(path,opts){
   const r=await fetch(path,opts);
-  const ct=r.headers.get('content-type')||'';
-  const d=ct.includes('json')?await r.json():null;
+  const d=(r.headers.get('content-type')||'').includes('json')?await r.json():null;
   if(!r.ok)throw new Error((d&&d.error)||('HTTP '+r.status));
   return d;
 }
 const postJSON=(path,body)=>api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 
-// ---- tabs
-function showTab(name){
-  for(const b of document.querySelectorAll('nav button'))b.setAttribute('aria-selected',b.dataset.tab===name);
-  for(const s of document.querySelectorAll('.tab'))s.hidden=s.id!=='tab-'+name;
-  try{localStorage.setItem('intact.tab',name)}catch(e){}
-}
-for(const b of document.querySelectorAll('nav button'))b.onclick=()=>showTab(b.dataset.tab);
-try{const t=localStorage.getItem('intact.tab');if(t&&$('tab-'+t))showTab(t)}catch(e){}
-
 // ---- modals
-function openModal(id){$(id).hidden=false;const f=$(id).querySelector('input:not([type=radio]),select');if(f)f.focus()}
-function closeModals(){for(const m of document.querySelectorAll('.overlay'))m.hidden=true}
+function openModal(id){$(id).hidden=false;const f=$(id).querySelector('input:not([type=hidden]):not(:disabled),select');if(f)f.focus()}
+function closeModal(id){$(id).hidden=true}
 for(const m of document.querySelectorAll('.overlay')){
-  m.addEventListener('click',e=>{if(e.target===m||e.target.closest('[data-close]'))closeModals()});
+  m.addEventListener('click',e=>{
+    if(e.target!==m&&!e.target.closest('[data-close]'))return;
+    m.id==='pModal'?closePicker():closeModal(m.id);
+  });
 }
-document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModals()});
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape')return;
+  // The picker sits over the combo editor, so Escape closes the top one only.
+  if(!$('pModal').hidden){closePicker();return}
+  for(const m of document.querySelectorAll('.overlay'))if(!m.hidden)closeModal(m.id);
+});
 
 // ---- data
 async function load(){
@@ -332,221 +349,323 @@ async function load(){
   S.groups=g.status==='fulfilled'?g.value.groups||[]:[];
   S.usage=u.status==='fulfilled'?u.value.usage||[]:[];
   S.providers=p.status==='fulfilled'?p.value.providers||[]:[];
-  renderStats();renderGroups();renderAccounts();renderUsage();
-  if(a.status!=='fulfilled')$('accounts').replaceChildren(el('div',{class:'empty',text:'Could not reach /accounts.'}));
+  $('ctProv').textContent=new Set(S.accounts.map(x=>x.provider)).size||'';
+  $('ctCombo').textContent=S.groups.length||'';
+  route();
 }
-
-function renderStats(){
-  const act=S.accounts.filter(a=>a.isActive).length;
-  $('sAcc').replaceChildren(String(act),el('small',{text:' / '+S.accounts.length}));
-  $('sGrp').textContent=S.groups.length;
-  const today=new Date().toISOString().slice(0,10);
-  const t=S.usage.filter(u=>u.day===today);
-  $('sReq').textContent=fmt(t.reduce((s,u)=>s+u.requests,0));
-  $('sTok').textContent=fmt(t.reduce((s,u)=>s+u.inputTokens+u.outputTokens,0));
-  $('nGroups').textContent=S.groups.length||'';
-  $('nAccounts').textContent=S.accounts.length||'';
-}
-
-// ---- groups
-function renderGroups(){
-  const box=$('groups'),acc=byId();
-  if(!S.groups.length){box.replaceChildren(el('div',{class:'card empty',style:'grid-column:1/-1'},
-    'No groups yet. ',el('button',{class:'ghost',type:'button',onclick:()=>editGroup(null)},'Create the first one')));return}
-  box.replaceChildren(...S.groups.map(g=>{
-    const members=g.members.map(m=>({m,a:acc[m.connectionId]})).filter(x=>x.a);
-    const usable=members.filter(x=>x.a.isActive&&supported(x.a.provider));
-    const protos=new Set(usable.map(x=>protocol(x.a.provider)));
-    return el('div',{class:'card'},
-      el('div',{class:'head'},
-        el('span',{class:'title',text:g.name}),
-        el('span',{class:'badge accent',text:g.strategy==='fallback'?'fallback':'round-robin'}),
-        el('span',{class:'badge'+(usable.length?' ok':' err'),text:usable.length+' / '+members.length+' usable'})),
-      el('div',{style:'padding:.7rem 1rem 0;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap'},
-        endpoint('/g/'+g.name+'/'),
-        el('div',{class:'acts'},
-          el('button',{class:'ghost',type:'button',onclick:()=>editGroup(g)},'Edit'),
-          el('button',{class:'danger',type:'button',onclick:()=>deleteGroup(g.name)},'Delete'))),
-      members.length?el('ol',{class:'members'},members.map(({m,a},i)=>{
-        const bad=!a.isActive||!supported(a.provider);
-        return el('li',{class:bad?'off':''},
-          el('span',{class:'n',text:String(i+1)}),
-          el('div',{class:'who'},
-            el('div',{},el('span',{class:'badge',text:a.provider}),' ',a.label||short(a.id)),
-            m.model?el('div',{class:'mono faint',text:'→ '+m.model}):null),
-          !a.isActive?el('span',{class:'badge',text:'off'}):null,
-          !supported(a.provider)?el('span',{class:'badge warn',text:'not wired'}):null);
-      })):el('div',{class:'empty',text:'No members.'}),
-      protos.size>1?el('div',{class:'warnline',text:'Members speak different APIs ('+[...protos].join(', ')+'). A request body only works on the members of its own shape.'}):null);
-  }));
-}
-
-let G=null; // the group being edited: {name,strategy,members:[{connectionId,model}],isNew}
-function editGroup(g){
-  G=g?{name:g.name,strategy:g.strategy,members:g.members.map(m=>({...m})),isNew:false}
-     :{name:'',strategy:'round-robin',members:[],isNew:true};
-  $('gTitle').textContent=G.isNew?'New group':'Edit group · '+G.name;
-  $('gName').value=G.name;$('gName').disabled=!G.isNew;
-  for(const r of document.getElementsByName('gStrat'))r.checked=r.value===G.strategy;
-  $('gErr').textContent='';
-  renderEditor();openModal('gModal');
-  if(!G.isNew)$('gSave').focus();
-}
-for(const r of document.getElementsByName('gStrat'))r.onchange=()=>{G.strategy=r.value;stratHint()};
-function stratHint(){
-  $('gStratHint').textContent=G.strategy==='fallback'
-    ?'Always try #1 first; the next only serves when it is busy.'
-    :'Rotate the first member on each call to spread load.';
-}
-function renderEditor(){
-  stratHint();
-  const acc=byId();
-  $('gCount').textContent=G.members.length?'('+G.members.length+')':'';
-  const sel=$('gSel');
-  if(!G.members.length)sel.replaceChildren(el('div',{class:'empty',style:'padding:1rem',text:'Pick accounts below.'}));
-  else sel.replaceChildren(...G.members.map((m,i)=>{
-    const a=acc[m.connectionId]||{provider:'?',label:m.connectionId,id:m.connectionId};
-    const inp=el('input',{placeholder:'model override (optional)',value:m.model||'',spellcheck:'false','aria-label':'Model override for '+(a.label||a.id)});
-    inp.oninput=()=>{m.model=inp.value.trim()};
-    const move=d=>{const j=i+d;[G.members[i],G.members[j]]=[G.members[j],G.members[i]];renderEditor()};
-    return el('div',{class:'it'+(a.isActive===false?' off':'')},
-      el('span',{class:'n mono faint',text:String(i+1)}),
-      el('div',{style:'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'},
-        el('span',{class:'badge',text:a.provider}),' ',a.label||short(a.id)),
-      inp,
-      el('div',{class:'mv'},
-        el('button',{class:'icon',type:'button','aria-label':'Move up',disabled:i===0,onclick:()=>move(-1)},'↑'),
-        el('button',{class:'icon',type:'button','aria-label':'Move down',disabled:i===G.members.length-1,onclick:()=>move(1)},'↓'),
-        el('button',{class:'icon',type:'button','aria-label':'Remove',onclick:()=>{G.members.splice(i,1);renderEditor()}},'✕')));
-  }));
-  // picker, grouped by provider
-  const inG=new Set(G.members.map(m=>m.connectionId));
-  const byProv={};
-  for(const a of S.accounts)(byProv[a.provider]=byProv[a.provider]||[]).push(a);
-  const provs=Object.keys(byProv).sort((x,y)=>supported(y)-supported(x)||x.localeCompare(y));
-  if(!provs.length){$('gPick').replaceChildren(el('div',{class:'empty',text:'No accounts yet.'}));return}
-  $('gPick').replaceChildren(...provs.flatMap(p=>{
-    const list=byProv[p],ok=supported(p);
-    const addAll=()=>{for(const a of list)if(!inG.has(a.id)&&a.isActive)G.members.push({connectionId:a.id,model:''});renderEditor()};
-    return [el('div',{class:'ph'},el('span',{},p,ok?'':' · not wired'),
-              ok?el('button',{class:'ghost',type:'button',onclick:addAll},'Add all active'):null),
-      ...list.map(a=>{
-        const cb=el('input',{type:'checkbox',checked:inG.has(a.id),disabled:!ok});
-        cb.onchange=()=>{if(cb.checked)G.members.push({connectionId:a.id,model:''});
-          else G.members=G.members.filter(m=>m.connectionId!==a.id);renderEditor()};
-        return el('label',{class:(!ok||!a.isActive)?'off':''},cb,
-          el('span',{style:'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap',text:a.label||short(a.id)}),
-          !a.isActive?el('span',{class:'badge',text:'off'}):null,
-          el('span',{class:'mono faint',text:short(a.id)}));
-      })];
-  }));
-}
-$('newGroup').onclick=()=>editGroup(null);
-$('gSave').onclick=async()=>{
-  const name=($('gName').value||'').trim().toLowerCase();
-  if(!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)){$('gErr').textContent='Name must be lowercase letters, digits, - or _.';$('gName').focus();return}
-  if(G.isNew&&S.groups.some(g=>g.name===name)){$('gErr').textContent='A group with this name exists.';return}
-  $('gSave').disabled=true;
+// A provider's model list, fetched through its first active account.
+async function modelsFor(p){
+  if(modelCache[p])return modelCache[p];
+  const acc=activeOf(p)[0];
+  if(!acc)return modelCache[p]={error:'No active account'};
   try{
-    await postJSON('/groups',{name,strategy:G.strategy,members:G.members.map(m=>({connectionId:m.connectionId,model:m.model||''}))});
-    closeModals();toast('Saved '+name);await load();
-  }catch(e){$('gErr').textContent=e.message}
-  finally{$('gSave').disabled=false}
-};
-async function deleteGroup(name){
-  if(!confirm('Delete group "'+name+'"? Its accounts stay.'))return;
-  try{await api('/groups/'+encodeURIComponent(name)+'/delete',{method:'POST'});toast('Deleted '+name);await load()}
-  catch(e){alert(e.message)}
+    const r=await fetch('/accounts/'+acc.id+'/models');const d=await r.json();
+    if(!r.ok||d.error)return modelCache[p]={error:'Provider error: '+((d.error&&d.error.message)||d.error||r.status)};
+    let ids=[];
+    if(Array.isArray(d.data))ids=d.data.map(m=>m.id||m.name).filter(Boolean);
+    else if(Array.isArray(d.models))ids=d.models.map(m=>typeof m==='string'?m:(m.id||m.name)).filter(Boolean);
+    return modelCache[p]={ids:[...new Set(ids)].sort()};
+  }catch(e){return modelCache[p]={error:'Could not reach the models endpoint'}}
 }
 
-// ---- accounts
-function renderAccounts(){
-  const box=$('accounts');
-  if(!S.accounts.length){box.replaceChildren(el('div',{class:'card empty',text:'No accounts yet. Add one above.'}));return}
-  const inGroups={};
-  for(const g of S.groups)for(const m of g.members)(inGroups[m.connectionId]=inGroups[m.connectionId]||[]).push(g.name);
-  const byProv={};
-  for(const a of S.accounts)(byProv[a.provider]=byProv[a.provider]||[]).push(a);
-  const provs=Object.keys(byProv).sort((x,y)=>supported(y)-supported(x)||x.localeCompare(y));
-  box.replaceChildren(...provs.map(p=>{
-    const list=byProv[p],ok=supported(p),act=list.filter(a=>a.isActive).length;
-    return el('div',{class:'card'},
-      el('div',{class:'head'},
-        el('span',{class:'title',text:p}),
-        el('span',{class:'badge',text:act+' / '+list.length+' active'}),
-        ok?null:el('span',{class:'badge warn',title:'This build has no upstream entry for this provider, so it cannot be proxied.',text:'not wired'}),
-        el('span',{class:'grow'}),
-        ok?endpoint('/r/'+p+'/'):null),
-      ...list.map(a=>{
-        const sw=el('input',{type:'checkbox',checked:a.isActive,'aria-label':'Active: '+(a.label||a.id)});
-        sw.onchange=async()=>{
-          try{await postJSON('/accounts/'+a.id+'/active',{active:sw.checked});a.isActive=sw.checked;
-              renderStats();renderGroups();renderAccounts()}
-          catch(e){sw.checked=!sw.checked;alert(e.message)}
-        };
-        return el('div',{class:'acc'+(a.isActive?'':' off')},
-          el('label',{class:'switch',title:a.isActive?'Active':'Off'},sw,el('span')),
-          el('div',{class:'who'},
-            el('div',{class:'l',text:a.label||'(no label)'}),
-            el('div',{class:'tags'},
-              el('span',{class:'mono faint',title:a.id,text:short(a.id)}),
-              ...(inGroups[a.id]||[]).map(n=>el('span',{class:'badge accent',text:n})))),
-          el('div',{class:'act'},
-            ok?endpoint('/p/'+short(a.id)+'…','/p/'+a.id+'/'):null,
-            el('button',{class:'ghost',type:'button',disabled:!ok,onclick:()=>showModels(a)},'Models'),
-            el('button',{class:'danger',type:'button',onclick:()=>deleteAccount(a)},'Delete')));
-      }));
-  }));
+// ---- router
+function header(title,sub,...right){
+  const left=el('div',{style:'flex:1;min-width:0'},typeof title==='string'?el('h1',{text:title}):title,sub?el('p',{text:sub}):null);
+  $('ph').replaceChildren(left,...right.filter(Boolean));
 }
-$('newAccount').onclick=()=>{
-  const sel=$('aProv');sel.replaceChildren(...S.providers.map(p=>el('option',{value:p,text:p})));
-  $('aForm').reset();$('aErr').textContent='';openModal('aModal');
-};
+function route(){
+  const parts=(location.hash.replace(/^#\/?/,'')||'providers').split('/');
+  const page=parts[0];
+  for(const a of document.querySelectorAll('aside a')){
+    if(a.dataset.nav===page)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');
+  }
+  const v=$('view');v.replaceChildren();
+  if(page==='endpoint')return viewEndpoint(v);
+  if(page==='combos')return viewCombos(v);
+  if(page==='usage')return viewUsage(v);
+  if(page==='providers'&&parts[1])return viewProvider(v,decodeURIComponent(parts[1]));
+  if(page!=='providers'){location.hash='#/providers';return}
+  viewProviders(v);
+}
+window.addEventListener('hashchange',route);
+
+// ---- Endpoint
+function viewEndpoint(v){
+  header('Endpoint','Point your client at intact; it adds the credential and forwards the request unchanged.');
+  const o=location.origin;
+  const sel=el('select',{style:'width:auto','aria-label':'Combo'},S.groups.map(g=>el('option',{value:g.name,text:g.name})));
+  const ex=el('pre');
+  const render=()=>{const c=sel.value||'my-combo';
+    ex.textContent='# OpenAI-compatible client\nbase_url = "'+o+'/g/'+c+'"\napi_key  = "<INTACT_API_TOKEN>"\n\n# curl\ncurl '+o+'/g/'+c+'/chat/completions \\\n  -H "Authorization: Bearer $INTACT_API_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"any","messages":[{"role":"user","content":"hi"}]}\''};
+  sel.onchange=render;render();
+  v.append(
+    el('div',{class:'card pad sec'},
+      el('h2',{},'Base URL'),copyLine(o),
+      el('div',{class:'kv'},
+        el('span',{class:'k'},'Combo'),copyLine(o+'/g/<combo>/'),
+        el('span',{class:'k'},'Provider'),copyLine(o+'/r/<provider>/'),
+        el('span',{class:'k'},'One account'),copyLine(o+'/p/<connection-id>/')),
+      el('p',{class:'muted small',style:'margin:0'},'A combo picks a model by its strategy and fails over on 429/500/503/409. A provider route rotates its active accounts. The rest of the path goes to the provider as is (for example ',el('code',{},'/chat/completions'),').')),
+    el('div',{class:'card pad sec'},
+      el('h2',{},'Authentication'),
+      el('p',{class:'muted',style:'margin:0'},'Send ',el('code',{},'Authorization: Bearer <INTACT_API_TOKEN>'),'. The token lives in the server environment file and is not shown here.')),
+    el('div',{class:'card pad sec'},
+      el('div',{class:'sech'},el('h2',{class:'grow'},'Example'),S.groups.length?sel:el('span',{class:'faint small',text:'Create a combo to fill in its name'})),ex));
+}
+
+// ---- Providers
+function viewProviders(v){
+  const q=el('input',{placeholder:'Search providers…',autocomplete:'off','aria-label':'Search providers'});
+  header('Providers','Manage the accounts intact holds for each provider.',el('div',{class:'search'},svg(ICON.search),q));
+  const ids=[...new Set([...S.providers,...S.accounts.map(a=>a.provider)])];
+  const card=p=>{
+    const n=accountsOf(p).length,act=activeOf(p).length;
+    return el('a',{class:'pcard'+(wired(p)?'':' dim'),href:'#/providers/'+encodeURIComponent(p),'data-q':(p+' '+pname(p)).toLowerCase()},
+      avatar(p),
+      el('div',{style:'min-width:0'},
+        el('div',{class:'nm',text:pname(p)}),
+        n?el('span',{class:'status'+(act?' on':''),text:act+' connected'+(act<n?' · '+(n-act)+' off':'')})
+         :el('span',{class:'status',text:'No connections'})));
+  };
+  const sec=(title,list,note)=>list.length?el('div',{class:'sec'},
+    el('div',{class:'sech'},el('h2',{},title),note?el('span',{class:'faint small',text:note}):null),
+    el('div',{class:'pgrid'},list.map(card))):null;
+  const byName=(a,b)=>pname(a).localeCompare(pname(b));
+  const body=el('div',{style:'display:grid;gap:1.75rem'},
+    sec('Connected',ids.filter(p=>wired(p)&&accountsOf(p).length).sort(byName)),
+    sec('Available',ids.filter(p=>wired(p)&&!accountsOf(p).length).sort(byName)),
+    sec('Not wired in this build',ids.filter(p=>!wired(p)).sort(byName),'Stored accounts that intact cannot proxy yet'));
+  v.append(body);
+  q.oninput=()=>{const s=q.value.trim().toLowerCase();
+    for(const c of body.querySelectorAll('.pcard'))c.hidden=!!s&&!c.dataset.q.includes(s);
+    for(const g of body.querySelectorAll('.sec'))g.hidden=![...g.querySelectorAll('.pcard')].some(c=>!c.hidden)};
+}
+
+function viewProvider(v,p){
+  const list=accountsOf(p),ok=wired(p);
+  header(el('div',{style:'display:flex;align-items:center;gap:.6rem'},
+    el('a',{class:'crumb',href:'#/providers'},'Providers'),el('span',{class:'faint'},'›'),avatar(p,true),el('h1',{text:pname(p)})),
+    list.length+' connection'+(list.length===1?'':'s'));
+  if(!ok)v.append(el('div',{class:'notice'},'This build has no upstream entry for "'+p+'", so these accounts are stored but cannot be proxied yet.'));
+  const addBtn=ok?el('button',{class:'primary',type:'button',onclick:()=>addAccount(p)},svg(ICON.plus),'Add'):null;
+  const rows=list.map((a,i)=>{
+    const sw=el('input',{type:'checkbox',checked:a.isActive,'aria-label':'Active: '+(a.label||a.id)});
+    sw.onchange=async()=>{
+      try{await postJSON('/accounts/'+a.id+'/active',{active:sw.checked});a.isActive=sw.checked;delete modelCache[p];route()}
+      catch(e){sw.checked=!sw.checked;alert(e.message)}
+    };
+    const inCombos=S.groups.filter(g=>g.members.some(m=>m.connectionId===a.id||(!m.connectionId&&m.provider===p))).map(g=>g.name);
+    return el('div',{class:'row'+(a.isActive?'':' off')},
+      el('span',{class:'idx',text:'#'+(i+1)}),
+      el('div',{class:'who'},
+        el('div',{class:'l',text:a.label||'(no name)'}),
+        el('div',{class:'meta'},
+          el('span',{class:'badge'+(a.isActive?' ok':''),text:a.isActive?'active':'off'}),
+          el('span',{class:'mono faint',title:a.id,text:short(a.id)}),
+          ...inCombos.map(n=>el('a',{class:'badge accent',href:'#/combos',style:'text-decoration:none',text:n})))),
+      ok?el('button',{class:'icon',type:'button',title:'Copy this account\'s URL','aria-label':'Copy this account\'s URL',
+        onclick:()=>copy(location.origin+'/p/'+a.id+'/','account URL')},svg(ICON.copy)):null,
+      el('button',{class:'danger',type:'button',onclick:()=>deleteAccount(a)},svg(ICON.trash),'Delete'),
+      el('label',{class:'switch',title:a.isActive?'Active':'Off'},sw,el('span')));
+  });
+  v.append(el('div',{class:'card'},
+    el('div',{class:'cardh'},el('h2',{class:'grow'},'Connections'),
+      ok&&list.length?el('span',{class:'muted small'},'All active accounts'):null,
+      ok&&list.length?el('span',{class:'copyline',style:'padding-block:.1rem'},el('code',{text:'/r/'+p+'/'}),copyBtn(location.origin+'/r/'+p+'/')):null),
+    list.length?rows:el('div',{class:'empty'},el('b',{},'No connections yet'),ok?'Add an API key to start using '+pname(p)+'.':null,addBtn),
+    list.length&&addBtn?el('div',{style:'padding:.8rem 1.25rem;border-top:1px solid var(--line)'},addBtn):null));
+  if(ok&&activeOf(p).length){
+    const box=el('div',{class:'chips'},el('span',{class:'muted',text:'Loading…'}));
+    v.append(el('div',{class:'card'},
+      el('div',{class:'cardh'},el('h2',{class:'grow'},'Available models'),el('span',{class:'faint small',text:'Click to copy the id'})),
+      el('div',{style:'padding:1rem 1.25rem'},box)));
+    modelsFor(p).then(r=>{
+      if(r.error){box.replaceChildren(el('span',{class:'muted',text:r.error}));return}
+      if(!r.ids.length){box.replaceChildren(el('span',{class:'muted',text:'The provider returned no model list.'}));return}
+      box.replaceChildren(...r.ids.map(m=>el('button',{class:'chip mono',type:'button',title:'Copy '+m,onclick:()=>copy(m)},el('span',{text:m}))));
+    });
+  }
+}
+function addAccount(p){
+  $('aTitle').textContent='Add '+pname(p)+' connection';
+  $('aForm').reset();$('aProv').value=p;$('aErr').textContent='';openModal('aModal');
+}
 $('aForm').onsubmit=async e=>{
   e.preventDefault();
   try{
     const r=await fetch('/accounts',{method:'POST',body:new URLSearchParams(new FormData($('aForm')))});
     if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.error||('HTTP '+r.status))}
-    closeModals();toast('Account added');await load();
+    delete modelCache[$('aProv').value];closeModal('aModal');toast('Connection added');await load();
   }catch(err){$('aErr').textContent=err.message}
 };
 async function deleteAccount(a){
   const gs=S.groups.filter(g=>g.members.some(m=>m.connectionId===a.id)).map(g=>g.name);
-  if(!confirm('Delete "'+(a.label||a.id)+'"?'+(gs.length?'\nIt will be removed from: '+gs.join(', '):'')))return;
+  if(!confirm('Delete "'+(a.label||a.id)+'"?'+(gs.length?'\nIt is pinned in: '+gs.join(', '):'')))return;
   const r=await fetch('/accounts/'+a.id+'/delete',{method:'POST'});
   if(!r.ok){alert('Delete failed');return}
-  toast('Deleted');await load();
-}
-function showModels(a){
-  $('mTitle').textContent='Models · '+(a.label||a.provider);
-  const body=$('mBody');body.replaceChildren(el('p',{class:'muted',text:'Loading…'}));openModal('mModal');
-  fetch('/accounts/'+a.id+'/models').then(r=>r.json()).then(d=>{
-    let ids=[];
-    if(Array.isArray(d.data))ids=d.data.map(m=>m.id||m.name).filter(Boolean);
-    else if(Array.isArray(d.models))ids=d.models.map(m=>typeof m==='string'?m:(m.id||m.name)).filter(Boolean);
-    else if(d.error){body.replaceChildren(el('p',{class:'muted',text:'Provider error: '+(d.error.message||d.error)}));return}
-    if(!ids.length){body.replaceChildren(el('p',{class:'muted',text:'No models returned (the provider may not list models).'}));return}
-    body.replaceChildren(el('ul',{},ids.sort().map(m=>el('li',{class:'mono',style:'display:flex;justify-content:space-between;gap:.5rem'},
-      el('span',{text:m}),el('button',{class:'icon',type:'button','aria-label':'Copy '+m,onclick:()=>copy(m)},copyIcon())))));
-  }).catch(()=>body.replaceChildren(el('p',{class:'muted',text:'Could not reach the models endpoint.'})));
+  delete modelCache[a.provider];toast('Deleted');await load();
 }
 
-// ---- usage
-function renderUsage(){
-  const tb=$('usage'),acc=byId();
-  if(!S.usage.length){tb.replaceChildren(el('tr',{},el('td',{colspan:6,class:'empty',text:'No usage recorded yet.'})));return}
-  const days=[...new Set(S.usage.map(u=>u.day))];
-  tb.replaceChildren(...days.flatMap(day=>{
-    const rows=S.usage.filter(u=>u.day===day);
-    const sum=k=>rows.reduce((s,u)=>s+u[k],0);
-    return [el('tr',{class:'total'},el('td',{text:day}),el('td',{colspan:2,class:'muted',text:rows.length+' rows'}),
-        el('td',{class:'num',text:fmt(sum('inputTokens'))}),el('td',{class:'num',text:fmt(sum('outputTokens'))}),el('td',{class:'num',text:fmt(sum('requests'))})),
-      ...rows.map(u=>{const a=acc[u.connectionId];
-        return el('tr',{},el('td',{}),
-          el('td',{},a?el('span',{},el('span',{class:'badge',text:a.provider}),' ',a.label||short(a.id)):el('span',{class:'mono faint',text:short(u.connectionId)+' (deleted)'})),
-          el('td',{class:'mono',text:u.model||'—'}),
-          el('td',{class:'num',text:fmt(u.inputTokens)}),el('td',{class:'num',text:fmt(u.outputTokens)}),el('td',{class:'num',text:fmt(u.requests)}))})];
+// ---- Combos
+const STRATS=[
+  ['fallback','Fallback','tries the models in order; the next one serves only when a model is busy or failing'],
+  ['round-robin','Round robin','rotates the first model on each request to spread the load'],
+];
+const memberReady=m=>wired(m.provider)&&(m.connectionId?!!(accById(m.connectionId)||{}).isActive:activeOf(m.provider).length>0);
+function viewCombos(v){
+  header('Combos','Group models under one name, then call them all through one URL.',
+    S.groups.length?el('button',{class:'primary',type:'button',onclick:()=>editCombo(null)},svg(ICON.plus),'Create combo'):null);
+  v.append(el('div',{class:'muted',style:'display:grid;gap:.2rem'},
+    ...STRATS.map(([,n,d])=>el('div',{},el('b',{style:'color:var(--fg)',text:n}),' — '+d)),
+    el('div',{},'A model runs on every active account of its provider in turn, unless you pin one account.')));
+  if(!S.groups.length){
+    v.append(el('div',{class:'card empty'},el('span',{class:'ic'},svg(ICON.layers,'i')),el('b',{},'No combos yet'),
+      'Create a combo to pool models from several providers.',
+      el('button',{class:'primary',type:'button',onclick:()=>editCombo(null)},svg(ICON.plus),'Create combo')));
+    return;
+  }
+  v.append(...S.groups.map(g=>{
+    const ready=g.members.filter(memberReady).length;
+    const apis=new Set(g.members.filter(m=>wired(m.provider)).map(m=>papi(m.provider)));
+    const seg=el('span',{class:'seg'},STRATS.map(([k,n])=>el('button',{type:'button','aria-pressed':String(g.strategy===k),
+      onclick:async()=>{if(g.strategy===k)return;
+        try{await postJSON('/groups',{...g,strategy:k});g.strategy=k;toast(g.name+': '+n);route()}catch(e){alert(e.message)}}},n)));
+    return el('div',{class:'card'},
+      el('div',{class:'cardh'},
+        el('span',{class:'av',style:'background:var(--accent-soft);color:var(--accent)'},svg(ICON.layers,'i')),
+        el('div',{class:'grow'},
+          el('div',{style:'display:flex;align-items:center;gap:.5rem;flex-wrap:wrap'},el('b',{text:g.name}),
+            el('span',{class:'badge'+(ready?' ok':' warn'),text:ready+' / '+g.members.length+' ready'})),
+          el('div',{style:'display:flex;align-items:center;gap:.15rem'},el('code',{class:'faint',text:'/g/'+g.name+'/'}),copyBtn(location.origin+'/g/'+g.name+'/'))),
+        seg,
+        el('button',{class:'ghost',type:'button',onclick:()=>editCombo(g)},svg(ICON.edit),'Edit'),
+        el('button',{class:'danger',type:'button',onclick:()=>deleteCombo(g.name)},svg(ICON.trash),'Delete')),
+      el('div',{style:'padding:.9rem 1.25rem',class:'chips'},
+        g.members.length?g.members.map((m,i)=>{
+          const a=m.connectionId&&accById(m.connectionId),ok=memberReady(m);
+          return el('span',{class:'chip',style:ok?null:'opacity:.5',title:ok?pname(m.provider):'Not ready: no active account, or the provider is not wired'},
+            el('span',{class:'faint',text:(i+1)+'.'}),avatar(m.provider,true),el('span',{class:'mono',text:m.model||'caller\'s model'}),
+            m.connectionId?el('span',{class:'badge',text:a?(a.label||short(a.id)):'deleted account'}):null);
+        }):el('span',{class:'muted',text:'No models'})),
+      apis.size>1?el('div',{class:'notice',style:'margin:0 1.25rem 1rem'},'This combo mixes APIs ('+[...apis].join(', ')+'). intact does not translate between them, so a request only works on the models of its own shape.'):null);
   }));
+}
+async function deleteCombo(name){
+  if(!confirm('Delete combo "'+name+'"? Its accounts stay.'))return;
+  try{await api('/groups/'+encodeURIComponent(name)+'/delete',{method:'POST'});toast('Deleted '+name);await load()}
+  catch(e){alert(e.message)}
+}
+
+let C=null; // the combo being edited
+function editCombo(g){
+  C=g?{name:g.name,strategy:g.strategy,members:g.members.map(m=>({...m})),isNew:false}
+     :{name:'',strategy:'fallback',members:[],isNew:true};
+  $('cTitle').textContent=C.isNew?'Create combo':'Edit combo · '+C.name;
+  $('cName').value=C.name;$('cName').disabled=!C.isNew;$('cErr').textContent='';
+  renderCombo();openModal('cModal');
+}
+$('cName').oninput=()=>{$('cUrl').textContent='/g/'+($('cName').value.trim().toLowerCase()||'…')+'/'};
+function renderCombo(){
+  $('cUrl').textContent='/g/'+($('cName').value.trim().toLowerCase()||'…')+'/';
+  $('cStrat').replaceChildren(...STRATS.map(([k,n])=>el('button',{type:'button','aria-pressed':String(C.strategy===k),onclick:()=>{C.strategy=k;renderCombo()}},n)));
+  $('cStratHint').textContent=STRATS.find(s=>s[0]===C.strategy)[1]+' '+STRATS.find(s=>s[0]===C.strategy)[2]+'.';
+  const list=$('cList');
+  if(!C.members.length){list.replaceChildren(el('div',{class:'dash'},svg(ICON.layers,'i'),el('span',{text:'No models added yet'})));return}
+  list.replaceChildren(el('div',{class:'mlist'},C.members.map((m,i)=>{
+    const sel=el('select',{'aria-label':'Account for '+(m.model||'this model'),title:'Which account runs this model'},
+      el('option',{value:'',text:'All accounts ('+activeOf(m.provider).length+')'}),
+      accountsOf(m.provider).map(a=>el('option',{value:a.id,text:(a.label||short(a.id))+(a.isActive?'':' (off)')})));
+    sel.value=m.connectionId||'';sel.onchange=()=>{m.connectionId=sel.value};
+    const mv=d=>{const j=i+d;[C.members[i],C.members[j]]=[C.members[j],C.members[i]];renderCombo()};
+    return el('div',{class:'row'},
+      el('span',{class:'idx',text:String(i+1)}),avatar(m.provider,true),
+      el('div',{class:'who'},el('div',{class:'l mono',text:m.model||'caller\'s model'}),el('div',{class:'faint small',text:pname(m.provider)})),
+      sel,
+      el('button',{class:'icon',type:'button','aria-label':'Move up',disabled:i===0,onclick:()=>mv(-1)},svg(ICON.up)),
+      el('button',{class:'icon',type:'button','aria-label':'Move down',disabled:i===C.members.length-1,onclick:()=>mv(1)},svg(ICON.down)),
+      el('button',{class:'icon',type:'button','aria-label':'Remove',onclick:()=>{C.members.splice(i,1);renderCombo()}},svg(ICON.x)));
+  })));
+}
+$('cSave').onclick=async()=>{
+  const name=C.isNew?$('cName').value.trim().toLowerCase():C.name;
+  if(!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)){$('cErr').textContent='Name must be lowercase letters, digits, - or _.';$('cName').focus();return}
+  if(C.isNew&&S.groups.some(g=>g.name===name)){$('cErr').textContent='A combo with this name exists.';return}
+  if(!C.members.length){$('cErr').textContent='Add at least one model.';return}
+  $('cSave').disabled=true;
+  try{
+    await postJSON('/groups',{name,strategy:C.strategy,members:C.members.map(m=>({provider:m.provider,connectionId:m.connectionId||'',model:m.model||''}))});
+    closeModal('cModal');toast('Saved '+name);await load();
+  }catch(e){$('cErr').textContent=e.message}
+  finally{$('cSave').disabled=false}
+};
+
+// ---- model picker
+$('cAdd').onclick=()=>{$('pSearch').value='';renderPicker();openModal('pModal')};
+function closePicker(){closeModal('pModal');renderCombo()}
+$('pDone').onclick=closePicker;$('pDone2').onclick=closePicker;
+$('pSearch').oninput=()=>filterPicker();
+const pickIndex=(p,model)=>C.members.findIndex(m=>m.provider===p&&(m.model||'')===model&&!m.connectionId);
+function modelChip(p,model,label){
+  const b=el('button',{class:'chip'+(pickIndex(p,model)>=0?' on':''),type:'button','data-q':(model+' '+pname(p)).toLowerCase()},
+    el('span',{class:model?'mono':'',text:label||model}));
+  b.onclick=()=>{const i=pickIndex(p,model);
+    if(i>=0)C.members.splice(i,1);else C.members.push({provider:p,connectionId:'',model});
+    b.classList.toggle('on',i<0)};
+  return b;
+}
+function renderPicker(){
+  const ps=S.providers.filter(p=>activeOf(p).length).sort((a,b)=>pname(a).localeCompare(pname(b)));
+  if(!ps.length){$('pBody').replaceChildren(el('div',{class:'empty'},el('b',{},'No active accounts'),'Add a connection on the Providers page first.'));return}
+  $('pBody').replaceChildren(...ps.map(p=>{
+    const chips=el('div',{class:'chips'},el('span',{class:'muted small',text:'Loading models…'}));
+    const custom=el('input',{placeholder:'Or type a model id and press Enter',style:'min-height:32px;font-size:.8rem;max-width:20rem'});
+    custom.onkeydown=e=>{if(e.key!=='Enter')return;e.preventDefault();const m=custom.value.trim();if(!m)return;
+      if(pickIndex(p,m)<0)C.members.push({provider:p,connectionId:'',model:m});
+      custom.value='';toast('Added '+m)};
+    const grp=el('div',{class:'grp'},
+      el('div',{class:'gh'},avatar(p,true),pname(p),el('span',{class:'ct',text:activeOf(p).length+' active'})),chips,custom);
+    modelsFor(p).then(r=>{
+      const keep=modelChip(p,'','caller\'s model');keep.title='Keep the model the request sends';
+      if(r.error)chips.replaceChildren(keep,el('span',{class:'muted small',text:r.error}));
+      else chips.replaceChildren(keep,...r.ids.map(m=>modelChip(p,m)));
+      filterPicker();
+    });
+    return grp;
+  }));
+}
+function filterPicker(){
+  const s=$('pSearch').value.trim().toLowerCase();
+  for(const g of $('pBody').querySelectorAll('.grp')){
+    let any=false;
+    for(const c of g.querySelectorAll('button.chip')){c.hidden=!!s&&!c.dataset.q.includes(s);any=any||!c.hidden}
+    g.hidden=!!s&&!any;
+  }
+}
+
+// ---- Usage
+function viewUsage(v){
+  const days=[...new Set(S.usage.map(u=>u.day))];
+  const sel=el('select',{style:'width:auto','aria-label':'Day'},el('option',{value:'',text:'All days'}),days.map(d=>el('option',{value:d,text:d})));
+  header('Usage','Token totals read from the responses that passed through.',S.usage.length?sel:null);
+  const today=new Date().toISOString().slice(0,10);
+  if(days.includes(today))sel.value=today;
+  const stats=el('div',{class:'stats'}),tb=el('tbody');
+  v.append(stats,el('div',{class:'card scroll'},el('table',{},
+    el('thead',{},el('tr',{},el('th',{},'Day'),el('th',{},'Account'),el('th',{},'Model'),el('th',{class:'num'},'Input'),el('th',{class:'num'},'Output'),el('th',{class:'num'},'Requests'))),tb)));
+  const render=()=>{
+    const rows=S.usage.filter(u=>!sel.value||u.day===sel.value);
+    const sum=k=>rows.reduce((s,u)=>s+u[k],0);
+    stats.replaceChildren(...[['Requests',sum('requests')],['Input tokens',sum('inputTokens')],['Output tokens',sum('outputTokens')]]
+      .map(([k,n])=>el('div',{class:'stat'},el('div',{class:'k',text:k}),el('div',{class:'v',text:fmt(n)}))));
+    if(!rows.length){tb.replaceChildren(el('tr',{},el('td',{colspan:6},el('div',{class:'empty'},el('b',{},'No usage recorded yet'),'Requests through /g, /r and /p show up here.'))));return}
+    tb.replaceChildren(...rows.map(u=>{const a=accById(u.connectionId);
+      return el('tr',{},el('td',{class:'faint',text:u.day}),
+        el('td',{},a?el('span',{style:'display:inline-flex;align-items:center;gap:.45rem'},avatar(a.provider,true),a.label||short(a.id))
+                    :el('span',{class:'mono faint',text:short(u.connectionId)+' (deleted)'})),
+        el('td',{class:'mono',text:u.model||'—'}),
+        el('td',{class:'num',text:fmt(u.inputTokens)}),el('td',{class:'num',text:fmt(u.outputTokens)}),el('td',{class:'num',text:fmt(u.requests)}))}));
+  };
+  sel.onchange=render;render();
 }
 
 load();

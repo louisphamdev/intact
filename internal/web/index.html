@@ -151,6 +151,13 @@
   .tabs a:hover{color:var(--fg)}
   .tabs a.on{color:var(--fg);border-bottom-color:var(--accent)}
   .tabs .ct{font-size:.72rem;color:var(--faint)}
+  .doc{max-width:52rem;display:grid;gap:1rem;line-height:1.65}
+  .doc h2{font-size:1.15rem;margin:.5rem 0 0}
+  .doc p,.doc ul,.doc ol{margin:0;color:var(--muted)}
+  .doc li{margin:.2rem 0}
+  .doc table{border:1px solid var(--line);border-radius:10px;border-collapse:separate;border-spacing:0;overflow:hidden}
+  .doc th,.doc td{padding:.55rem .85rem;vertical-align:top}
+  .doc td{color:var(--muted)}
   [hidden]{display:none!important}
   @media (max-width:820px){
     body{grid-template-columns:1fr}
@@ -178,6 +185,7 @@
   <a href="#/endpoint" data-nav="endpoint"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h16M12 4v16"/><circle cx="12" cy="12" r="8"/></svg>Endpoint &amp; keys</a>
   <a href="#/providers" data-nav="providers"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/></svg>Providers<span class="ct" id="ctProv"></span></a>
   <a href="#/blacklist" data-nav="blacklist"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>Blacklist<span class="ct" id="ctFilter"></span></a>
+  <a href="#/docs" data-nav="docs"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h7"/></svg>Docs</a>
   <a href="#/usage" data-nav="usage"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Usage</a>
   </nav>
   <div class="spacer"></div>
@@ -373,6 +381,7 @@ function route(){
   if(page==='endpoint')return viewEndpoint(v,parts[1]);
   if(page==='usage')return viewUsage(v);
   if(page==='blacklist')return viewBlacklist(v,parts[1]);
+  if(page==='docs')return viewDocs(v,parts[1]);
   if(page==='providers'&&parts[1])return viewProvider(v,decodeURIComponent(parts[1]));
   if(page!=='providers'){location.hash='#/providers';return}
   viewProviders(v);
@@ -393,20 +402,18 @@ function viewEndpoint(v,tab){
   if(tab==='mcp'){v.append(mcpCard());return}
   const anth=tab==='anthropic', o=location.origin;
   const base=anth?o:o+'/v1', path=anth?'/v1/messages':'/v1/chat/completions';
-  const provs=[...new Set(S.accounts.filter(a=>a.isActive).map(a=>a.provider))].filter(wired).sort((a,b)=>pname(a).localeCompare(pname(b)));
-  const sel=el('select',{style:'width:auto','aria-label':'Provider for the example'},provs.map(p=>el('option',{value:p,text:pname(p)})));
-  const pre=el('pre');
+  const pre=el('pre'), curl={text:''};
   const render=async()=>{
-    const p=sel.value, r=p?await modelsFor(p):{ids:[]};
-    const m=(p||'groq')+'/'+((r.ids&&r.ids[0])||'<model>');
-    pre.textContent=anth
-      ?'# Claude Code\nexport ANTHROPIC_BASE_URL="'+base+'"\nexport ANTHROPIC_AUTH_TOKEN="<API key>"\nexport ANTHROPIC_MODEL="'+m+'"\n\n'+
-       '# Anthropic SDK (Python)\nclient = anthropic.Anthropic(base_url="'+base+'", api_key="<API key>")\n\n'+
-       '# curl\ncurl '+o+path+' \\\n  -H "x-api-key: $INTACT_KEY" -H "Content-Type: application/json" \\\n  -d \'{"model":"'+m+'","max_tokens":256,"messages":[{"role":"user","content":"hi"}]}\''
-      :'# OpenAI SDK (Python)\nclient = OpenAI(base_url="'+base+'", api_key="<API key>")\nclient.chat.completions.create(model="'+m+'", messages=[...])\n\n'+
-       '# curl\ncurl '+o+path+' \\\n  -H "Authorization: Bearer $INTACT_KEY" -H "Content-Type: application/json" \\\n  -d \'{"model":"'+m+'","messages":[{"role":"user","content":"hi"}]}\'';
+    // The sample calls a model that exists: the first of the first active provider.
+    const p=[...new Set(S.accounts.filter(a=>a.isActive).map(a=>a.provider))].filter(wired).sort()[0];
+    const r=p?await modelsFor(p):{ids:[]};
+    const m=p&&r.ids&&r.ids[0]?p+'/'+r.ids[0]:'<provider>/<model>';
+    curl.text=anth
+      ?'curl '+o+path+' \\\n  -H "x-api-key: $INTACT_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"'+m+'","max_tokens":256,"messages":[{"role":"user","content":"hi"}]}\''
+      :'curl '+o+path+' \\\n  -H "Authorization: Bearer $INTACT_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"'+m+'","messages":[{"role":"user","content":"hi"}]}\'';
+    pre.textContent=curl.text;
   };
-  sel.onchange=render;render();
+  render();
   v.append(
     el('div',{class:'card pad sec'},
       el('h2',{},anth?'Anthropic Messages API':'OpenAI Chat Completions API'),
@@ -414,9 +421,10 @@ function viewEndpoint(v,tab){
         el('span',{class:'k'},'Base URL'),copyLine(base),
         el('span',{class:'k'},'Endpoint'),el('code',{text:'POST '+path}),
         el('span',{class:'k'},'Models'),el('code',{text:'GET /v1/models'}),
-        el('span',{class:'k'},'Auth'),el('code',{text:anth?'x-api-key: <API key>  (or Authorization: Bearer)':'Authorization: Bearer <API key>'}))),
+        el('span',{class:'k'},'Auth'),el('code',{text:anth?'x-api-key: <API key>':'Authorization: Bearer <API key>'}))),
     el('div',{class:'card pad sec'},
-      el('div',{class:'sech'},el('h2',{class:'grow'},'Client setup'),provs.length?sel:null),pre));
+      el('div',{class:'sech'},el('h2',{class:'grow'},'curl'),
+        el('button',{class:'ghost',type:'button',onclick:()=>copy(curl.text,'curl')},svg(ICON.copy),'Copy')),pre));
 }
 function mcpCard(){
   return el('div',{class:'card pad sec'},
@@ -424,7 +432,8 @@ function mcpCard(){
     el('div',{class:'kv'},el('span',{class:'k'},'URL'),copyLine(location.origin+'/mcp'),
       el('span',{class:'k'},'Transport'),el('code',{},'Streamable HTTP'),
       el('span',{class:'k'},'Auth'),el('code',{},'Authorization: Bearer <API key>')),
-    el('pre',{text:'claude mcp add --transport http intact '+location.origin+'/mcp \\\n  --header "Authorization: Bearer <API key>"'}));
+    ...(()=>{const cmd='claude mcp add --transport http intact '+location.origin+'/mcp \\\n  --header "Authorization: Bearer <API key>"';
+      return [el('div',{class:'sech'},el('h2',{class:'grow'},'Claude Code'),el('button',{class:'ghost',type:'button',onclick:()=>copy(cmd,'command')},svg(ICON.copy),'Copy')),el('pre',{text:cmd})]})());
 }
 
 // ---- Providers
@@ -638,6 +647,74 @@ $('fForm').onsubmit=async e=>{
   }catch(err){$('fErr').textContent=err.message}
   finally{release($('fForm'))}
 };
+
+// ---- Docs
+// Each section is a tab; add one to DOCS to extend the docs.
+function dt(tag,...kids){return el(tag,{},...kids)}
+function dc(x){return el('code',{text:x})}
+function codeBlock(text){
+  return el('div',{style:'position:relative'},el('pre',{text}),
+    el('button',{class:'icon',type:'button',title:'Copy','aria-label':'Copy',style:'position:absolute;top:.4rem;right:.4rem',onclick:()=>copy(text,'snippet')},svg(ICON.copy)));
+}
+const DOCS=[
+  {id:'intro',title:'Introduction',body:()=>{
+    const o=location.origin;
+    return [
+      dt('h2','What intact is'),
+      dt('p','intact holds the credentials of your LLM accounts and puts all of them behind one gateway. A client sends a request with an intact API key; intact picks an account that serves the requested model, attaches that account\'s credential, and forwards the request. The provider\'s answer comes back unchanged, and the tokens it used are counted.'),
+      dt('h2','Endpoints'),
+      el('table',{},dt('thead',dt('tr',dt('th','Client'),dt('th','Base URL'),dt('th','Request'))),dt('tbody',
+        dt('tr',dt('td','OpenAI-compatible'),dt('td',dc(o+'/v1')),dt('td',dc('POST /v1/chat/completions'))),
+        dt('tr',dt('td','Anthropic'),dt('td',dc(o)),dt('td',dc('POST /v1/messages'))))),
+      dt('p','Either endpoint reaches any provider. When the client and the provider speak different shapes, intact translates the request and the answer, streamed or not, tool calls included. ',dc('GET /v1/models'),' lists every model you can call.'),
+      dt('h2','Naming a model'),
+      dt('ul',
+        dt('li',dc('groq/llama-3.3-70b-versatile'),' — provider and model. intact sends ',dc('llama-3.3-70b-versatile'),' to groq.'),
+        dt('li',dc('llama-3.3-70b-versatile'),' — model only. Every provider whose model list has it is used.')),
+      dt('p','Copy the exact name from a provider page (click a model) or from ',dc('/v1/models'),'.'),
+      dt('h2','Rotation and failover'),
+      dt('p','Requests for a model rotate across the active accounts that serve it. When an account answers 429, 500, 503 or 409, intact tries the next one. An OAuth account that answers 401 is refreshed and retried once. Turn an account off on its provider page to take it out of rotation.'),
+      dt('h2','Keys'),
+      dt('p','Create API keys under Endpoint & keys. Send one as ',dc('Authorization: Bearer <key>'),' or ',dc('x-api-key: <key>'),'. The same key works for ',dc('/v1'),', the management API ',dc('/api'),' and the MCP server ',dc('/mcp'),'.'),
+    ];
+  }},
+  {id:'blacklist',title:'Blacklist',body:()=>{
+    const o=location.origin;
+    return [
+      dt('h2','Why'),
+      dt('p','A provider often rejects a whole request when it carries something the provider does not know: a field another provider added, a JSON Schema keyword in a tool, a line a client puts in the system prompt. The blacklist removes those parts just before the request leaves intact, after any translation, so the request goes through without changing the client.'),
+      dt('h2','Kinds'),
+      el('table',{},dt('thead',dt('tr',dt('th','Kind'),dt('th','Example'),dt('th','Removes'))),dt('tbody',
+        dt('tr',dt('td','Body field'),dt('td',dc('messages.*.cache_control')),dt('td','The key at a dot path in the JSON body. ',dc('*'),' matches any key or list item.')),
+        dt('tr',dt('td','Schema key'),dt('td',dc('$id')),dt('td','The key at every depth of each tool\'s JSON schema. A tool parameter with that name is kept.')),
+        dt('tr',dt('td','System line'),dt('td',dc('^x-anthropic-billing-header:.*$')),dt('td','Every line of the system prompt that matches the regular expression.')),
+        dt('tr',dt('td','Header'),dt('td',dc('anthropic-beta')),dt('td','A request header, including one intact adds by default. The account\'s credential is never removed.')))),
+      dt('p','Each entry applies to one provider or to all providers, and takes effect on the next request. No restart.'),
+      dt('h2','Find what to block'),
+      dt('ol',
+        dt('li','Send the failing request and read the provider\'s error. It usually names the culprit: ',dc('Unknown parameter: \'reasoning_effort\''),', ',dc('Invalid JSON payload: unknown name "$id"'),'.'),
+        dt('li','Pick the kind from where the name sits: top level or inside messages → body field; inside a tool\'s parameters → schema key; a line of the system prompt → system line; an HTTP header → header.'),
+        dt('li','Scope it to the provider that rejects it. Use All providers only for something no provider needs.'),
+        dt('li','Send the request again.')),
+      dt('h2','Add from the dashboard'),
+      dt('p','Open Blacklist, choose the tab of the kind, press Block, pick the provider, and enter the value. The switch on each row turns an entry off without deleting it.'),
+      dt('h2','Add with the API'),
+      codeBlock('curl '+o+'/api/filters \\\n  -H "Authorization: Bearer $INTACT_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"provider":"groq","kind":"field","pattern":"reasoning_effort","note":"groq rejects it"}\''),
+      dt('p',dc('GET /api/filters'),' lists the entries, ',dc('DELETE /api/filters/<id>'),' removes one. ',dc('provider'),' is a provider id or ',dc('*'),'; ',dc('kind'),' is ',dc('field'),', ',dc('schema'),', ',dc('system'),' or ',dc('header'),'.'),
+      dt('h2','Add from an agent (MCP)'),
+      codeBlock('claude mcp add --transport http intact '+o+'/mcp \\\n  --header "Authorization: Bearer $INTACT_KEY"'),
+      dt('p','The server offers ',dc('list_filters'),', ',dc('add_filter'),', ',dc('update_filter'),' and ',dc('delete_filter'),', so an agent that hits a rejected field can block it and retry.'),
+      dt('h2','Built-in entries'),
+      dt('p','The first start adds the fixes already found against real providers: the schema keys ',dc('encrypted'),', ',dc('cache_control'),', ',dc('$id'),' and ',dc('example'),' for all providers, and Claude Code\'s billing line for Antigravity, which answers a false 429 when it sees it. Edit or delete them like any other entry.'),
+    ];
+  }},
+];
+function viewDocs(v,id){
+  const d=DOCS.find(x=>x.id===id)||DOCS[0];
+  header('Docs');
+  v.append(el('div',{class:'tabs',role:'tablist'},DOCS.map(x=>el('a',{role:'tab',href:'#/docs/'+x.id,'aria-selected':String(x===d),class:x===d?'on':''},x.title))),
+    el('article',{class:'doc'},d.body()));
+}
 
 // ---- Usage
 function viewUsage(v){

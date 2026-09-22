@@ -54,6 +54,9 @@ func (a *api) createAccount(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		baseURL = p.WithAccount(acct)
+	case registered && p.Setup == "oauth":
+		writeError(w, http.StatusBadRequest, "this provider's accounts sign in with OAuth; they cannot be added with a key")
+		return
 	case registered && p.Setup == "none":
 		secret = ""
 	case registered:

@@ -30,7 +30,8 @@ type Provider struct {
 	// anthropic when the caller uses the other one.
 	API string
 	// Setup tells the dashboard what a new connection needs besides a label:
-	// "key" (the default), "account" (a key and an account id) or "none".
+	// "key" (the default), "account" (a key and an account id), "none", or
+	// "oauth" (an account signs in; it cannot be added with a pasted key).
 	Setup string
 	// Models is the list to use when the upstream has no model endpoint.
 	Models []string
@@ -104,6 +105,7 @@ var registry = map[string]Provider{
 			"Originator": "codex_cli_rs",
 			"User-Agent": "codex_cli_rs/" + CodexCLIVersion,
 		},
+		Setup:         "oauth",
 		AccountHeader: "ChatGPT-Account-ID",
 		SessionHeader: "Session_id",
 		ModelsQuery:   "client_version=" + CodexCLIVersion,
@@ -120,6 +122,7 @@ var registry = map[string]Provider{
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
 		Identity:   map[string]string{"User-Agent": AntigravityUserAgent},
+		Setup:      "oauth",
 	},
 	"groq": {
 		ID:         "groq",

@@ -493,7 +493,7 @@ function viewProvider(v,p){
   if(!ok)v.append(el('div',{class:'notice'},'intact cannot call "'+pname(p)+'" yet, so these accounts are stored but not used.'));
   if(setupOf(p)==='account'&&list.some(a=>!a.baseUrl))v.append(el('div',{class:'notice'},'A connection without an account ID cannot be used. Delete it and add it again with the account ID.'));
   if(custom(p))v.append(el('div',{class:'muted small'},'Custom OpenAI-compatible provider · ',el('code',{text:list.find(a=>a.baseUrl).baseUrl})));
-  const addBtn=ok?el('button',{class:'primary',type:'button',onclick:()=>addAccount(p)},svg(ICON.plus),'Add'):null;
+  const addBtn=ok&&setupOf(p)!=='oauth'?el('button',{class:'primary',type:'button',onclick:()=>addAccount(p)},svg(ICON.plus),'Add'):null;
   const rows=list.map((a,i)=>{
     const sw=el('input',{type:'checkbox',checked:a.isActive,'aria-label':'Active: '+(a.label||a.id)});
     sw.onchange=async()=>{

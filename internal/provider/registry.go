@@ -104,6 +104,7 @@ var registry = map[string]Provider{
 		Identity: map[string]string{
 			"Originator": "codex_cli_rs",
 			"User-Agent": "codex_cli_rs/" + CodexCLIVersion,
+			"Version":    CodexCLIVersion,
 		},
 		Setup:         "oauth",
 		AccountHeader: "ChatGPT-Account-ID",
@@ -213,7 +214,7 @@ const (
 
 // CodexCLIVersion is the Codex CLI version intact presents; the backend hides
 // models that need a newer client.
-const CodexCLIVersion = "0.154.0"
+const CodexCLIVersion = "0.155.1"
 
 // Lookup returns the provider with this id.
 func Lookup(id string) (Provider, bool) {

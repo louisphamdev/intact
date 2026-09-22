@@ -86,6 +86,18 @@ func OpenAIToResponses(body []byte) ([]byte, error) {
 	}
 	if e := str(in["reasoning_effort"]); e != "" {
 		out["reasoning"] = obj{"effort": e, "summary": "auto"}
+		// With store off, the reasoning of a turn comes back encrypted so the
+		// next turn can hand it back; the Codex CLI always asks for it.
+		out["include"] = []any{"reasoning.encrypted_content"}
+	}
+	// Fields both APIs share keep their value; the Codex CLI sends each of them.
+	for _, k := range []string{"parallel_tool_calls", "service_tier", "prompt_cache_key", "safety_identifier"} {
+		if v, ok := in[k]; ok {
+			out[k] = v
+		}
+	}
+	if v := str(in["verbosity"]); v != "" {
+		out["text"] = obj{"verbosity": v}
 	}
 	return json.Marshal(out)
 }

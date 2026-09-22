@@ -169,8 +169,9 @@
 <aside>
   <a class="brand" href="#/providers" aria-label="intact home"><span class="logo"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c6cf6"/><stop offset="1" stop-color="#2dd4bf"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><path d="M16 6.5 24 9.6v6.1c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V9.6Z" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/><path d="m12.4 16.2 2.6 2.6 4.8-5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div><b>intact</b><small>credential proxy</small></div></a>
   <nav>
-  <a href="#/endpoint" data-nav="endpoint"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h16M12 4v16"/><circle cx="12" cy="12" r="8"/></svg>Endpoint</a>
+  <a href="#/endpoint" data-nav="endpoint"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h16M12 4v16"/><circle cx="12" cy="12" r="8"/></svg>Endpoint &amp; keys</a>
   <a href="#/providers" data-nav="providers"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/></svg>Providers<span class="ct" id="ctProv"></span></a>
+  <a href="#/filters" data-nav="filters"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 5h18l-7 8v6l-4-2v-4L3 5Z"/></svg>Filters<span class="ct" id="ctFilter"></span></a>
   <a href="#/usage" data-nav="usage"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Usage</a>
   </nav>
   <div class="spacer"></div>
@@ -198,6 +199,32 @@
         <label class="f" id="aKeyRow">API key<input name="secret" id="aKey" type="password" autocomplete="off"></label>
         <p class="hint" id="aNoKey" style="margin:0">This provider needs no key.</p>
         <div class="err-msg" id="aErr"></div>
+      </div>
+      <div class="mf"><button class="ghost" type="button" data-close>Cancel</button><button class="primary" type="submit">Save</button></div>
+    </form>
+  </div>
+</div>
+
+<!-- api key -->
+<div id="kModal" class="overlay" hidden>
+  <div class="modal sm" role="dialog" aria-modal="true" aria-labelledby="kTitle">
+    <div class="mh"><strong id="kTitle">Create API key</strong><button class="icon" type="button" data-close aria-label="Close">✕</button></div>
+    <div class="mb" id="kBody"></div>
+    <div class="mf" id="kFoot"></div>
+  </div>
+</div>
+
+<!-- filter -->
+<div id="fModal" class="overlay" hidden>
+  <div class="modal sm" role="dialog" aria-modal="true" aria-labelledby="fTitle">
+    <div class="mh"><strong id="fTitle">Add filter</strong><button class="icon" type="button" data-close aria-label="Close">✕</button></div>
+    <form id="fForm">
+      <div class="mb">
+        <label class="f">Applies to<select id="fProv"></select></label>
+        <label class="f">Kind<select id="fKind"></select><span class="hint" id="fKindHint"></span></label>
+        <label class="f">Pattern<input id="fPat" autocomplete="off" spellcheck="false" required></label>
+        <label class="f">Note<input id="fNote" autocomplete="off" placeholder="Why this is removed"></label>
+        <div class="err-msg" id="fErr"></div>
       </div>
       <div class="mf"><button class="ghost" type="button" data-close>Cancel</button><button class="primary" type="submit">Save</button></div>
     </form>
@@ -254,7 +281,7 @@ function avatar(id,sm){
   return el('span',{class:'av'+(sm?' sm':''),style:'background:'+pinfo(id).color,'aria-hidden':'true',text:t});
 }
 
-let S={accounts:[],usage:[],providers:[]};
+let S={accounts:[],usage:[],providers:[],filters:[],keys:[],envToken:false};
 const modelCache={}; // provider -> {ids:[...]} or {error:"…"}
 const setupOf=p=>(S.providers.find(x=>x.id===p)||{}).setup;
 // A provider is wired when this build registers it or a connection gives it a
@@ -297,8 +324,12 @@ document.addEventListener('keydown',e=>{
 
 // ---- data
 async function load(){
-  const [a,u,p]=await Promise.allSettled([api('/accounts'),api('/usage'),api('/providers')]);
+  const [a,u,p,f,k]=await Promise.allSettled([api('/accounts'),api('/usage'),api('/providers'),api('/filters'),api('/keys')]);
   S.accounts=a.status==='fulfilled'?a.value.accounts||[]:[];
+  S.filters=f.status==='fulfilled'?f.value.filters||[]:[];
+  S.keys=k.status==='fulfilled'?k.value.keys||[]:[];
+  S.envToken=k.status==='fulfilled'&&!!k.value.envToken;
+  $('ctFilter').textContent=S.filters.filter(x=>x.enabled).length||'';
   S.usage=u.status==='fulfilled'?u.value.usage||[]:[];
   S.providers=p.status==='fulfilled'?p.value.providers||[]:[];
   $('ctProv').textContent=new Set(S.accounts.map(x=>x.provider)).size||'';
@@ -333,6 +364,7 @@ function route(){
   const v=$('view');v.replaceChildren();
   if(page==='endpoint')return viewEndpoint(v);
   if(page==='usage')return viewUsage(v);
+  if(page==='filters')return viewFilters(v);
   if(page==='providers'&&parts[1])return viewProvider(v,decodeURIComponent(parts[1]));
   if(page!=='providers'){location.hash='#/providers';return}
   viewProviders(v);
@@ -341,7 +373,7 @@ window.addEventListener('hashchange',route);
 
 // ---- Endpoint
 function viewEndpoint(v){
-  header('Endpoint','One base URL for every provider. The model you ask for decides where the request goes.');
+  header('Endpoint & keys','One base URL for every provider. The model you ask for decides where the request goes.');
   const base=location.origin+'/v1';
   const provs=[...new Set(S.accounts.filter(a=>a.isActive).map(a=>a.provider))].filter(wired).sort((a,b)=>pname(a).localeCompare(pname(b)));
   const sel=el('select',{style:'width:auto','aria-label':'Provider'},provs.map(p=>el('option',{value:p,text:pname(p)})));
@@ -352,7 +384,7 @@ function viewEndpoint(v){
     const m=p+'/'+((r.ids&&r.ids[0])||'<model>');
     // Anthropic speaks the Messages API; every other provider here is OpenAI-shaped.
     const anth=p==='claude';
-    ex.textContent='# '+(anth?'Anthropic':'OpenAI-compatible')+' client\nbase_url = "'+base+'"\napi_key  = "<INTACT_API_TOKEN>"\nmodel    = "'+m+'"\n\n# curl\ncurl '+base+(anth?'/messages':'/chat/completions')+' \\\n  -H "Authorization: Bearer $INTACT_API_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"'+m+'",'+(anth?'"max_tokens":256,':'')+'"messages":[{"role":"user","content":"hi"}]}\''};
+    ex.textContent='# '+(anth?'Anthropic':'OpenAI-compatible')+' client\nbase_url = "'+base+'"\napi_key  = "<API key>"\nmodel    = "'+m+'"\n\n# curl\ncurl '+base+(anth?'/messages':'/chat/completions')+' \\\n  -H "Authorization: Bearer $INTACT_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"'+m+'",'+(anth?'"max_tokens":256,':'')+'"messages":[{"role":"user","content":"hi"}]}\''};
   sel.onchange=render;render();
   v.append(
     el('div',{class:'card pad sec'},
@@ -365,11 +397,14 @@ function viewEndpoint(v){
         el('code',{},'groq/llama-3.3-70b-versatile'),el('span',{class:'muted'},'Provider and model. intact removes the ',el('code',{},'groq/'),' prefix before it sends the request.'),
         el('code',{},'llama-3.3-70b-versatile'),el('span',{class:'muted'},'Model only. intact uses every provider that lists this model.')),
       el('p',{class:'muted small',style:'margin:0'},'Requests rotate across the active accounts that serve the model, and move to the next account on 429/500/503/409.')),
+    keysCard(),
     el('div',{class:'card pad sec'},
-      el('h2',{},'Authentication'),
-      el('p',{class:'muted',style:'margin:0'},'Send ',el('code',{},'Authorization: Bearer <INTACT_API_TOKEN>'),'. The token lives in the server environment file and is not shown here.')),
+      el('div',{class:'sech'},el('h2',{class:'grow'},'Example'),provs.length?sel:null),ex),
     el('div',{class:'card pad sec'},
-      el('div',{class:'sech'},el('h2',{class:'grow'},'Example'),provs.length?sel:null),ex));
+      el('h2',{},'MCP server'),
+      el('p',{class:'muted',style:'margin:0'},'Agents can list accounts, models and usage, and edit the filters, with the same API key.'),
+      copyLine(location.origin+'/mcp'),
+      el('pre',{text:'claude mcp add --transport http intact '+location.origin+'/mcp \\\n  --header "Authorization: Bearer <API key>"'})));
 }
 
 // ---- Providers
@@ -476,6 +511,103 @@ async function deleteAccount(a){
   if(!r.ok){alert('Delete failed');return}
   delete modelCache[a.provider];toast('Deleted');await load();
 }
+
+// ---- API keys
+function keysCard(){
+  const rows=S.keys.map(k=>{
+    const code=el('code',{class:'mono',text:k.masked});
+    const sw=el('input',{type:'checkbox',checked:k.enabled,'aria-label':'Enabled: '+k.name});
+    sw.onchange=async()=>{try{await postJSON('/keys/'+k.id+'/active',{active:sw.checked});k.enabled=sw.checked;route()}catch(e){sw.checked=!sw.checked;alert(e.message)}};
+    const reveal=async()=>{try{const r=await api('/keys/'+k.id+'/reveal',{method:'POST'});return r.key}catch(e){alert(e.message)}};
+    return el('div',{class:'row'+(k.enabled?'':' off')},
+      el('div',{class:'who'},el('div',{class:'l',text:k.name}),
+        el('div',{class:'meta'},code,el('span',{class:'faint small',text:'created '+k.createdAt.slice(0,10)}))),
+      el('button',{class:'icon',type:'button',title:'Show','aria-label':'Show '+k.name,onclick:async()=>{const f=await reveal();if(f)code.textContent=code.textContent===f?k.masked:f}},
+        svg(['M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z','M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z'])),
+      el('button',{class:'icon',type:'button',title:'Copy','aria-label':'Copy '+k.name,onclick:async()=>{const f=await reveal();if(f)copy(f,k.name)}},svg(ICON.copy)),
+      el('button',{class:'danger',type:'button',onclick:async()=>{if(!confirm('Delete key "'+k.name+'"? Clients using it stop working.'))return;
+        try{await api('/keys/'+k.id+'/delete',{method:'POST'});toast('Deleted');await load()}catch(e){alert(e.message)}}},svg(ICON.trash),'Delete'),
+      el('label',{class:'switch'},sw,el('span')));
+  });
+  return el('div',{class:'card'},
+    el('div',{class:'cardh'},el('h2',{class:'grow'},'API keys'),
+      el('button',{class:'primary',type:'button',onclick:createKey},svg(ICON.plus),'Create key')),
+    el('div',{style:'padding:.8rem 1.25rem',class:'muted small'},'Send a key as ',el('code',{},'Authorization: Bearer <key>'),' (or ',el('code',{},'x-api-key'),' for Anthropic clients) to /v1, /api and /mcp.'),
+    rows.length?rows:el('div',{class:'empty',style:'padding:1.25rem'},'No keys yet.'),
+    S.envToken?el('div',{class:'row'},el('div',{class:'who'},el('div',{class:'l',text:'Environment token'}),
+      el('div',{class:'meta'},el('span',{class:'faint small'},'INTACT_API_TOKEN in the server environment file also works; it is not shown here.')))):null);
+}
+function createKey(){
+  $('kTitle').textContent='Create API key';
+  const name=el('input',{placeholder:'e.g. laptop, hermes',autocomplete:'off'});
+  const err=el('div',{class:'err-msg'});
+  $('kBody').replaceChildren(el('label',{class:'f'},'Name',name),err);
+  const go=el('button',{class:'primary',type:'button'},'Create');
+  $('kFoot').replaceChildren(el('button',{class:'ghost',type:'button','data-close':true},'Cancel'),go);
+  const submit=async()=>{
+    try{
+      const k=await postJSON('/keys',{name:name.value.trim()});
+      $('kTitle').textContent='Key created';
+      $('kBody').replaceChildren(el('p',{class:'muted',style:'margin:0'},'Copy it now, or reveal it later from this page.'),copyLine(k.key));
+      $('kFoot').replaceChildren(el('button',{class:'primary',type:'button','data-close':true},'Done'));
+      await load();
+    }catch(e){err.textContent=e.message}
+  };
+  go.onclick=submit;name.onkeydown=e=>{if(e.key==='Enter')submit()};
+  openModal('kModal');
+}
+
+// ---- Filters
+const KINDS={
+  field:{name:'Body field',hint:'Dot path into the request body; * matches any key or list item.',ex:'messages.*.cache_control'},
+  schema:{name:'Schema key',hint:'Removed at every depth of each tool\'s JSON schema.',ex:'$id'},
+  system:{name:'System line',hint:'Regular expression; matching lines are removed from the system prompt.',ex:'^x-anthropic-billing-header:.*$'},
+  header:{name:'Header',hint:'A request header that is not sent to the provider.',ex:'anthropic-beta'},
+};
+function viewFilters(v){
+  header('Filters','Remove what a provider refuses before the request leaves. Changes apply to the next request.',
+    el('button',{class:'primary',type:'button',onclick:()=>editFilter(null)},svg(ICON.plus),'Add filter'));
+  v.append(el('div',{class:'muted',style:'display:grid;gap:.2rem'},
+    ...Object.values(KINDS).map(k=>el('div',{},el('b',{style:'color:var(--fg)',text:k.name}),' — '+k.hint+' ',el('code',{text:k.ex})))));
+  const scopes=[...new Set(S.filters.map(f=>f.provider))].sort((a,b)=>a==='*'?-1:b==='*'?1:pname(a).localeCompare(pname(b)));
+  if(!scopes.length){v.append(el('div',{class:'card empty'},el('b',{},'No filters'),'Add one when a provider rejects a field it does not know.'));return}
+  v.append(...scopes.map(sc=>el('div',{class:'card'},
+    el('div',{class:'cardh'},sc==='*'?el('span',{class:'av sm',style:'background:var(--accent-strong)',text:'*'}):avatar(sc,true),
+      el('h2',{class:'grow'},sc==='*'?'All providers':pname(sc))),
+    ...S.filters.filter(f=>f.provider===sc).map(f=>{
+      const sw=el('input',{type:'checkbox',checked:f.enabled,'aria-label':'Enabled'});
+      sw.onchange=async()=>{try{await postJSON('/filters',{...f,enabled:sw.checked});f.enabled=sw.checked;await load()}catch(e){sw.checked=!sw.checked;alert(e.message)}};
+      return el('div',{class:'row'+(f.enabled?'':' off')},
+        el('span',{class:'badge accent',style:'min-width:5.5rem;justify-content:center',text:(KINDS[f.kind]||{}).name||f.kind}),
+        el('div',{class:'who'},el('div',{class:'l mono',text:f.pattern}),f.note?el('div',{class:'faint small',text:f.note}):null),
+        el('button',{class:'ghost',type:'button',onclick:()=>editFilter(f)},svg(ICON.edit),'Edit'),
+        el('button',{class:'danger',type:'button',onclick:async()=>{if(!confirm('Delete this filter?'))return;
+          try{await api('/filters/'+f.id+'/delete',{method:'POST'});toast('Deleted');await load()}catch(e){alert(e.message)}}},svg(ICON.trash),'Delete'),
+        el('label',{class:'switch'},sw,el('span')));
+    }))));
+}
+let F=null;
+function editFilter(f){
+  F=f?{...f}:{provider:'*',kind:'field',pattern:'',note:'',enabled:true};
+  $('fTitle').textContent=f?'Edit filter':'Add filter';
+  const ids=[...new Set([...S.providers.map(x=>x.id),...S.accounts.map(a=>a.provider)])].sort((a,b)=>pname(a).localeCompare(pname(b)));
+  if(!ids.includes(F.provider)&&F.provider!=='*')ids.push(F.provider);
+  $('fProv').replaceChildren(el('option',{value:'*',text:'All providers'}),...ids.map(p=>el('option',{value:p,text:pname(p)+(pname(p)!==p?' ('+p+')':'')})));
+  $('fProv').value=F.provider;
+  $('fKind').replaceChildren(...Object.entries(KINDS).map(([k,d])=>el('option',{value:k,text:d.name})));
+  $('fKind').value=F.kind;
+  const hint=()=>{const d=KINDS[$('fKind').value];$('fKindHint').textContent=d.hint;$('fPat').placeholder=d.ex};
+  $('fKind').onchange=hint;hint();
+  $('fPat').value=F.pattern;$('fNote').value=F.note;$('fErr').textContent='';
+  openModal('fModal');
+}
+$('fForm').onsubmit=async e=>{
+  e.preventDefault();
+  try{
+    await postJSON('/filters',{...F,provider:$('fProv').value,kind:$('fKind').value,pattern:$('fPat').value.trim(),note:$('fNote').value.trim()});
+    closeModal('fModal');toast('Filter saved');await load();
+  }catch(err){$('fErr').textContent=err.message}
+};
 
 // ---- Usage
 function viewUsage(v){

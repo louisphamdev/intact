@@ -18,6 +18,14 @@ and drops the parts that alter the payload.
 - **Usage counter.** intact reads the `usage` object from each response and
   keeps a daily total per account and model. It reads the response; it never
   changes it.
+- **Both API shapes.** `/v1/chat/completions` (OpenAI) and `/v1/messages`
+  (Anthropic) reach a provider of either shape; intact translates the request
+  and the answer, streamed or whole, when they differ.
+- **Filters.** An editable blacklist removes what a provider refuses (a body
+  field, a tool-schema key, a system-prompt line, a header) before the request
+  leaves. See [Filters](#filters).
+- **Management API and MCP.** `/api/*` and an MCP server at `/mcp` let a machine
+  or an agent read accounts, models and usage and edit the filters.
 - **Model list.** The dashboard shows the models of a provider, read server-side.
 - **Authentication.** A person signs in with a TOTP code (an authenticator app).
   A machine sends a bearer token. There is no password.
@@ -76,7 +84,7 @@ or the shell.
 | Variable | Meaning |
 | --- | --- |
 | `INTACT_TOTP_SECRET` | The base32 TOTP secret for the login. When empty, the server has no gate (loopback only). |
-| `INTACT_API_TOKEN` | The token a machine sends to `/v1`, as `Authorization: Bearer` or `x-api-key`. |
+| `INTACT_API_TOKEN` | A token a machine sends to `/v1`, `/api` and `/mcp`, as `Authorization: Bearer` or `x-api-key`. Keys made in the dashboard work the same way. |
 | `INTACT_SESSION_KEY` | The key that signs the session cookie. A random key is generated when empty, so a restart then ends every session. |
 | `INTACT_SESSION_TTL` | The session lifetime in seconds (default 43200). |
 
@@ -91,6 +99,12 @@ To enroll:
 | Method and path | Gate | Purpose |
 | --- | --- | --- |
 | `GET /v1/models` | API token | Every model of every provider, as `<provider>/<model>`. |
+| `GET /api/providers`, `GET /api/accounts`, `GET /api/usage` | API token | Read the state. |
+| `POST /api/accounts/{id}/active` | API token | Turn an account on or off. |
+| `GET /api/filters`, `POST /api/filters`, `DELETE /api/filters/{id}` | API token | Read and edit the filters. |
+| `POST /mcp` | API token | MCP over Streamable HTTP; the same operations as tools. |
+| `GET/POST /keys…` | session | Create, reveal, switch off and delete API keys. |
+| `GET/POST /filters…` | session | The filters, for the dashboard. |
 | `/v1/{path...}` | API token | Forward to the accounts that serve the body's model, with rotation and failover. |
 | `GET /` | session | The dashboard: Endpoint, Providers (accounts and models per provider), Usage. |
 | `GET /accounts` | session | The connection list as JSON. |
@@ -123,6 +137,29 @@ curl https://intact.example/v1/chat/completions \
   reaches Anthropic. intact does not translate between the two.
 - **Failover.** The pool rotates per model. A busy status moves to the next
   account; an OAuth account that answers 401 is refreshed and retried once.
+
+## Filters
+
+A provider that meets a field it does not know often fails the whole request.
+A filter removes it just before the request leaves, after any translation.
+
+| Kind | Pattern | Removes |
+| --- | --- | --- |
+| `field` | `messages.*.cache_control` | A key at a dot path in the body; `*` matches any key or list item. |
+| `schema` | `$id` | A key at every depth of each tool's JSON schema (a parameter of that name is kept). |
+| `system` | `^x-anthropic-billing-header:.*$` | Lines of the system prompt matching the regex. |
+| `header` | `anthropic-beta` | A request header, including a provider default; never the credential. |
+
+A filter applies to one provider or to all (`*`), and takes effect on the next
+request. The first start seeds the fixes found against real providers (tool
+schema keys `encrypted`, `cache_control`, `$id`, `example`, and the Claude Code
+billing line for Antigravity). Add one from the dashboard, the API or MCP:
+
+```bash
+curl https://intact.example/api/filters -H "Authorization: Bearer $INTACT_KEY" \
+  -d '{"provider":"groq","kind":"field","pattern":"reasoning_effort","note":"groq rejects it"}'
+claude mcp add --transport http intact https://intact.example/mcp --header "Authorization: Bearer $INTACT_KEY"
+```
 
 ## Providers
 

@@ -5,15 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>intact</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="icon" href="/favicon.ico" sizes="32x32"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#7c6cf6">
+<script>try{const t=localStorage.getItem('intact-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
 <style>
   :root{color-scheme:dark;--bg:#0c1017;--side:#10151e;--card:#141a25;--card2:#1b2331;--line:#232d3d;--fg:#e4e9f1;
         --muted:#95a0b3;--faint:#657086;--accent:#8b80f9;--accent-strong:#6c5ce7;--accent-soft:rgba(139,128,249,.15);
         --accent-fg:#fff;--mint:#5eead4;--ok:#4ade80;--ok-soft:rgba(74,222,128,.12);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.1);
         --err:#fb7185;--err-soft:rgba(251,113,133,.12);--code:#5eead4;--shadow:0 20px 50px rgba(0,0,0,.55)}
-  @media (prefers-color-scheme:light){:root{color-scheme:light;--bg:#f3f5f9;--side:#fff;--card:#fff;--card2:#eef1f6;
+  /* Light colours: when the system asks for them, unless the user chose dark;
+     and always when the user chose light. */
+  @media (prefers-color-scheme:light){:root:not([data-theme=dark]){color-scheme:light;--bg:#f3f5f9;--side:#fff;--card:#fff;--card2:#eef1f6;
         --line:#dfe4ec;--fg:#141a25;--muted:#526076;--faint:#8591a5;--accent:#5b4bdb;--accent-strong:#5b4bdb;
         --accent-soft:rgba(91,75,219,.1);--mint:#0f9488;--ok:#15803d;--ok-soft:rgba(21,128,61,.1);--warn:#b45309;
         --warn-soft:rgba(180,83,9,.08);--err:#e11d48;--err-soft:rgba(225,29,72,.08);--code:#0f766e;--shadow:0 20px 50px rgba(20,26,37,.14)}}
+  :root[data-theme=light]{color-scheme:light;--bg:#f3f5f9;--side:#fff;--card:#fff;--card2:#eef1f6;
+        --line:#dfe4ec;--fg:#141a25;--muted:#526076;--faint:#8591a5;--accent:#5b4bdb;--accent-strong:#5b4bdb;
+        --accent-soft:rgba(91,75,219,.1);--mint:#0f9488;--ok:#15803d;--ok-soft:rgba(21,128,61,.1);--warn:#b45309;
+        --warn-soft:rgba(180,83,9,.08);--err:#e11d48;--err-soft:rgba(225,29,72,.08);--code:#0f766e;--shadow:0 20px 50px rgba(20,26,37,.14)}
+  :root[data-theme=dark]{color-scheme:dark}
   *{box-sizing:border-box}
   html,body{height:100%}
   body{font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:var(--bg);color:var(--fg);
@@ -46,6 +54,9 @@
   /* The content fills the window: tables and the quota grid use a wide
      screen. Docs keep a readable column, centred (.docwrap). */
   .content{padding:1.5rem 2rem 3rem;width:100%;display:grid;gap:1.5rem;align-content:start}
+  /* A grid item grows to its widest content by default; a wide table must
+     scroll inside its card instead of widening the page. */
+  .content>*{min-width:0}
   h2{font-size:1.02rem;margin:0;font-weight:600}
   .sec{display:grid;gap:.85rem}
   .sech{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap}
@@ -77,8 +88,8 @@
   .eff.def{background:var(--c);color:#fff;border-color:var(--c)}
   .eff-none{--c:#8b93a7}.eff-minimal,.eff-extra-low{--c:#60a5fa}.eff-low{--c:#38bdf8}.eff-medium{--c:#2dd4bf}
   .eff-high{--c:#f59e0b}.eff-xhigh{--c:#f97316}.eff-max{--c:#ef4444}.eff-ultra{--c:#d946ef}.eff-tiered{--c:#8b7cf6}
-  @media (prefers-color-scheme:light){.eff-none{--c:#6b7280}.eff-minimal,.eff-extra-low{--c:#2563eb}.eff-low{--c:#0284c7}.eff-medium{--c:#0d9488}
-    .eff-high{--c:#d97706}.eff-xhigh{--c:#ea580c}.eff-max{--c:#dc2626}.eff-ultra{--c:#c026d3}.eff-tiered{--c:#7c6cf6}}
+  @media (prefers-color-scheme:light){:root:not([data-theme=dark]) .eff-none{--c:#6b7280}:root:not([data-theme=dark]) .eff-minimal,:root:not([data-theme=dark]) .eff-extra-low{--c:#2563eb}:root:not([data-theme=dark]) .eff-low{--c:#0284c7}:root:not([data-theme=dark]) .eff-medium{--c:#0d9488}:root:not([data-theme=dark]) .eff-high{--c:#d97706}:root:not([data-theme=dark]) .eff-xhigh{--c:#ea580c}:root:not([data-theme=dark]) .eff-max{--c:#dc2626}:root:not([data-theme=dark]) .eff-ultra{--c:#c026d3}:root:not([data-theme=dark]) .eff-tiered{--c:#7c6cf6}}
+  :root[data-theme=light] .eff-none{--c:#6b7280}:root[data-theme=light] .eff-minimal,:root[data-theme=light] .eff-extra-low{--c:#2563eb}:root[data-theme=light] .eff-low{--c:#0284c7}:root[data-theme=light] .eff-medium{--c:#0d9488}:root[data-theme=light] .eff-high{--c:#d97706}:root[data-theme=light] .eff-xhigh{--c:#ea580c}:root[data-theme=light] .eff-max{--c:#dc2626}:root[data-theme=light] .eff-ultra{--c:#c026d3}:root[data-theme=light] .eff-tiered{--c:#7c6cf6}
   .badge{display:inline-flex;align-items:center;gap:.25rem;font-size:.7rem;font-weight:500;border-radius:6px;
          padding:.05rem .45rem;background:var(--card2);color:var(--muted);white-space:nowrap}
   .badge.ok{background:var(--ok-soft);color:var(--ok)}
@@ -196,6 +207,8 @@
   .qwin .top{display:flex;justify-content:space-between;gap:.5rem;font-size:.82rem}
   .qwin .top b{font-weight:550}
   [hidden]{display:none!important}
+  .prefs{display:flex;gap:.4rem;flex-wrap:wrap;padding:.25rem .5rem .6rem}
+  .seg.sm button{min-height:24px;padding:.1rem .55rem;font-size:.75rem}
   @media (max-width:820px){
     /* minmax(0,…) and min-width:0 keep the menu from widening the page to
        the width of all its links; the menu scrolls sideways instead. */
@@ -232,6 +245,7 @@
   <a href="#/usage" data-nav="usage"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Usage</a>
   </nav>
   <div class="spacer"></div>
+  <div class="prefs" id="prefs"></div>
   <form method="post" action="/logout"><button class="plain" type="submit"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 12H4m0 0 4-4m-4 4 4 4M13 4h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5"/></svg><span>Sign out</span></button></form>
 </aside>
 
@@ -311,6 +325,122 @@
 <div class="toast" id="toast" hidden></div>
 
 <script>
+const VI={
+// menu, frame
+'Endpoint':'Endpoint','Providers':'Nhà cung cấp','Blacklist':'Blacklist','Drift':'Drift','Docs':'Tài liệu','Quota':'Hạn mức','Usage':'Sử dụng',
+'Sign out':'Đăng xuất','credential proxy':'proxy tài khoản LLM','intact home':'Trang chủ intact','Close':'Đóng',
+'Auto':'Tự động','Follow the system':'Theo hệ thống','Light':'Sáng','Dark':'Tối',
+// common
+'Copy':'Sao chép','Copy {0}':'Sao chép {0}','Copied {0}':'Đã sao chép {0}','Cancel':'Huỷ','Save':'Lưu','Saved':'Đã lưu','Continue':'Tiếp tục',
+'Delete':'Xoá','Deleted':'Đã xoá','Delete failed':'Xoá thất bại','Delete {0}':'Xoá {0}','Delete "{0}"?':'Xoá "{0}"?','Edit':'Sửa','Edit {0}':'Sửa {0}','Done':'Xong',
+'Rename':'Đổi tên','Rename {0}':'Đổi tên {0}','Renamed':'Đã đổi tên','Show':'Hiện','Show {0}':'Hiện {0}','Name':'Tên','Create':'Tạo','Refresh':'Làm mới',
+'Loading…':'Đang tải…','Starting…':'Đang bắt đầu…','All':'Tất cả','New':'Mới','None':'Không có','Enabled':'Đang bật','Enabled: {0}':'Đang bật: {0}',
+'Active':'Đang bật','Off':'Tắt','active':'đang bật','off':'tắt','Test':'Test','Clear':'Bỏ chọn','Add':'Thêm','Login':'Đăng nhập','Sign in':'Đăng nhập',
+'Provider':'Nhà cung cấp','Account':'Tài khoản','Model':'Model','Kind':'Loại','Note':'Ghi chú','Type':'Kiểu','Field':'Trường','Seen':'Số lần thấy','Sample':'Mẫu',
+'Direction':'Chiều','Day':'Ngày','All days':'Mọi ngày','Input':'Vào','Output':'Ra','Requests':'Request','Input tokens':'Token vào','Output tokens':'Token ra',
+// endpoint
+'API keys':'API key','Base URL':'Base URL','Models':'Model','Auth':'Xác thực','Anthropic Messages API':'Anthropic Messages API','OpenAI Chat Completions API':'OpenAI Chat Completions API',
+'MCP server':'MCP server','Transport':'Giao thức','Create key':'Tạo key','No keys yet.':'Chưa có key nào.','Create API key':'Tạo API key','Key created':'Đã tạo key',
+'e.g. laptop, hermes':'ví dụ: laptop, hermes','created {0}':'tạo ngày {0}','Delete key "{0}"? Clients using it stop working.':'Xoá key "{0}"? Các client đang dùng nó sẽ ngừng hoạt động.',
+// providers
+'OpenAI compatible':'Tương thích OpenAI','Signs in as the real tool (OAuth)':'Đăng nhập như công cụ thật (OAuth)','Documented API with a key':'API công khai, dùng key',
+'Choose a provider':'Chọn nhà cung cấp','Connected':'Đã kết nối','Not connected yet':'Chưa kết nối','Signs in with the provider account':'Đăng nhập bằng tài khoản của nhà cung cấp',
+'Uses an API key':'Dùng API key','Search providers…':'Tìm nhà cung cấp…','Search providers':'Tìm nhà cung cấp','{0} connected':'{0} đã kết nối','{0} off':'{0} tắt',
+'No connections':'Chưa có kết nối','Sign in with':'Đăng nhập với','No account signed in yet.':'Chưa có tài khoản nào đăng nhập.','API providers':'Nhà cung cấp API',
+'Add API key':'Thêm API key','Add an API key for':'Thêm API key cho','No API provider connected yet.':'Chưa kết nối nhà cung cấp API nào.','Custom endpoints':'Endpoint tuỳ chỉnh',
+'Add endpoint':'Thêm endpoint','No custom endpoint yet.':'Chưa có endpoint tuỳ chỉnh.','Not supported yet':'Chưa hỗ trợ','{0} connection':'{0} kết nối','{0} connections':'{0} kết nối',
+'intact cannot call "{0}" yet, so these accounts are stored but not used.':'intact chưa gọi được "{0}", nên các tài khoản này được lưu nhưng chưa dùng.',
+'A connection without an account ID cannot be used. Delete it and add it again with the account ID.':'Kết nối thiếu account ID thì không dùng được. Hãy xoá rồi thêm lại kèm account ID.',
+'Custom OpenAI-compatible provider · ':'Nhà cung cấp tuỳ chỉnh tương thích OpenAI · ','Add token':'Thêm token','Active: {0}':'Đang bật: {0}','Connections':'Kết nối',
+'No connections yet':'Chưa có kết nối','Add an API key to start using {0}.':'Thêm API key để bắt đầu dùng {0}.','testing…':'đang test…','failed':'lỗi',
+'Send a short test call through this account only':'Gửi một lệnh gọi test ngắn qua riêng tài khoản này','(no name)':'(chưa đặt tên)',
+'Add connection':'Thêm kết nối','Add {0} connection':'Thêm kết nối {0}','Add a custom endpoint':'Thêm endpoint tuỳ chỉnh','Provider id':'Id nhà cung cấp','API standard':'Chuẩn API',
+'Account ID':'Account ID','This provider needs no key.':'Nhà cung cấp này không cần key.','e.g. tokenharbor':'ví dụ: tokenharbor','e.g. Work key':'ví dụ: Key công việc',
+'The API key is required.':'Cần nhập API key.','The account ID is required.':'Cần nhập account ID.','The provider id must be lowercase letters, digits or -.':'Id nhà cung cấp chỉ gồm chữ thường, số hoặc -.',
+'That id is a built-in provider; open it from the list instead.':'Id này là nhà cung cấp có sẵn; hãy mở nó từ danh sách.','Connection added':'Đã thêm kết nối',
+'The provider lists no models.':'Nhà cung cấp không liệt kê model nào.','Could not read the model list from the provider.':'Không đọc được danh sách model từ nhà cung cấp.',
+// sign-in
+'After signing in, the page shows a code. Copy it and paste it here.':'Sau khi đăng nhập, trang sẽ hiện một mã. Sao chép và dán vào đây.',
+'After signing in, the browser opens localhost:1455 and fails to load. Copy that whole URL from the address bar and paste it here.':'Sau khi đăng nhập, trình duyệt mở localhost:1455 và không tải được. Sao chép nguyên URL trên thanh địa chỉ rồi dán vào đây.',
+'After signing in, the browser opens localhost:51121 and fails to load. Copy that whole URL from the address bar and paste it here.':'Sau khi đăng nhập, trình duyệt mở localhost:51121 và không tải được. Sao chép nguyên URL trên thanh địa chỉ rồi dán vào đây.',
+'Login · {0}':'Đăng nhập · {0}','e.g. Work, Personal (default: the account email)':'ví dụ: Công việc, Cá nhân (mặc định: email tài khoản)','Signed in: {0}':'Đã đăng nhập: {0}',
+'1. Copy this code':'1. Sao chép mã này','2. Enter it at GitHub':'2. Nhập mã tại GitHub','Waiting for GitHub…':'Đang chờ GitHub…','Paste the URL or code':'Dán URL hoặc mã',
+'1. Open the sign-in page':'1. Mở trang đăng nhập','Open {0} sign-in':'Mở trang đăng nhập {0}',
+// model table
+'Thinking':'Thinking','Failed':'Lỗi','Untested':'Chưa test','The provider serves it only on a paid plan':'Nhà cung cấp chỉ phục vụ model này ở gói trả phí','paid plan':'gói trả phí',
+'One model per level upstream; intact picks the level from the effort the request asks for. Without one: {0}.':'Phía nhà cung cấp mỗi mức là một model; intact chọn mức theo effort mà request yêu cầu. Không nêu effort: {0}.',
+'Always thinks; it cannot be switched off.':'Luôn suy nghĩ; không tắt được.','Supports thinking; effort levels the request may ask for.':'Hỗ trợ thinking; các mức effort request có thể yêu cầu.',
+'Supports thinking.':'Hỗ trợ thinking.','thinking · always':'thinking · luôn bật','Default — used when the request names no effort':'Mặc định — dùng khi request không nêu effort',
+'Default when the request names none':'Mặc định khi request không nêu','Variant {0}':'Biến thể {0}','Filter by name — free, free|mini, -preview, /regex/':'Lọc theo tên — free, free|mini, -preview, /regex/',
+'Select every model shown':'Chọn mọi model đang hiện','{0} of {1} on · {2} shown':'{0}/{1} đang bật · hiện {2}','list fetched {0}':'fetch lúc {0}','last fetch failed':'lần fetch gần nhất lỗi',
+'{0} selected':'Đã chọn {0}','Turn on':'Bật','Turn off':'Tắt','Keep only these on':'Chỉ bật các mục này','Turn on the {0} selected and turn off {1} other model(s)?':'Bật {0} model đã chọn và tắt {1} model khác?',
+'Turn the selected models on and every other model of this provider off':'Bật các model đã chọn và tắt mọi model khác của nhà cung cấp này','No model matches.':'Không có model nào khớp.','No models yet.':'Chưa có model nào.',
+'Select {0}':'Chọn {0}','On: {0}':'Bật: {0}','On':'Bật',
+"Test every free model of {0} in the background and keep on only those that answer? Tests use the provider's quota.":'Test ngầm mọi model free của {0} và chỉ bật những model trả lời được? Việc test dùng hạn mức của nhà cung cấp.',
+"Test every model of {0} in the background and keep on only those that answer? Tests use the provider's quota.":'Test ngầm mọi model của {0} và chỉ bật những model trả lời được? Việc test dùng hạn mức của nhà cung cấp.',
+'Auto test':'Tự test','Only free':'Chỉ free',
+'Fetch the list, test each model, keep on only those that answer; models the provider dropped are deleted. Runs again every 6 hours and for every new model.':'Fetch danh sách, test từng model, chỉ bật model trả lời được; model nhà cung cấp đã bỏ sẽ bị xoá. Chạy lại mỗi 6 giờ và với mọi model mới.',
+'Only models whose name contains "free" are on (and tested).':'Chỉ bật (và test) các model có chữ "free" trong tên.','Last run {0} · {1}':'Lần chạy gần nhất {0} · {1}','{0} of {1} tested work':'{0}/{1} model test dùng được',
+'New models start on when free.':'Model mới được bật nếu là model free.','New models start on.':'Model mới được bật sẵn.','Fetch the model list from the provider now':'Fetch danh sách model từ nhà cung cấp ngay',
+'Fetching…':'Đang fetch…','Fetch failed; nothing was removed':'Fetch lỗi; không xoá gì','Fetched {0} models':'Đã fetch {0} model','{0} new':'{0} mới','{0} removed':'{0} bị xoá','no change':'không đổi',
+'Fetch now':'Fetch ngay','Effort':'Effort','Last test':'Test gần nhất','free':'free','clear':'xoá lọc',
+// blacklist
+'Body field':'Trường body','Fields':'Trường','Schema key':'Key schema','Schema keys':'Key schema','System line':'Dòng system','System lines':'Dòng system','Header':'Header','Headers':'Header',
+'Block {0}':'Chặn {0}','Edit blocked {0}':'Sửa mục chặn {0}','Nothing blocked':'Chưa chặn gì','All providers':'Tất cả nhà cung cấp','Unblock "{0}"?':'Bỏ chặn "{0}"?','Removed':'Đã bỏ',
+'Blocked':'Đã chặn','Blocked {0}':'Đã chặn {0}','Block':'Chặn','Applies to':'Áp dụng cho',
+// drift
+'type changed':'đổi kiểu','Acknowledge all':'Đánh dấu đã xem tất cả','No new changes':'Không có thay đổi mới','No changes recorded':'Chưa ghi nhận thay đổi nào',
+'Add {0} to the blacklist of {1}':'Thêm {0} vào blacklist của {1}','Ack':'Đã xem','Requests from clients':'Request từ client','Answers from the provider':'Response từ nhà cung cấp',
+'Nothing learned yet':'Chưa học được gì','Endpoint · event':'Endpoint · event','(gone)':'(đã mất)',
+// quota
+'resets in {0}':'reset sau {0}','resetting':'đang reset','{0}% used':'đã dùng {0}%','Reading quota…':'Đang đọc hạn mức…','No quota data to choose from.':'Không có dữ liệu hạn mức để chọn.',
+'Nothing to show. Use Edit to choose what to show.':'Không có gì để hiện. Bấm Sửa để chọn mục cần hiện.','From the rate-limit headers of the last answer, {0}':'Từ header rate-limit của response gần nhất, {0}',
+'last answer':'response gần nhất','Main only':'Chỉ mục chính','applies to every {0} account':'áp dụng cho mọi tài khoản {0}','Per model':'Theo model',
+// usage
+'No usage recorded yet':'Chưa ghi nhận lượt dùng nào','Requests through /v1 show up here.':'Các request qua /v1 sẽ hiện ở đây.','(deleted)':'(đã xoá)',
+// docs tabs
+'Introduction':'Giới thiệu',
+};
+// ---- Language and theme
+// The page is written in English; in Vietnamese each fixed string is looked up
+// in VI as a whole. Text built with data uses a template: t('Delete "{0}"?', x).
+// el() translates the strings it is given, and the static HTML is translated
+// once at start, so a string not in VI (a model name, an account) stays as is.
+const LANGS={en:'EN',vi:'VI'};
+let LANG=(()=>{try{const v=localStorage.getItem('intact-lang');if(LANGS[v])return v}catch(e){}
+  return (navigator.language||'').toLowerCase().startsWith('vi')?'vi':'en'})();
+document.documentElement.lang=LANG;
+function tr(s){if(LANG==='en'||typeof s!=='string')return s;const v=VI[s];return v===undefined?s:v}
+function t(s,...args){let out=tr(s);args.forEach((a,i)=>{out=out.split('{'+i+'}').join(String(a))});return out}
+function setLang(l){try{localStorage.setItem('intact-lang',l)}catch(e){}location.reload()}
+const _alert=window.alert.bind(window),_confirm=window.confirm.bind(window);
+window.alert=m=>_alert(tr(m));window.confirm=m=>_confirm(tr(m));
+// tResult reads the server's auto-test summary ("17 of 22 tested work").
+function tResult(r){const m=/^(\d+) of (\d+) tested work$/.exec(r||'');return m?t('{0} of {1} tested work',m[1],m[2]):(r||'')}
+function translateStatic(root){
+  if(LANG==='en')return;
+  const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);
+  for(let n=w.nextNode();n;n=w.nextNode()){
+    const s=n.nodeValue.trim();if(!s)continue;
+    const v=VI[s];if(v!==undefined)n.nodeValue=n.nodeValue.replace(s,v);
+  }
+  for(const e of root.querySelectorAll('[placeholder],[title],[aria-label]'))
+    for(const a of ['placeholder','title','aria-label']){const v=e.getAttribute(a);if(v&&VI[v]!==undefined)e.setAttribute(a,VI[v])}
+}
+// Theme: auto follows the system; light or dark is the user's choice, kept in
+// this browser. The attribute is set in <head> too, before the page paints.
+const THEMES=['auto','light','dark'];
+let THEME=(()=>{try{const v=localStorage.getItem('intact-theme');if(THEMES.includes(v))return v}catch(e){}return 'auto'})();
+function applyTheme(){if(THEME==='auto')delete document.documentElement.dataset.theme;else document.documentElement.dataset.theme=THEME}
+function setTheme(v){THEME=v;try{localStorage.setItem('intact-theme',v)}catch(e){}applyTheme();paintPrefs()}
+function paintPrefs(){
+  const box=document.getElementById('prefs');if(!box)return;
+  const seg=(items,cur,on)=>el('span',{class:'seg sm'},...items.map(([k,label,title])=>
+    el('button',{type:'button','aria-pressed':String(k===cur),title:title||label,onclick:()=>on(k)},label)));
+  box.replaceChildren(
+    seg(Object.entries(LANGS).map(([k,n])=>[k,n,k==='en'?'English':'Tiếng Việt']),LANG,l=>{if(l!==LANG)setLang(l)}),
+    seg([['auto','Auto','Follow the system'],['light','☀','Light'],['dark','☾','Dark']],THEME,setTheme));
+}
 // Every string shown comes from stored data or a provider response, so it is
 // written with textContent, never innerHTML, to keep it from injecting HTML.
 const $=id=>document.getElementById(id);
@@ -318,10 +448,11 @@ function el(tag,props,...kids){
   const e=document.createElement(tag);
   for(const [k,v] of Object.entries(props||{})){
     if(v===false||v==null)continue;
-    if(k==='class')e.className=v; else if(k==='text')e.textContent=v;
-    else if(k.startsWith('on'))e.addEventListener(k.slice(2),v); else e.setAttribute(k,v===true?'':v);
+    if(k==='class')e.className=v; else if(k==='text')e.textContent=tr(v);
+    else if(k.startsWith('on'))e.addEventListener(k.slice(2),v);
+    else e.setAttribute(k,v===true?'':(k==='title'||k==='placeholder'||k==='aria-label')?tr(v):v);
   }
-  for(const c of kids.flat())if(c!=null&&c!==false)e.append(c);
+  for(const c of kids.flat())if(c!=null&&c!==false)e.append(typeof c==='string'?tr(c):c);
   return e;
 }
 function svg(paths,cls){
@@ -376,13 +507,13 @@ const accountsOf=p=>S.accounts.filter(a=>a.provider===p);
 const activeOf=p=>accountsOf(p).filter(a=>a.isActive);
 const accById=id=>S.accounts.find(a=>a.id===id);
 
-function toast(msg){const t=$('toast');t.textContent=msg;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,1800)}
+function toast(msg){const t=$('toast');t.textContent=tr(msg);t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,1800)}
 function copy(text,what){
-  const done=()=>toast('Copied '+(what||text));
+  const done=()=>toast(t('Copied {0}',what||text));
   if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(text).then(done,()=>{});
   else{const t=el('textarea',{style:'position:fixed;opacity:0'});t.value=text;document.body.append(t);t.select();document.execCommand('copy');t.remove();done()}
 }
-const copyBtn=(text,what)=>el('button',{class:'icon',type:'button',title:'Copy','aria-label':'Copy '+(what||text),onclick:()=>copy(text,what)},svg(ICON.copy));
+const copyBtn=(text,what)=>el('button',{class:'icon',type:'button',title:'Copy','aria-label':t('Copy {0}',what||text),onclick:()=>copy(text,what)},svg(ICON.copy));
 const copyLine=text=>el('div',{class:'copyline'},el('code',{text}),copyBtn(text));
 async function api(path,opts){
   const r=await fetch(path,opts);
@@ -536,7 +667,7 @@ const isCustom=p=>!infoOf(p).id&&accountsOf(p).some(a=>a.baseUrl);
 // chooseProvider asks for one provider from a list, in a combobox so the list
 // can grow without filling the screen.
 function chooseProvider(title,ids,onPick){
-  $('chTitle').textContent=title;
+  $('chTitle').textContent=t(title);
   const sel=el('select',{'aria-label':'Provider'},
     ...[['Connected',ids.filter(p=>accountsOf(p).length)],['Not connected yet',ids.filter(p=>!accountsOf(p).length)]]
       .filter(g=>g[1].length).map(([label,list])=>el('optgroup',{label},list.map(p=>el('option',{value:p,text:pname(p)+(accountsOf(p).length?' ('+accountsOf(p).length+')':'')})))));
@@ -565,7 +696,7 @@ function viewProviders(v){
       el('div',{style:'min-width:0'},
         el('div',{class:'nm',text:pname(p)}),
         el('div',{style:'display:flex;gap:.45rem;align-items:center;flex-wrap:wrap'},
-          el('span',{class:'status'+(act?' on':''),text:n?act+' connected'+(act<n?' · '+(n-act)+' off':''):'No connections'}),
+          el('span',{class:'status'+(act?' on':''),text:n?t('{0} connected',act)+(act<n?' · '+t('{0} off',n-act):''):'No connections'}),
           api?el('span',{class:'badge',text:{openai:'OpenAI',anthropic:'Anthropic',responses:'Responses'}[api]||api}):null)));
   };
   const group=(title,list,addLabel,onAdd,empty)=>el('div',{class:'sec'},
@@ -590,15 +721,15 @@ function viewProvider(v,p){
   const list=accountsOf(p),ok=wired(p);
   header(el('div',{style:'display:flex;align-items:center;gap:.6rem'},
     el('a',{class:'crumb',href:'#/providers'},'Providers'),el('span',{class:'faint'},'›'),avatar(p,true),el('h1',{text:pname(p)}),authTag(p)),
-    list.length+' connection'+(list.length===1?'':'s'));
-  if(!ok)v.append(el('div',{class:'notice'},'intact cannot call "'+pname(p)+'" yet, so these accounts are stored but not used.'));
+    t(list.length===1?'{0} connection':'{0} connections',list.length));
+  if(!ok)v.append(el('div',{class:'notice'},t('intact cannot call "{0}" yet, so these accounts are stored but not used.',pname(p))));
   if(setupOf(p)==='account'&&list.some(a=>!a.baseUrl))v.append(el('div',{class:'notice'},'A connection without an account ID cannot be used. Delete it and add it again with the account ID.'));
   if(custom(p))v.append(el('div',{class:'muted small'},'Custom OpenAI-compatible provider · ',el('code',{text:list.find(a=>a.baseUrl).baseUrl})));
   const loginBtn=LOGIN[p]?el('button',{class:'primary',type:'button',onclick:()=>startLogin(p)},svg(ICON.plus),'Login'):null;
   const keyBtn=ok&&setupOf(p)!=='oauth'?el('button',{class:loginBtn?'ghost':'primary',type:'button',onclick:()=>addAccount(p)},svg(ICON.plus),loginBtn?'Add token':'Add'):null;
   const addBtn=loginBtn||keyBtn?el('span',{style:'display:inline-flex;gap:.5rem'},loginBtn,keyBtn):null;
   const rows=list.map((a,i)=>{
-    const sw=el('input',{type:'checkbox',checked:a.isActive,'aria-label':'Active: '+(a.label||a.id)});
+    const sw=el('input',{type:'checkbox',checked:a.isActive,'aria-label':t('Active: {0}',a.label||a.id)});
     sw.onchange=async()=>{
       try{await postJSON('/accounts/'+a.id+'/active',{active:sw.checked});a.isActive=sw.checked;delete modelCache[p];route()}
       catch(e){sw.checked=!sw.checked;alert(e.message)}
@@ -618,7 +749,7 @@ function viewProvider(v,p){
   v.append(el('div',{class:'card'},
     el('div',{class:'cardh'},el('h2',{class:'grow'},'Connections'),
       null),
-    list.length?rows:el('div',{class:'empty'},el('b',{},'No connections yet'),ok?'Add an API key to start using '+pname(p)+'.':null,addBtn),
+    list.length?rows:el('div',{class:'empty'},el('b',{},'No connections yet'),ok?t('Add an API key to start using {0}.',pname(p)):null,addBtn),
     list.length&&addBtn?el('div',{style:'padding:.8rem 1.25rem;border-top:1px solid var(--line)'},addBtn):null));
   if(ok&&activeOf(p).length)v.append(modelTable(p));
   loadAcctTests();
@@ -629,12 +760,12 @@ let acctTests={};const acctTestEls={};
 async function loadAcctTests(){try{acctTests=await api('/account-tests')}catch(e){acctTests={}}for(const id in acctTestEls)paintAcctTest(id)}
 function acctTest(a){const s=el('span',{class:'small'});acctTestEls[a.id]=s;paintAcctTest(a.id);return s}
 function paintAcctTest(id,busy){
-  const s=acctTestEls[id];if(!s)return;const t=acctTests[id];
-  if(busy){s.className='small faint';s.textContent='testing…';s.title='';return}
-  if(!t){s.textContent='';return}
-  s.className='small';s.style.color=t.ok?'var(--ok)':'var(--err)';
-  s.textContent=(t.ok?'✓ '+t.ms+' ms':'✗ '+(t.message||'failed').slice(0,50))+' · '+t.model;
-  s.title=(t.message||'')+'\n'+new Date(t.at).toLocaleString();
+  const s=acctTestEls[id];if(!s)return;const rec=acctTests[id];
+  if(busy){s.className='small faint';s.textContent=t('testing…');s.title='';return}
+  if(!rec){s.textContent='';return}
+  s.className='small';s.style.color=rec.ok?'var(--ok)':'var(--err)';
+  s.textContent=(rec.ok?'✓ '+rec.ms+' ms':'✗ '+(rec.message||t('failed')).slice(0,50))+' · '+rec.model;
+  s.title=(rec.message||'')+'\n'+new Date(rec.at).toLocaleString();
 }
 function acctTestBtn(a){
   const b=el('button',{class:'ghost',type:'button',title:'Send a short test call through this account only'},'Test');
@@ -648,7 +779,7 @@ function acctTestBtn(a){
 function labelEditor(a){
   const box=el('div',{class:'l',style:'display:flex;align-items:center;gap:.3rem'});
   const show=()=>box.replaceChildren(el('span',{style:'overflow:hidden;text-overflow:ellipsis',text:a.label||'(no name)'}),
-    el('button',{class:'icon',type:'button',title:'Rename','aria-label':'Rename '+(a.label||a.id),style:'min-height:24px;min-width:24px',onclick:edit},svg(ICON.edit)));
+    el('button',{class:'icon',type:'button',title:'Rename','aria-label':t('Rename {0}',a.label||a.id),style:'min-height:24px;min-width:24px',onclick:edit},svg(ICON.edit)));
   const edit=()=>{
     const inp=el('input',{value:a.label||'',style:'min-height:30px;padding:.2rem .5rem;max-width:22rem'});
     let busy=false;
@@ -680,8 +811,8 @@ const MODEL_VIEWS=[['all','All'],['active','Active'],['inactive','Off'],['thinki
 function thinkChips(info,variants){
   const paid=info&&info.paid?el('span',{class:'badge warn',style:'margin-left:.45rem',title:'The provider serves it only on a paid plan'},'paid plan'):null;
   if(!info||!info.thinking)return paid;
-  const tip=variants?'One model per level upstream; intact picks the level from the effort the request asks for. Without one: '+(info.default||'none')+'.':
-    info.always?'Always thinks; it cannot be switched off.':'Supports thinking'+(info.efforts&&info.efforts.length?'; effort levels the request may ask for':'')+'.';
+  const tip=variants?t('One model per level upstream; intact picks the level from the effort the request asks for. Without one: {0}.',info.default||'none'):
+    info.always?t('Always thinks; it cannot be switched off.'):t(info.efforts&&info.efforts.length?'Supports thinking; effort levels the request may ask for.':'Supports thinking.');
   return el('span',{style:'margin-left:.45rem;display:inline-flex;gap:.3rem;align-items:center;flex-wrap:wrap',title:tip},
     el('span',{class:'badge ok'},info.always?'thinking · always':'thinking'),paid);
 }
@@ -693,7 +824,7 @@ function effortChips(info,variants){
   return el('span',{style:'display:inline-flex;gap:.25rem;flex-wrap:nowrap'},...list.map(e=>{
     const v=e||'none',def=e===info.default;
     return el('span',{class:'eff eff-'+(/^[a-z-]+$/.test(v)?v:'none')+(def?' def':''),
-      title:(def?'Default':'')+(variants?(def?' — used when the request names no effort':'Variant '+v):(def?' when the request names none':''))},v);
+      title:def?t(variants?'Default — used when the request names no effort':'Default when the request names none'):(variants?t('Variant {0}',v):'')},v);
   }));
 }
 function modelTable(p){
@@ -734,16 +865,16 @@ function modelTable(p){
     for(const m of [...st.sel])if(!visible.has(m))st.sel.delete(m);
     const sel=selected();
     paintPolicy();
-    counts.textContent=on+' of '+st.rows.length+' on · '+list.length+' shown'+(st.ok?(st.fetchedAt?' · list fetched '+new Date(st.fetchedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):''):' · last fetch failed');
+    counts.textContent=t('{0} of {1} on · {2} shown',on,st.rows.length,list.length)+(st.ok?(st.fetchedAt?' · '+t('list fetched {0}',new Date(st.fetchedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})):''):' · '+t('last fetch failed'));
     seg.replaceChildren(...MODEL_VIEWS.map(([k,n])=>el('button',{type:'button','aria-pressed':String(st.view===k),onclick:()=>{st.view=k;render()}},n)));
     all.checked=list.length>0&&sel.length===list.length;all.indeterminate=sel.length>0&&sel.length<list.length;all.disabled=!list.length;
     bar.hidden=!sel.length;
-    bar.replaceChildren(el('b',{style:'font-size:.85rem;margin-right:.4rem',text:sel.length+' selected'}),
+    bar.replaceChildren(el('b',{style:'font-size:.85rem;margin-right:.4rem',text:t('{0} selected',sel.length)}),
       act('Turn on',()=>setActive(sel.filter(r=>!r.active).map(r=>r.model),true),{disabled:sel.every(r=>r.active)}),
       act('Turn off',()=>setActive(sel.filter(r=>r.active).map(r=>r.model),false),{disabled:sel.every(r=>!r.active)}),
       act('Keep only these on',async()=>{
         const keep=new Set(sel.map(r=>r.model)),off=st.rows.filter(r=>!keep.has(r.model)&&r.active);
-        if(off.length&&!confirm('Turn on the '+keep.size+' selected and turn off '+off.length+' other model(s)?'))return;
+        if(off.length&&!confirm(t('Turn on the {0} selected and turn off {1} other model(s)?',keep.size,off.length)))return;
         await setActive(sel.filter(r=>!r.active).map(r=>r.model),true);await setActive(off.map(r=>r.model),false);
       },{title:'Turn the selected models on and every other model of this provider off'}),
       act('Test',async()=>{let i=0;const list=sel;const next=async()=>{while(i<list.length)await test(list[i++])};await Promise.all([next(),next(),next()])}),
@@ -751,16 +882,16 @@ function modelTable(p){
       act('Clear',()=>{st.sel.clear();render()}));
     if(!list.length){body.replaceChildren(el('tr',{},el('td',{colspan:6,class:'empty',text:st.rows.length?'No model matches.':'No models yet.'})));return}
     body.replaceChildren(...list.map(r=>{
-      const pick=el('input',{type:'checkbox',checked:st.sel.has(r.model),'aria-label':'Select '+r.model,style:'width:auto;min-height:0'});
+      const pick=el('input',{type:'checkbox',checked:st.sel.has(r.model),'aria-label':t('Select {0}',r.model),style:'width:auto;min-height:0'});
       pick.onchange=()=>{pick.checked?st.sel.add(r.model):st.sel.delete(r.model);render()};
-      const sw=el('input',{type:'checkbox',checked:r.active,'aria-label':'On: '+r.model});
+      const sw=el('input',{type:'checkbox',checked:r.active,'aria-label':t('On: {0}',r.model)});
       sw.onchange=()=>setActive([r.model],sw.checked).catch(e=>{alert(e.message);sw.checked=!sw.checked});
       const res=r.testing?el('span',{class:'faint small',text:'testing…'}):r.testAt?el('span',{class:'small',title:r.testMsg||'',style:'color:'+(r.testOk?'var(--ok)':'var(--err)')},
         (r.testOk?'✓ ':'✗ ')+(r.testOk?(r.testMs+' ms'):(r.testMsg||'failed')).slice(0,60)+(r.testConn?' · '+acctName(r.testConn):'')):el('span',{class:'faint small',text:'—'});
       return el('tr',{class:(r.active?'':'off')+(st.sel.has(r.model)?' selrow':'')},
         el('td',{style:'width:2.5rem'},pick),
         el('td',{style:'width:3.5rem'},el('label',{class:'switch',title:r.active?'On':'Off'},sw,el('span'))),
-        el('td',{},el('button',{class:'plain mono',type:'button',title:'Copy '+p+'/'+r.model,style:'min-height:0;padding:.1rem .2rem;text-align:left',onclick:()=>copy(p+'/'+r.model)},r.model),
+        el('td',{},el('button',{class:'plain mono',type:'button',title:t('Copy {0}',p+'/'+r.model),style:'min-height:0;padding:.1rem .2rem;text-align:left',onclick:()=>copy(p+'/'+r.model)},r.model),
           thinkChips(st.info[r.model],!!st.variants[r.model])),
         el('td',{style:'white-space:nowrap'},effortChips(st.info[r.model],!!st.variants[r.model])),
         el('td',{style:'max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'},res),
@@ -774,7 +905,7 @@ function modelTable(p){
     const i=el('input',{type:'checkbox','aria-label':label});
     i.onchange=async()=>{
       const next={autoTest:!!st.policy.autoTest,onlyFree:!!st.policy.onlyFree,[key]:i.checked};
-      if(next.autoTest&&!st.policy.autoTest&&!confirm('Test every '+(next.onlyFree?'free ':'')+'model of '+pname(p)+' in the background and keep on only those that answer? Tests use the provider\'s quota.')){i.checked=false;return}
+      if(next.autoTest&&!st.policy.autoTest&&!confirm(t(next.onlyFree?'Test every free model of {0} in the background and keep on only those that answer? Tests use the provider\'s quota.':'Test every model of {0} in the background and keep on only those that answer? Tests use the provider\'s quota.',pname(p)))){i.checked=false;return}
       try{const d=await postJSON('/providers/'+p+'/model-policy',next);st.policy=d.policy;st.running=d.running;delete modelCache[p];await load(false)}
       catch(e){i.checked=!i.checked;alert(e.message)}
     };
@@ -788,19 +919,19 @@ function modelTable(p){
     at.i.checked=!!st.policy.autoTest;of.i.checked=!!st.policy.onlyFree;
     // Auto test runs in the background: nothing waits on it; results fill the
     // table as they come.
-    polMsg.textContent=st.policy.autoTest&&st.policy.lastRun?'Last run '+new Date(st.policy.lastRun).toLocaleString()+' · '+st.policy.lastResult:
-      st.policy.autoTest?'':'New models start on'+(st.policy.onlyFree?' when free':'')+'.';
+    polMsg.textContent=st.policy.autoTest&&st.policy.lastRun?t('Last run {0} · {1}',new Date(st.policy.lastRun).toLocaleString(),tResult(st.policy.lastResult)):
+      st.policy.autoTest?'':t(st.policy.onlyFree?'New models start on when free.':'New models start on.');
   };
   let poll=null;
   const fetchBtn=el('button',{class:'primary',type:'button',style:'min-height:30px;font-size:.8rem',title:'Fetch the model list from the provider now',onclick:async()=>{
     const before=new Set(st.rows.map(r=>r.model));
-    fetchBtn.disabled=true;fetchBtn.lastChild.textContent='Fetching…';
+    fetchBtn.disabled=true;fetchBtn.lastChild.textContent=t('Fetching…');
     try{await load(true);
       if(!st.ok){toast('Fetch failed; nothing was removed');return}
       const after=new Set(st.rows.map(r=>r.model));
       const added=[...after].filter(m=>!before.has(m)).length,gone=[...before].filter(m=>!after.has(m)).length;
-      toast('Fetched '+after.size+' models'+(added?' · '+added+' new':'')+(gone?' · '+gone+' removed':'')+(!added&&!gone?' · no change':''));
-    }finally{fetchBtn.disabled=false;fetchBtn.lastChild.textContent='Fetch now'}
+      toast(t('Fetched {0} models',after.size)+(added?' · '+t('{0} new',added):'')+(gone?' · '+t('{0} removed',gone):'')+(!added&&!gone?' · '+t('no change'):''));
+    }finally{fetchBtn.disabled=false;fetchBtn.lastChild.textContent=t('Fetch now')}
   }},svg(ICON.fetch),el('span',{},'Fetch now'));
   const load=async refresh=>{
     if(!st.rows.length)body.replaceChildren(el('tr',{},el('td',{colspan:6,class:'empty',text:refresh?'Fetching…':'Loading…'})));
@@ -814,7 +945,7 @@ function modelTable(p){
     }
     catch(e){body.replaceChildren(el('tr',{},el('td',{colspan:6,class:'empty',text:e.message})))}
   };
-  let t=null;q.oninput=()=>{clearTimeout(t);t=setTimeout(()=>{st.q=q.value;render()},120)};
+  let timer=null;q.oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>{st.q=q.value;render()},120)};
   const chip=(label,val)=>el('button',{class:'chip',type:'button',onclick:()=>{q.value=val;st.q=val;render()}},label);
   card.append(
     el('div',{class:'cardh'},el('h2',{class:'grow'},'Models'),counts,
@@ -831,7 +962,7 @@ function modelTable(p){
 function addAccount(p){
   // p is null for a new custom OpenAI-compatible provider.
   const setup=p?(setupOf(p)||(custom(p)?'custom':'key')):'custom';
-  $('aTitle').textContent=p?'Add '+pname(p)+' connection':'Add a custom endpoint';
+  $('aTitle').textContent=p?t('Add {0} connection',pname(p)):t('Add a custom endpoint');
   $('aForm').reset();$('aErr').textContent='';
   $('aProv').value=p||'';$('aId').value='';
   const show=(id,on)=>$(id).hidden=!on;
@@ -846,10 +977,10 @@ $('aForm').onsubmit=async e=>{
   if(guard($('aForm')))return;
   try{
     const fd=new FormData($('aForm'));
-    if(!$('aKeyRow').hidden&&!$('aKey').value)throw new Error('The API key is required.');
-    if(!$('aAcctRow').hidden&&!$('aAcct').value.trim())throw new Error('The account ID is required.');
-    if(!$('aIdRow').hidden&&!/^[a-z0-9][a-z0-9-]{0,39}$/.test(fd.get('provider')))throw new Error('The provider id must be lowercase letters, digits or -.');
-    if(!$('aIdRow').hidden&&setupOf(fd.get('provider')))throw new Error('That id is a built-in provider; open it from the list instead.');
+    if(!$('aKeyRow').hidden&&!$('aKey').value)throw new Error(t('The API key is required.'));
+    if(!$('aAcctRow').hidden&&!$('aAcct').value.trim())throw new Error(t('The account ID is required.'));
+    if(!$('aIdRow').hidden&&!/^[a-z0-9][a-z0-9-]{0,39}$/.test(fd.get('provider')))throw new Error(t('The provider id must be lowercase letters, digits or -.'));
+    if(!$('aIdRow').hidden&&setupOf(fd.get('provider')))throw new Error(t('That id is a built-in provider; open it from the list instead.'));
     const r=await fetch('/accounts',{method:'POST',body:new URLSearchParams(fd)});
     if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.error||('HTTP '+r.status))}
     const np=$('aProv').value;delete modelCache[np];closeModal('aModal');toast('Connection added');await load();
@@ -858,7 +989,7 @@ $('aForm').onsubmit=async e=>{
   finally{release($('aForm'))}
 };
 async function deleteAccount(a){
-  if(!confirm('Delete "'+(a.label||a.id)+'"?'))return;
+  if(!confirm(t('Delete "{0}"?',a.label||a.id)))return;
   const r=await fetch('/accounts/'+a.id+'/delete',{method:'POST'});
   if(!r.ok){alert('Delete failed');return}
   delete modelCache[a.provider];toast('Deleted');await load();
@@ -868,16 +999,16 @@ async function deleteAccount(a){
 function keysCard(){
   const rows=S.keys.map(k=>{
     const code=el('code',{class:'mono',text:k.masked});
-    const sw=el('input',{type:'checkbox',checked:k.enabled,'aria-label':'Enabled: '+k.name});
+    const sw=el('input',{type:'checkbox',checked:k.enabled,'aria-label':t('Enabled: {0}',k.name)});
     sw.onchange=async()=>{try{await postJSON('/keys/'+k.id+'/active',{active:sw.checked});k.enabled=sw.checked;route()}catch(e){sw.checked=!sw.checked;alert(e.message)}};
     const reveal=async()=>{try{const r=await api('/keys/'+k.id+'/reveal',{method:'POST'});return r.key}catch(e){alert(e.message)}};
     return el('div',{class:'row'+(k.enabled?'':' off')},
       el('div',{class:'who'},el('div',{class:'l',text:k.name}),
-        el('div',{class:'meta'},code,el('span',{class:'faint small',text:'created '+k.createdAt.slice(0,10)}))),
-      el('button',{class:'icon',type:'button',title:'Show','aria-label':'Show '+k.name,onclick:async()=>{const f=await reveal();if(f)code.textContent=code.textContent===f?k.masked:f}},
+        el('div',{class:'meta'},code,el('span',{class:'faint small',text:t('created {0}',k.createdAt.slice(0,10))}))),
+      el('button',{class:'icon',type:'button',title:'Show','aria-label':t('Show {0}',k.name),onclick:async()=>{const f=await reveal();if(f)code.textContent=code.textContent===f?k.masked:f}},
         svg(['M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z','M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z'])),
-      el('button',{class:'icon',type:'button',title:'Copy','aria-label':'Copy '+k.name,onclick:async()=>{const f=await reveal();if(f)copy(f,k.name)}},svg(ICON.copy)),
-      el('button',{class:'danger',type:'button',onclick:async()=>{if(!confirm('Delete key "'+k.name+'"? Clients using it stop working.'))return;
+      el('button',{class:'icon',type:'button',title:'Copy','aria-label':t('Copy {0}',k.name),onclick:async()=>{const f=await reveal();if(f)copy(f,k.name)}},svg(ICON.copy)),
+      el('button',{class:'danger',type:'button',onclick:async()=>{if(!confirm(t('Delete key "{0}"? Clients using it stop working.',k.name)))return;
         try{await api('/keys/'+k.id+'/delete',{method:'POST'});toast('Deleted');await load()}catch(e){alert(e.message)}}},svg(ICON.trash),'Delete'),
       el('label',{class:'switch'},sw,el('span')));
   });
@@ -887,7 +1018,7 @@ function keysCard(){
     rows.length?rows:el('div',{class:'empty',style:'padding:1.25rem'},'No keys yet.'));
 }
 function createKey(){
-  $('kTitle').textContent='Create API key';
+  $('kTitle').textContent=t('Create API key');
   const name=el('input',{placeholder:'e.g. laptop, hermes',autocomplete:'off'});
   const err=el('div',{class:'err-msg'});
   $('kBody').replaceChildren(el('label',{class:'f'},'Name',name),err);
@@ -899,7 +1030,7 @@ function createKey(){
     busy=true;go.disabled=true;
     try{
       const k=await postJSON('/keys',{name:name.value.trim()});
-      $('kTitle').textContent='Key created';
+      $('kTitle').textContent=t('Key created');
       $('kBody').replaceChildren(copyLine(k.key));
       $('kFoot').replaceChildren(el('button',{class:'primary',type:'button','data-close':true},'Done'));
       await load();
@@ -923,7 +1054,7 @@ const LOGIN={
 let loginPoll=null;
 function startLogin(p){
   clearTimeout(loginPoll);
-  $('lTitle').textContent='Login · '+pname(p);
+  $('lTitle').textContent=t('Login · {0}',pname(p));
   const name=el('input',{placeholder:'e.g. Work, Personal (default: the account email)',autocomplete:'off'});
   const go=el('button',{class:'primary',type:'button'},'Continue');
   $('lBody').replaceChildren(el('label',{class:'f'},'Name',name));
@@ -937,7 +1068,7 @@ async function runLogin(p,label){
   let r;
   try{r=await postJSON('/oauth/'+p+'/start',{label})}catch(e){$('lBody').replaceChildren(el('div',{class:'err-msg',text:e.message}));return}
   const err=el('div',{class:'err-msg'});
-  const done=async c=>{closeModal('lModal');toast('Signed in: '+((c&&c.label)||pname(p)));delete modelCache[p];await load()};
+  const done=async c=>{closeModal('lModal');toast(t('Signed in: {0}',(c&&c.label)||pname(p)));delete modelCache[p];await load()};
   if(r.device){
     const code=el('div',{style:'font:700 1.6rem/1.2 ui-monospace,monospace;letter-spacing:.15em;text-align:center;padding:.6rem;background:var(--bg);border:1px solid var(--line);border-radius:10px',text:r.userCode});
     $('lBody').replaceChildren(el('div',{class:'f'},'1. Copy this code',el('div',{style:'display:flex;gap:.5rem;align-items:center'},el('div',{style:'flex:1'},code),copyBtn(r.userCode,'code'))),
@@ -956,7 +1087,7 @@ async function runLogin(p,label){
   const input=el('input',{placeholder:'Paste the URL or code',autocomplete:'off',spellcheck:'false'});
   const go=el('button',{class:'primary',type:'button'},'Sign in');
   $('lBody').replaceChildren(
-    el('div',{class:'f'},'1. Open the sign-in page',el('a',{href:r.url,target:'_blank',rel:'noopener',class:'primary',style:'display:inline-flex;justify-content:center;padding:.55rem;border-radius:8px;background:var(--accent-strong);color:#fff;text-decoration:none;font-weight:600'},'Open '+pname(p)+' sign-in')),
+    el('div',{class:'f'},'1. Open the sign-in page',el('a',{href:r.url,target:'_blank',rel:'noopener',class:'primary',style:'display:inline-flex;justify-content:center;padding:.55rem;border-radius:8px;background:var(--accent-strong);color:#fff;text-decoration:none;font-weight:600'},t('Open {0} sign-in',pname(p)))),
     el('label',{class:'f'},'2. '+LOGIN[p].hint,input),err);
   $('lFoot').replaceChildren(el('button',{class:'ghost',type:'button','data-close':true},'Cancel'),go);
   let busy=false;
@@ -978,7 +1109,7 @@ const KINDS={
 };
 function viewBlacklist(v,tab){
   if(!KINDS[tab])tab='field';
-  header('Blacklist',null,el('button',{class:'primary',type:'button',onclick:()=>editFilter(null,tab)},svg(ICON.plus),'Block '+KINDS[tab].name.toLowerCase()));
+  header('Blacklist',null,el('button',{class:'primary',type:'button',onclick:()=>editFilter(null,tab)},svg(ICON.plus),t('Block {0}',t(KINDS[tab].name).toLowerCase())));
   v.append(el('div',{class:'tabs',role:'tablist'},Object.entries(KINDS).map(([k,d])=>{
     const n=S.filters.filter(f=>f.kind===k).length;
     return el('a',{role:'tab',href:'#/blacklist/'+k,'aria-selected':String(k===tab),class:k===tab?'on':''},d.tab,n?el('span',{class:'ct',text:String(n)}):null);
@@ -986,7 +1117,7 @@ function viewBlacklist(v,tab){
   const list=S.filters.filter(f=>f.kind===tab)
     .sort((a,b)=>(a.provider==='*'?-1:b.provider==='*'?1:pname(a.provider).localeCompare(pname(b.provider)))||a.pattern.localeCompare(b.pattern));
   if(!list.length){v.append(el('div',{class:'card empty'},el('b',{},'Nothing blocked'),
-    el('button',{class:'primary',type:'button',onclick:()=>editFilter(null,tab)},svg(ICON.plus),'Block '+KINDS[tab].name.toLowerCase())));return}
+    el('button',{class:'primary',type:'button',onclick:()=>editFilter(null,tab)},svg(ICON.plus),t('Block {0}',t(KINDS[tab].name).toLowerCase()))));return}
   v.append(el('div',{class:'card'},list.map(f=>{
     const sw=el('input',{type:'checkbox',checked:f.enabled,'aria-label':'Enabled'});
     sw.onchange=async()=>{try{await postJSON('/filters',{...f,enabled:sw.checked});f.enabled=sw.checked;await load()}catch(e){sw.checked=!sw.checked;alert(e.message)}};
@@ -994,8 +1125,8 @@ function viewBlacklist(v,tab){
       el('div',{class:'who'},el('div',{class:'l mono',text:f.pattern}),f.note?el('div',{class:'faint small',text:f.note}):null),
       f.provider==='*'?el('span',{class:'badge'},'All providers')
         :el('span',{class:'badge',style:'gap:.35rem'},avatar(f.provider,true),pname(f.provider)),
-      el('button',{class:'icon',type:'button',title:'Edit','aria-label':'Edit '+f.pattern,onclick:()=>editFilter(f)},svg(ICON.edit)),
-      el('button',{class:'icon',type:'button',title:'Delete','aria-label':'Delete '+f.pattern,onclick:async()=>{if(!confirm('Unblock "'+f.pattern+'"?'))return;
+      el('button',{class:'icon',type:'button',title:'Edit','aria-label':t('Edit {0}',f.pattern),onclick:()=>editFilter(f)},svg(ICON.edit)),
+      el('button',{class:'icon',type:'button',title:'Delete','aria-label':t('Delete {0}',f.pattern),onclick:async()=>{if(!confirm(t('Unblock "{0}"?',f.pattern)))return;
         try{await api('/filters/'+f.id+'/delete',{method:'POST'});toast('Removed');await load()}catch(e){alert(e.message)}}},svg(ICON.trash)),
       el('label',{class:'switch'},sw,el('span')));
   })));
@@ -1003,7 +1134,7 @@ function viewBlacklist(v,tab){
 let F=null;
 function editFilter(f,kind){
   F=f?{...f}:{provider:'*',kind:kind||'field',pattern:'',note:'',enabled:true};
-  $('fTitle').textContent=(f?'Edit blocked ':'Block ')+(KINDS[F.kind]||KINDS.field).name.toLowerCase();
+  $('fTitle').textContent=t(f?'Edit blocked {0}':'Block {0}',t((KINDS[F.kind]||KINDS.field).name).toLowerCase());
   const ids=[...new Set([...S.providers.map(x=>x.id),...S.accounts.map(a=>a.provider)])].sort((a,b)=>pname(a).localeCompare(pname(b)));
   if(!ids.includes(F.provider)&&F.provider!=='*')ids.push(F.provider);
   $('fProv').replaceChildren(el('option',{value:'*',text:'All providers'}),...ids.map(p=>el('option',{value:p,text:pname(p)+(pname(p)!==p?' ('+p+')':'')})));
@@ -1055,7 +1186,7 @@ function viewDrift(v,tab){
           c.oldType||c.newType?el('span',{text:(c.oldType||'—')+' → '+(c.newType||'—')}):null)),
       el('div',{class:'acts'},
         blocked?el('span',{class:'badge',text:'blocked'}):null,
-        canBlock?el('button',{class:'primary',type:'button',title:'Add '+toFieldPattern(c.path)+' to the blacklist of '+pname(c.provider),
+        canBlock?el('button',{class:'primary',type:'button',title:t('Add {0} to the blacklist of {1}',toFieldPattern(c.path),pname(c.provider)),
           onclick:()=>blockDrift(c)},'Block'):null,
         c.acked?null:el('button',{class:'ghost',type:'button',onclick:()=>ackDrift([c.id])},'Ack')),
       c.sample?el('details',{},el('summary',{class:'faint small'},'Sample'),el('pre',{text:c.sample})):null);
@@ -1068,7 +1199,7 @@ async function blockDrift(c){
   try{
     await postJSON('/filters',{provider:c.provider,kind:'field',pattern:toFieldPattern(c.path),note:'from drift: '+c.kind+' on '+c.endpoint,enabled:true});
     await postJSON('/drift/ack',{ids:[c.id]});
-    toast('Blocked '+toFieldPattern(c.path));await load();
+    toast(t('Blocked {0}',toFieldPattern(c.path)));await load();
   }catch(e){alert(e.message)}
 }
 function driftFields(){
@@ -1080,13 +1211,13 @@ function driftFields(){
     try{
       const r=await api('/drift/fields?provider='+encodeURIComponent(psel.value)+'&direction='+dsel.value);
       const byKey={};
-      for(const f of r.fields){const k=f.key.split('|').slice(2).join(' · ').replace(/ · $/,'');(byKey[k]=byKey[k]||[]).push(f)}
+      for(const f of r.fields||[]){const k=f.key.split('|').slice(2).join(' · ').replace(/ · $/,'');(byKey[k]=byKey[k]||[]).push(f)}
       const keys=Object.keys(byKey).sort();
       if(!keys.length){box.replaceChildren(el('div',{class:'empty'},el('b',{},'Nothing learned yet')));return}
       box.replaceChildren(el('div',{class:'scroll'},el('table',{},
         el('thead',{},el('tr',{},el('th',{},'Endpoint · event'),el('th',{},'Field'),el('th',{},'Type'),el('th',{class:'num'},'Seen'))),
         el('tbody',{},keys.flatMap(k=>byKey[k].map((f,i)=>el('tr',{class:f.gone?'off':''},
-          el('td',{class:'faint small',text:i===0?k:''}),el('td',{class:'mono',text:f.path}),el('td',{class:'faint',text:f.type+(f.gone?' (gone)':'')}),
+          el('td',{class:'faint small',text:i===0?k:''}),el('td',{class:'mono',text:f.path}),el('td',{class:'faint',text:f.type+(f.gone?' '+t('(gone)'):'')}),
           el('td',{class:'num',text:fmt(f.seen)}))))))));
     }catch(e){box.replaceChildren(el('div',{class:'empty',text:e.message}))}
   };
@@ -1096,16 +1227,16 @@ function driftFields(){
 
 // ---- Quota
 function untilText(iso){
-  const t=Date.parse(iso);if(!t)return iso||'';
-  let d=Math.round((t-Date.now())/60000);if(d<=0)return 'resetting';
+  const at=Date.parse(iso);if(!at)return iso||'';
+  let d=Math.round((at-Date.now())/60000);if(d<=0)return t('resetting');
   const days=Math.floor(d/1440);d-=days*1440;const h=Math.floor(d/60),m=d%60;
-  return 'resets in '+(days?days+'d ':'')+(h?h+'h ':'')+(days?'':m+'m');
+  return t('resets in {0}',(days?days+'d ':'')+(h?h+'h ':'')+(days?'':m+'m'));
 }
 function quotaWindow(w){
   const pct=w.usedPct;
   const color=w.unlimited?'var(--ok)':pct<0?'var(--faint)':pct>=90?'var(--err)':pct>=70?'var(--warn)':'var(--ok)';
   const right=w.unlimited?'unlimited':pct<0?(w.used?w.used+(w.limit?' / '+w.limit:''):'—')
-    :Math.round(pct)+'% used'+(w.used&&w.limit?' · '+w.used+' / '+w.limit:'');
+    :t('{0}% used',Math.round(pct))+(w.used&&w.limit?' · '+w.used+' / '+w.limit:'');
   return el('div',{class:'qwin'},
     el('div',{class:'top'},el('b',{text:w.name}),el('span',{class:'muted',text:right})),
     el('div',{class:'qbar'},el('span',{style:'width:'+(w.unlimited?100:Math.max(0,Math.min(100,pct<0?0:pct)))+'%;background:'+color+(w.unlimited?';opacity:.35':'')})),
@@ -1138,7 +1269,7 @@ async function viewQuota(v,prov){
       const head=el('div',{class:'cardh'},avatar(q.provider,true),
         el('div',{class:'grow',style:'min-width:0'},el('div',{style:'font-weight:600',text:pname(q.provider)}),
           el('div',{class:'faint small',style:'overflow:hidden;text-overflow:ellipsis;white-space:nowrap',text:(q.label||'')+(q.plan?' · '+q.plan:'')})),
-        q.source==='headers'?el('span',{class:'badge',title:'From the rate-limit headers of the last answer, '+q.fetchedAt},'last answer'):null);
+        q.source==='headers'?el('span',{class:'badge',title:t('From the rate-limit headers of the last answer, {0}',q.fetchedAt)},'last answer'):null);
       if(!editing)return el('div',{class:'card'},head,el('div',{style:'padding:1rem 1.25rem;display:grid;gap:.9rem'},shownWindows(q,view).map(w=>quotaWindow({...w,name:w.name.replace(/^model /,'')}))));
       // Edit: tick the windows to show for this provider.
       const cur=new Set(shownWindows(q,view).map(w=>w.name));
@@ -1156,7 +1287,7 @@ async function viewQuota(v,prov){
           el('button',{class:'ghost',type:'button',style:'min-height:28px;font-size:.78rem',onclick:()=>set(q.windows.map(w=>w.name))},'All'),
           el('button',{class:'ghost',type:'button',style:'min-height:28px;font-size:.78rem',onclick:()=>set(main.map(w=>w.name))},'Main only'),
           el('button',{class:'ghost',type:'button',style:'min-height:28px;font-size:.78rem',onclick:()=>set([])},'None'),
-          el('span',{class:'faint small',style:'margin-left:auto;align-self:center',text:'applies to every '+pname(q.provider)+' account'})),
+          el('span',{class:'faint small',style:'margin-left:auto;align-self:center',text:t('applies to every {0} account',pname(q.provider))})),
         ...main.map(box),
         models.length?el('div',{class:'faint small',style:'margin-top:.3rem',text:'Per model'}):null,
         models.length?el('div',{style:'display:grid;gap:.35rem'},models.map(box)):null));
@@ -1171,9 +1302,9 @@ async function viewQuota(v,prov){
     finally{refresh.disabled=false}
   };
   edit.onclick=async()=>{
-    if(!editing){editing=true;draft=JSON.parse(JSON.stringify(quotaView));edit.textContent='Done';edit.className='primary';render();return}
+    if(!editing){editing=true;draft=JSON.parse(JSON.stringify(quotaView));edit.textContent=t('Done');edit.className='primary';render();return}
     try{await postJSON('/ui-settings/quota-view',draft);quotaView=draft;toast('Saved')}catch(e){alert(e.message);return}
-    editing=false;edit.textContent='Edit';edit.className='ghost';render();
+    editing=false;edit.textContent=t('Edit');edit.className='ghost';render();
   };
   refresh.onclick=()=>load(true);
   load(false);
@@ -1284,12 +1415,110 @@ const DOCS=[
     ];
   }},
 ];
+// Vietnamese bodies of the Docs pages; the English ones are in DOCS.
+const DOCS_VI={
+  intro:()=>{
+    const o=location.origin;
+    return [
+      dt('h2','intact là gì'),
+      dt('p','intact giữ credential của các tài khoản LLM của bạn và đặt tất cả sau một gateway duy nhất. Client gửi request kèm một API key của intact; intact chọn một tài khoản phục vụ model được yêu cầu, gắn credential của tài khoản đó rồi chuyển tiếp request. Response của nhà cung cấp được trả về nguyên vẹn, và số token đã dùng được ghi lại.'),
+      dt('h2','Endpoint'),
+      el('table',{},dt('thead',dt('tr',dt('th','Client'),dt('th','Base URL'),dt('th','Request'))),dt('tbody',
+        dt('tr',dt('td','Tương thích OpenAI'),dt('td',dc(o+'/v1')),dt('td',dc('POST /v1/chat/completions'))),
+        dt('tr',dt('td','Anthropic'),dt('td',dc(o)),dt('td',dc('POST /v1/messages'))))),
+      dt('p','Endpoint nào cũng tới được mọi nhà cung cấp. Khi client và nhà cung cấp dùng định dạng khác nhau, intact tự chuyển đổi request và response, có stream hay không, kể cả tool call. ',dc('GET /v1/models'),' liệt kê mọi model bạn có thể gọi.'),
+      dt('h2','Đặt tên model'),
+      dt('ul',
+        dt('li',dc('groq/llama-3.3-70b-versatile'),' — nhà cung cấp và model. intact gửi ',dc('llama-3.3-70b-versatile'),' tới groq.'),
+        dt('li',dc('llama-3.3-70b-versatile'),' — chỉ model. Mọi nhà cung cấp có model này trong danh sách đều được dùng.')),
+      dt('p','Sao chép đúng tên từ trang nhà cung cấp (bấm vào một model) hoặc từ ',dc('/v1/models'),'.'),
+      dt('h2','Xoay vòng và failover'),
+      dt('p','Request cho một model được xoay vòng giữa các tài khoản đang bật có phục vụ model đó. Khi một tài khoản trả về 429, 500, 503 hoặc 409, intact thử tài khoản kế tiếp. Tài khoản OAuth trả về 401 sẽ được refresh và thử lại một lần. Tắt tài khoản trên trang nhà cung cấp để đưa nó ra khỏi vòng xoay.'),
+      dt('h2','Key'),
+      dt('p','Tạo API key trong Endpoint → API key. Gửi key dưới dạng ',dc('Authorization: Bearer <key>'),' hoặc ',dc('x-api-key: <key>'),'. Cùng một key dùng được cho ',dc('/v1'),', API quản trị ',dc('/api'),' và MCP server ',dc('/mcp'),'.'),
+    ];
+  },
+  blacklist:()=>{
+    const o=location.origin;
+    return [
+      dt('h2','Tại sao'),
+      dt('p','Nhà cung cấp thường từ chối cả request khi nó chứa thứ họ không biết: một field do nhà cung cấp khác thêm vào, một keyword JSON Schema trong tool, một dòng client chèn vào system prompt. Blacklist gỡ những phần đó ngay trước khi request rời intact, sau mọi bước chuyển đổi, để request đi qua được mà không cần sửa client.'),
+      dt('h2','Các loại'),
+      el('table',{},dt('thead',dt('tr',dt('th','Loại'),dt('th','Ví dụ'),dt('th','Gỡ bỏ'))),dt('tbody',
+        dt('tr',dt('td','Field trong body'),dt('td',dc('messages.*.cache_control')),dt('td','Key tại một đường dẫn dạng dấu chấm trong JSON body. ',dc('*'),' khớp với mọi key hoặc phần tử danh sách.')),
+        dt('tr',dt('td','Key trong schema'),dt('td',dc('$id')),dt('td','Key ở mọi cấp trong JSON schema của từng tool. Tham số tool trùng tên vẫn được giữ.')),
+        dt('tr',dt('td','Dòng system'),dt('td',dc('^x-anthropic-billing-header:.*$')),dt('td','Mọi dòng trong system prompt khớp với biểu thức chính quy.')),
+        dt('tr',dt('td','Header'),dt('td',dc('anthropic-beta')),dt('td','Một request header, kể cả header intact thêm mặc định. Credential của tài khoản không bao giờ bị gỡ.')))),
+      dt('p','Mỗi mục áp dụng cho một nhà cung cấp hoặc tất cả, và có hiệu lực từ request kế tiếp. Không cần khởi động lại.'),
+      dt('h2','Tìm thứ cần chặn'),
+      dt('ol',
+        dt('li','Gửi request đang lỗi và đọc lỗi của nhà cung cấp. Lỗi thường nêu tên thủ phạm: ',dc('Unknown parameter: \'reasoning_effort\''),', ',dc('Invalid JSON payload: unknown name "$id"'),'.'),
+        dt('li','Chọn loại theo vị trí của tên: ở cấp ngoài cùng hoặc trong messages → field trong body; trong parameters của tool → key trong schema; một dòng của system prompt → dòng system; một HTTP header → header.'),
+        dt('li','Giới hạn cho đúng nhà cung cấp từ chối nó. Chỉ dùng Tất cả nhà cung cấp cho thứ không nhà cung cấp nào cần.'),
+        dt('li','Gửi lại request.')),
+      dt('h2','Thêm từ dashboard'),
+      dt('p','Mở Blacklist, chọn tab của loại, bấm Chặn, chọn nhà cung cấp và nhập giá trị. Công tắc trên mỗi dòng tắt một mục mà không xoá nó.'),
+      dt('h2','Thêm bằng API'),
+      codeBlock('curl '+o+'/api/filters \\\n  -H "Authorization: Bearer $INTACT_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"provider":"groq","kind":"field","pattern":"reasoning_effort","note":"groq rejects it"}\''),
+      dt('p',dc('GET /api/filters'),' liệt kê các mục, ',dc('DELETE /api/filters/<id>'),' xoá một mục. ',dc('provider'),' là id nhà cung cấp hoặc ',dc('*'),'; ',dc('kind'),' là ',dc('field'),', ',dc('schema'),', ',dc('system'),' hoặc ',dc('header'),'.'),
+      dt('h2','Thêm từ agent (MCP)'),
+      codeBlock('claude mcp add --transport http intact '+o+'/mcp \\\n  --header "Authorization: Bearer $INTACT_KEY"'),
+      dt('p','Server cung cấp ',dc('list_filters'),', ',dc('add_filter'),', ',dc('update_filter'),' và ',dc('delete_filter'),', nên agent gặp field bị từ chối có thể tự chặn nó rồi thử lại.'),
+      dt('h2','Mục có sẵn'),
+      dt('p','Lần khởi động đầu tiên thêm sẵn các bản sửa đã tìm ra khi chạy với nhà cung cấp thật: các key schema ',dc('encrypted'),', ',dc('cache_control'),', ',dc('$id'),' và ',dc('example'),' cho mọi nhà cung cấp, cùng dòng billing của Claude Code cho Antigravity (nó trả 429 giả khi thấy dòng này). Sửa hoặc xoá chúng như mọi mục khác.'),
+    ];
+  },
+  models:()=>[
+    dt('h2','Bảng model'),
+    dt('p','Mỗi trang nhà cung cấp liệt kê các model nhà cung cấp đó có. intact ghi nhận mỗi lần fetch danh sách: model mới mặc định được bật, và khi fetch thành công, model nào nhà cung cấp không còn liệt kê sẽ bị xoá (fetch lỗi thì không xoá gì).'),
+    dt('ul',
+      dt('li',dt('b','Bật'),' — model bị tắt sẽ biến mất khỏi ',dc('/v1/models'),', không được chọn khi gọi bằng model id trần, và request gọi đích danh nó bị từ chối.'),
+      dt('li',dt('b','Test'),' — gửi một chat request ngắn qua đúng đường ',dc('/v1'),' mà client dùng, rồi hiện thời gian phản hồi hoặc lỗi. Model đang tắt vẫn test được.'),
+      dt('li',dt('b','Fetch ngay'),' — fetch danh sách từ nhà cung cấp ngay lúc này. intact cũng tự fetch danh sách của mọi nhà cung cấp mỗi giờ (fetch lỗi được thử lại trong vòng mười phút), nên model mới tự xuất hiện và model bị bỏ tự biến mất mà không cần bấm gì.')),
+    dt('h2','Lọc theo tên'),
+    el('table',{},dt('thead',dt('tr',dt('th','Bộ lọc'),dt('th','Hiển thị'))),dt('tbody',
+      dt('tr',dt('td',dc('free')),dt('td','tên có chứa free')),
+      dt('tr',dt('td',dc('free mini')),dt('td','tên chứa cả hai')),
+      dt('tr',dt('td',dc('free|beta')),dt('td','tên chứa một trong hai')),
+      dt('tr',dt('td',dc('-preview')),dt('td','tên không chứa preview')),
+      dt('tr',dt('td',dc('/^meta-llama\\//')),dt('td','một biểu thức chính quy')))),
+    dt('p','Tick các dòng (ô ở header tick mọi dòng đang hiển thị) rồi thao tác từ thanh hiện ra: Bật, Tắt, Chỉ bật các mục này, Test. Test chạy qua bất kỳ tài khoản nào của nhà cung cấp; kết quả ghi tên tài khoản đã trả lời. Nút Test của một tài khoản chỉ test riêng tài khoản đó; test TypeSafe hỏi System One những câu đã biết trước đáp án và kiểm tra kết quả.'),
+    dt('p',dt('b','Thinking'),' — chip này đánh dấu model mà chính danh sách của nhà cung cấp cho biết có thể thinking; cột Effort liệt kê các mức một request có thể yêu cầu, tô màu từ lạnh (low) tới nóng (max), mức mặc định được tô đặc. Anthropic, Codex, Copilot, OpenRouter, Groq, Cloudflare và Antigravity có cung cấp thông tin này; NVIDIA, TokenHarbor và TypeSafe thì không, nên model của họ không có chip. Cloudflare còn đánh dấu các model chỉ gói trả phí mới phục vụ (paid plan).'),
+    dt('p',dt('b','Biến thể'),' — Antigravity liệt kê một model nhiều lần, mỗi lần một mức thinking (',dc('gemini-3.8-flash-high'),', ',dc('-medium'),', ',dc('-low'),', ',dc('-tiered'),'). intact chỉ liệt kê một lần, là ',dc('gemini-3.8-flash'),', và chọn mức theo effort mà request yêu cầu: ',dc('reasoning_effort'),', ',dc('reasoning.effort'),', ',dc('output_config.effort'),' của Anthropic hoặc ',dc('thinking.budget_tokens'),'. Không có effort, hoặc effort là ',dc('none'),', thì dùng biến thể mặc định (badge đầu tiên, là ',dc('tiered'),' nếu có). Khi mọi tài khoản đều từ chối mức đã chọn vì bận (429), request được thử thêm một lần với biến thể mặc định; header ',dc('X-Intact-Model'),' cho biết model đã trả lời. Id đầy đủ như ',dc('gemini-3.8-flash-high'),' vẫn dùng được.'),
+    dt('p',dt('b','Chỉ free'),' chỉ bật các model có tên chứa ',dc('free'),'; tắt nó thì mọi model được bật lại. ',dt('b','Tự test'),' fetch danh sách, test từng model (chỉ model free khi đang Chỉ free) và chỉ giữ bật những model trả lời được; nó chạy lại mỗi 6 giờ, và model mới được test trước khi bật. Model lỗi bị tắt; model bị từ chối do rate limit được test lại sau 30 phút. Khi đang Tự test, bấm Test cũng đặt luôn công tắc.'),
+    dt('h2','API và MCP'),
+    codeBlock('curl '+location.origin+'/api/providers/openrouter/models -H "Authorization: Bearer $INTACT_KEY"\ncurl '+location.origin+'/api/providers/openrouter/models/active -H "Authorization: Bearer $INTACT_KEY" -d \'{"models":["x"],"active":false}\''),
+    dt('p','MCP: ',dc('list_provider_models'),', ',dc('set_models_active'),'.'),
+  ],
+  drift:()=>{
+    const o=location.origin;
+    return [
+      dt('h2','Theo dõi những gì'),
+      dt('p','Drift được theo dõi với các nhà cung cấp mà intact truy cập như một tool thật — Antigravity, Codex, Claude Code và GitHub Copilot — vì định dạng của chúng thay đổi theo mỗi bản phát hành của tool. API có tài liệu (Groq, NVIDIA, OpenRouter, …) không được theo dõi.'),
+      dt('p','intact học cấu trúc của hai thứ khi traffic đi qua: mỗi request client gửi (trước khi intact sửa nó) và mỗi response nhà cung cấp trả về (với stream thì theo từng event). Cấu trúc là tập các đường dẫn field cùng kiểu JSON của chúng, lưu riêng theo nhà cung cấp và endpoint. Các tên do client hoặc nhà cung cấp tự đặt — tham số tool, message id, tên câu hỏi — được tính là ',dc('{*}'),', không phải field.'),
+      dt('h2','Thay đổi'),
+      el('table',{},dt('thead',dt('tr',dt('th','Thay đổi'),dt('th','Ý nghĩa'))),dt('tbody',
+        dt('tr',dt('td','added'),dt('td','Xuất hiện một field chưa từng thấy. Với request: tool bắt đầu gửi thứ gì đó mới — ứng viên cho blacklist. Với response: nhà cung cấp thêm dữ liệu.')),
+        dt('tr',dt('td','type changed'),dt('td','Một field đến với kiểu JSON khác.')),
+        dt('tr',dt('td','removed'),dt('td','Một field gần như lúc nào cũng có đã vắng mặt 20 document liên tiếp.')),
+        dt('tr',dt('td','returned'),dt('td','Một field đã bị removed nay xuất hiện lại.')))),
+      dt('p','Mỗi endpoint học lặng lẽ trong ba document đầu tiên, sau đó mọi thay đổi đều được ghi lại kèm một mẫu của document chứa nó.'),
+      dt('h2','Xử lý một thay đổi'),
+      dt('p','Trên trang Drift, Chặn thêm field vào blacklist cho nhà cung cấp đó (đường dẫn ',dc('messages[].x'),' trở thành pattern ',dc('messages.*.x'),'), còn Đã xem đánh dấu thay đổi là đã xem xét.'),
+      dt('h2','Capture tham chiếu'),
+      dt('p','Có thể nạp sẵn cấu trúc từ một bản capture của tool thật trước khi intact phục vụ nó, để thay đổi đầu tiên được so với chính tool đó: ',dc('POST /api/drift/seed'),' với ',dc('{"direction","provider","endpoint","sse","documents":[…]}'),'. Document nạp sẵn được học mà không ghi thay đổi.'),
+      dt('h2','API và MCP'),
+      codeBlock('curl "'+o+'/api/drift/changes?unacked=1" -H "Authorization: Bearer $INTACT_KEY"\ncurl '+o+'/api/drift/ack -H "Authorization: Bearer $INTACT_KEY" -d \'{"ids":[12]}\'\ncurl "'+o+'/api/drift/fields?provider=codex&direction=response" -H "Authorization: Bearer $INTACT_KEY"'),
+      dt('p','Tool MCP: ',dc('list_drift_changes'),', ',dc('ack_drift_changes'),', ',dc('list_drift_fields'),'. Agent có thể đọc các field request mới và thêm chúng bằng ',dc('add_filter'),'.'),
+    ];
+  },
+};
 function viewDocs(v,id){
   const d=DOCS.find(x=>x.id===id)||DOCS[0];
   header('Docs');
   v.append(el('div',{class:'docwrap'},
     el('div',{class:'tabs',role:'tablist'},DOCS.map(x=>el('a',{role:'tab',href:'#/docs/'+x.id,'aria-selected':String(x===d),class:x===d?'on':''},x.title))),
-    el('article',{class:'doc'},d.body())));
+    el('article',{class:'doc'},LANG==='vi'&&DOCS_VI[d.id]?DOCS_VI[d.id]():d.body())));
 }
 
 // ---- Usage
@@ -1311,13 +1540,14 @@ function viewUsage(v){
     tb.replaceChildren(...rows.map(u=>{const a=accById(u.connectionId);
       return el('tr',{},el('td',{class:'faint',text:u.day}),
         el('td',{},a?el('span',{style:'display:inline-flex;align-items:center;gap:.45rem'},avatar(a.provider,true),a.label||short(a.id))
-                    :el('span',{class:'mono faint',text:short(u.connectionId)+' (deleted)'})),
+                    :el('span',{class:'mono faint',text:short(u.connectionId)+' '+t('(deleted)')})),
         el('td',{class:'mono',text:u.model||'—'}),
         el('td',{class:'num',text:fmt(u.inputTokens)}),el('td',{class:'num',text:fmt(u.outputTokens)}),el('td',{class:'num',text:fmt(u.requests)}))}));
   };
   sel.onchange=render;render();
 }
 
+translateStatic(document.body);paintPrefs();
 load();
 </script>
 </body>

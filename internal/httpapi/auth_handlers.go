@@ -12,8 +12,14 @@ import (
 const loginPage = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>intact — sign in</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="icon" href="/favicon.ico" sizes="32x32"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#7c6cf6">
+<script>try{const t=localStorage.getItem('intact-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
 <style>
 :root{color-scheme:dark;--bg:#0c1017;--card:#141a25;--line:#232d3d;--fg:#e4e9f1;--muted:#95a0b3;--accent:#8b80f9;--mint:#5eead4;--err:#fb7185}
+@media (prefers-color-scheme:light){:root:not([data-theme=dark]){color-scheme:light;--bg:#f3f5f9;--card:#fff;--line:#dfe4ec;--fg:#141a25;--muted:#526076;--accent:#5b4bdb;--mint:#0f9488;--err:#e11d48}}
+:root[data-theme=light]{color-scheme:light;--bg:#f3f5f9;--card:#fff;--line:#dfe4ec;--fg:#141a25;--muted:#526076;--accent:#5b4bdb;--mint:#0f9488;--err:#e11d48}
+.lang{margin-top:1.25rem;font-size:.78rem;color:var(--muted)}
+.lang button{background:none;border:0;color:var(--muted);cursor:pointer;font:inherit;padding:.1rem .3rem}
+.lang button[aria-pressed=true]{color:var(--accent);font-weight:600}
 *{box-sizing:border-box}
 body{font:15px system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:var(--bg);color:var(--fg);display:grid;place-items:center;min-height:100vh;padding:1rem}
 .card{background:var(--card);border:1px solid var(--line);padding:2rem 1.75rem;border-radius:14px;width:min(23rem,94vw);text-align:center}
@@ -32,7 +38,7 @@ p{color:var(--muted);font-size:.85rem;margin:0 0 1.5rem}
 <div class="card">
   <span class="logo"><svg viewBox="0 0 32 32" width="52" height="52" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c6cf6"/><stop offset="1" stop-color="#2dd4bf"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><path d="M16 6.5 24 9.6v6.1c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V9.6Z" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/><path d="m12.4 16.2 2.6 2.6 4.8-5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
   <h1>intact</h1>
-  <p>Enter the 6-digit code from your authenticator</p>
+  <p id="prompt">Enter the 6-digit code from your authenticator</p>
   <form id="f" method="post" action="/login">
     <div class="otp" id="otp">
       <input aria-label="digit 1" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" autofocus>
@@ -43,10 +49,23 @@ p{color:var(--muted);font-size:.85rem;margin:0 0 1.5rem}
       <input aria-label="digit 6" inputmode="numeric" pattern="[0-9]*" maxlength="1">
     </div>
     <input type="hidden" name="totp" id="totp">
-    <div class="msg">{{ERR}}</div>
+    <div class="msg" id="msg">{{ERR}}</div>
   </form>
+  <div class="lang" id="lang"><button type="button" data-l="en">English</button>·<button type="button" data-l="vi">Tiếng Việt</button></div>
 </div>
 <script>
+// The language is the dashboard's choice, kept in this browser.
+(()=>{
+  const VI={'Enter the 6-digit code from your authenticator':'Nhập mã 6 số từ ứng dụng xác thực',
+    'Wrong or expired code. Try again.':'Mã sai hoặc đã hết hạn. Thử lại.','intact — sign in':'intact — đăng nhập'};
+  let lang='en';try{lang=localStorage.getItem('intact-lang')||((navigator.language||'').toLowerCase().startsWith('vi')?'vi':'en')}catch(e){}
+  if(lang==='vi'){document.documentElement.lang='vi';
+    for(const id of ['prompt','msg']){const e=document.getElementById(id);if(VI[e.textContent])e.textContent=VI[e.textContent]}
+    document.title=VI[document.title]||document.title;
+    document.querySelectorAll('.otp input').forEach((b,i)=>b.setAttribute('aria-label','chữ số '+(i+1)))}
+  document.querySelectorAll('#lang button').forEach(b=>{b.setAttribute('aria-pressed',String(b.dataset.l===lang));
+    b.onclick=()=>{try{localStorage.setItem('intact-lang',b.dataset.l)}catch(e){}location.reload()}});
+})();
 const boxes=[...document.querySelectorAll('.otp input')],wrap=document.getElementById('otp'),
   hidden=document.getElementById('totp'),form=document.getElementById('f');
 function collect(){return boxes.map(b=>b.value).join('')}

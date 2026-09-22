@@ -50,6 +50,9 @@ func (a *api) driftFields(w http.ResponseWriter, r *http.Request) {
 		}
 		return list[i].Path < list[j].Path
 	})
+	if list == nil {
+		list = []store.ShapeField{} // an empty list, not null
+	}
 	writeJSON(w, map[string]any{"fields": list})
 }
 

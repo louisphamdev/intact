@@ -76,3 +76,14 @@ func TestDriftIgnoresADocumentedAPI(t *testing.T) {
 		t.Errorf("groq traffic was watched: %+v", c)
 	}
 }
+
+func TestDriftFieldsEmptyIsAList(t *testing.T) {
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	h := New(s, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/drift/fields?provider=codex", nil))
+	if !strings.Contains(rec.Body.String(), `"fields":[]`) {
+		t.Errorf("fields = %s", rec.Body.String())
+	}
+}

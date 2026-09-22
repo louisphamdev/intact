@@ -45,6 +45,9 @@ tools) and wants to use them all from any client.
   `/api/*`, and to an agent through an MCP server at `/mcp`. [API](docs/api.md)
 - **Dashboard.** A single embedded page with sign-in by TOTP code (no password).
   API keys are created there. [Security](docs/security.md)
+  - It is in English and Vietnamese.
+  - It has light, dark and automatic (system) themes.
+  - Both choices are made at the bottom of the menu and kept in the browser.
 
 ## Quick start
 

@@ -189,8 +189,14 @@
     <form id="aForm">
       <div class="mb">
         <input type="hidden" name="provider" id="aProv">
+        <label class="f" id="aIdRow">Provider id
+          <input id="aId" placeholder="e.g. tokenharbor" autocomplete="off" spellcheck="false">
+          <span class="hint">Lowercase letters, digits and -. Models are called as <code>&lt;id&gt;/&lt;model&gt;</code>.</span></label>
+        <label class="f" id="aBaseRow">Base URL<input name="base_url" id="aBase" placeholder="https://example.com/v1" autocomplete="off" spellcheck="false"></label>
         <label class="f">Name<input name="label" placeholder="e.g. Work key" autocomplete="off"></label>
-        <label class="f">API key<input name="secret" type="password" required autocomplete="off"></label>
+        <label class="f" id="aAcctRow">Account ID<input name="account_id" id="aAcct" autocomplete="off" spellcheck="false"></label>
+        <label class="f" id="aKeyRow">API key<input name="secret" id="aKey" type="password" autocomplete="off"></label>
+        <p class="hint" id="aNoKey" style="margin:0">This provider needs no key.</p>
         <div class="err-msg" id="aErr"></div>
       </div>
       <div class="mf"><button class="ghost" type="button" data-close>Cancel</button><button class="primary" type="submit">Save</button></div>
@@ -231,10 +237,10 @@ const short=id=>id.slice(0,8);
 // Display names and colours for known providers. Anything else shows its id.
 const CATALOG={
   groq:{name:'Groq',color:'#f55036'}, nvidia:{name:'NVIDIA NIM',color:'#76b900'},
-  openrouter:{name:'OpenRouter',color:'#6467f2'}, claude:{name:'Claude Code',color:'#d97757',api:'anthropic'},
+  openrouter:{name:'OpenRouter',color:'#6467f2'}, opencode:{name:'OpenCode Zen',color:'#e87040'}, claude:{name:'Claude Code',color:'#d97757',api:'anthropic'},
   typesafe:{name:'TypeSafe AI',color:'#0ea5e9',api:'typesafe'}, antigravity:{name:'Antigravity',color:'#4f7cff'},
   codex:{name:'OpenAI Codex',color:'#10a37f'}, github:{name:'GitHub Copilot',color:'#6e40c9'},
-  'cloudflare-ai':{name:'Cloudflare AI',color:'#f38020'}, opencode:{name:'OpenCode',color:'#71717a'},
+  'cloudflare-ai':{name:'Cloudflare Workers AI',color:'#f38020'},
 };
 function pinfo(id){
   if(CATALOG[id])return CATALOG[id];
@@ -250,7 +256,11 @@ function avatar(id,sm){
 
 let S={accounts:[],usage:[],providers:[]};
 const modelCache={}; // provider -> {ids:[...]} or {error:"…"}
-const wired=p=>S.providers.includes(p);
+const setupOf=p=>(S.providers.find(x=>x.id===p)||{}).setup;
+// A provider is wired when this build registers it or a connection gives it a
+// base URL (a custom OpenAI-compatible provider).
+const wired=p=>!!setupOf(p)||accountsOf(p).some(a=>a.baseUrl);
+const custom=p=>!setupOf(p)&&accountsOf(p).some(a=>a.baseUrl);
 const accountsOf=p=>S.accounts.filter(a=>a.provider===p);
 const activeOf=p=>accountsOf(p).filter(a=>a.isActive);
 const accById=id=>S.accounts.find(a=>a.id===id);
@@ -333,7 +343,7 @@ window.addEventListener('hashchange',route);
 function viewEndpoint(v){
   header('Endpoint','One base URL for every provider. The model you ask for decides where the request goes.');
   const base=location.origin+'/v1';
-  const provs=S.providers.filter(p=>activeOf(p).length);
+  const provs=[...new Set(S.accounts.filter(a=>a.isActive).map(a=>a.provider))].filter(wired).sort((a,b)=>pname(a).localeCompare(pname(b)));
   const sel=el('select',{style:'width:auto','aria-label':'Provider'},provs.map(p=>el('option',{value:p,text:pname(p)})));
   const ex=el('pre');
   const render=async()=>{
@@ -365,8 +375,9 @@ function viewEndpoint(v){
 // ---- Providers
 function viewProviders(v){
   const q=el('input',{placeholder:'Search providers…',autocomplete:'off','aria-label':'Search providers'});
-  header('Providers','Manage the accounts intact holds for each provider.',el('div',{class:'search'},svg(ICON.search),q));
-  const ids=[...new Set([...S.providers,...S.accounts.map(a=>a.provider)])];
+  header('Providers','Manage the accounts intact holds for each provider.',el('div',{class:'search'},svg(ICON.search),q),
+    el('button',{class:'ghost',type:'button',onclick:()=>addAccount(null)},svg(ICON.plus),'Custom provider'));
+  const ids=[...new Set([...S.providers.map(x=>x.id),...S.accounts.map(a=>a.provider)])];
   const card=p=>{
     const n=accountsOf(p).length,act=activeOf(p).length;
     return el('a',{class:'pcard'+(wired(p)?'':' dim'),href:'#/providers/'+encodeURIComponent(p),'data-q':(p+' '+pname(p)).toLowerCase()},
@@ -383,7 +394,7 @@ function viewProviders(v){
   const body=el('div',{style:'display:grid;gap:1.75rem'},
     sec('Connected',ids.filter(p=>wired(p)&&accountsOf(p).length).sort(byName)),
     sec('Available',ids.filter(p=>wired(p)&&!accountsOf(p).length).sort(byName)),
-    sec('Not wired in this build',ids.filter(p=>!wired(p)).sort(byName),'Stored accounts that intact cannot proxy yet'));
+    sec('Not supported yet',ids.filter(p=>!wired(p)).sort(byName),'Accounts imported from another gateway that intact cannot call yet'));
   v.append(body);
   q.oninput=()=>{const s=q.value.trim().toLowerCase();
     for(const c of body.querySelectorAll('.pcard'))c.hidden=!!s&&!c.dataset.q.includes(s);
@@ -395,7 +406,9 @@ function viewProvider(v,p){
   header(el('div',{style:'display:flex;align-items:center;gap:.6rem'},
     el('a',{class:'crumb',href:'#/providers'},'Providers'),el('span',{class:'faint'},'›'),avatar(p,true),el('h1',{text:pname(p)})),
     list.length+' connection'+(list.length===1?'':'s'));
-  if(!ok)v.append(el('div',{class:'notice'},'This build has no upstream entry for "'+p+'", so these accounts are stored but cannot be proxied yet.'));
+  if(!ok)v.append(el('div',{class:'notice'},'intact cannot call "'+pname(p)+'" yet, so these accounts are stored but not used.'));
+  if(setupOf(p)==='account'&&list.some(a=>!a.baseUrl))v.append(el('div',{class:'notice'},'A connection without an account ID cannot be used. Delete it and add it again with the account ID.'));
+  if(custom(p))v.append(el('div',{class:'muted small'},'Custom OpenAI-compatible provider · ',el('code',{text:list.find(a=>a.baseUrl).baseUrl})));
   const addBtn=ok?el('button',{class:'primary',type:'button',onclick:()=>addAccount(p)},svg(ICON.plus),'Add'):null;
   const rows=list.map((a,i)=>{
     const sw=el('input',{type:'checkbox',checked:a.isActive,'aria-label':'Active: '+(a.label||a.id)});
@@ -431,15 +444,30 @@ function viewProvider(v,p){
   }
 }
 function addAccount(p){
-  $('aTitle').textContent='Add '+pname(p)+' connection';
-  $('aForm').reset();$('aProv').value=p;$('aErr').textContent='';openModal('aModal');
+  // p is null for a new custom OpenAI-compatible provider.
+  const setup=p?(setupOf(p)||(custom(p)?'custom':'key')):'custom';
+  $('aTitle').textContent=p?'Add '+pname(p)+' connection':'Add a custom provider';
+  $('aForm').reset();$('aErr').textContent='';
+  $('aProv').value=p||'';$('aId').value='';
+  const show=(id,on)=>$(id).hidden=!on;
+  show('aIdRow',!p);show('aBaseRow',setup==='custom');show('aAcctRow',setup==='account');
+  show('aKeyRow',setup!=='none');show('aNoKey',setup==='none');
+  $('aBase').value=p&&custom(p)?accountsOf(p).find(a=>a.baseUrl).baseUrl:'';
+  openModal('aModal');
 }
+$('aId').oninput=()=>{$('aProv').value=$('aId').value.trim().toLowerCase()};
 $('aForm').onsubmit=async e=>{
   e.preventDefault();
   try{
-    const r=await fetch('/accounts',{method:'POST',body:new URLSearchParams(new FormData($('aForm')))});
+    const fd=new FormData($('aForm'));
+    if(!$('aKeyRow').hidden&&!$('aKey').value)throw new Error('The API key is required.');
+    if(!$('aAcctRow').hidden&&!$('aAcct').value.trim())throw new Error('The account ID is required.');
+    if(!$('aIdRow').hidden&&!/^[a-z0-9][a-z0-9-]{0,39}$/.test(fd.get('provider')))throw new Error('The provider id must be lowercase letters, digits or -.');
+    if(!$('aIdRow').hidden&&setupOf(fd.get('provider')))throw new Error('That id is a built-in provider; open it from the list instead.');
+    const r=await fetch('/accounts',{method:'POST',body:new URLSearchParams(fd)});
     if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.error||('HTTP '+r.status))}
-    delete modelCache[$('aProv').value];closeModal('aModal');toast('Connection added');await load();
+    const np=$('aProv').value;delete modelCache[np];closeModal('aModal');toast('Connection added');await load();
+    if(!location.hash.endsWith('/'+np))location.hash='#/providers/'+encodeURIComponent(np);
   }catch(err){$('aErr').textContent=err.message}
 };
 async function deleteAccount(a){

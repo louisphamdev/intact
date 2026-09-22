@@ -23,10 +23,24 @@ func (a *api) setActive(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true, "active": body.Active})
 }
 
-// providers lists the provider ids this build can proxy, so the dashboard can
-// offer them and mark a stored connection whose provider is not wired.
+// providers lists the providers this build can proxy and what a new
+// connection of each needs, so the dashboard can offer them and mark a stored
+// connection it cannot reach.
 func (a *api) providers(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{"providers": provider.IDs()})
+	type info struct {
+		ID    string `json:"id"`
+		Setup string `json:"setup"`
+	}
+	out := []info{}
+	for _, id := range provider.IDs() {
+		p, _ := provider.Lookup(id)
+		setup := p.Setup
+		if setup == "" {
+			setup = "key"
+		}
+		out = append(out, info{ID: id, Setup: setup})
+	}
+	writeJSON(w, map[string]any{"providers": out})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

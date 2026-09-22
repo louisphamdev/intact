@@ -71,7 +71,9 @@ func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, secr
 	for k, v := range p.Identity {
 		out.Header.Set(k, v)
 	}
-	out.Header.Set(p.AuthHeader, p.AuthPrefix+secret)
+	if p.AuthHeader != "" {
+		out.Header.Set(p.AuthHeader, p.AuthPrefix+secret)
+	}
 	return out, nil
 }
 

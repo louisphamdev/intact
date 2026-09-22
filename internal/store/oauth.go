@@ -20,6 +20,9 @@ var oauthColumns = []string{
 	"client_id     TEXT NOT NULL DEFAULT ''",
 	"client_secret TEXT NOT NULL DEFAULT ''",
 	"expires_at    TEXT NOT NULL DEFAULT ''",
+	// base_url overrides the provider's upstream for one connection: a
+	// Cloudflare account, or a custom OpenAI-compatible provider.
+	"base_url      TEXT NOT NULL DEFAULT ''",
 }
 
 // migrateOAuth adds the OAuth columns if they are missing. It is idempotent, so

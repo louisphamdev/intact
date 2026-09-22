@@ -4,7 +4,10 @@
 // the exact headers are known.
 package provider
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // Provider describes how to reach one upstream.
 //
@@ -12,6 +15,9 @@ import "sort"
 // replaces what the caller sent, because a class A upstream answers differently
 // when it does not recognise the client. Defaults select features, so the caller
 // keeps control and a default only fills a header that is absent.
+//
+// An empty AuthHeader means the upstream takes no credential. A BaseURL that
+// holds {accountId} is completed per connection (see Setup).
 type Provider struct {
 	ID         string
 	BaseURL    string
@@ -19,6 +25,20 @@ type Provider struct {
 	AuthPrefix string
 	Identity   map[string]string
 	Defaults   map[string]string
+	// Setup tells the dashboard what a new connection needs besides a label:
+	// "key" (the default), "account" (a key and an account id) or "none".
+	Setup string
+}
+
+// Generic is an OpenAI-compatible upstream that a connection defines itself
+// with its own id and base URL, such as a self-hosted or niche gateway.
+func Generic(id, baseURL string) Provider {
+	return Provider{ID: id, BaseURL: baseURL, AuthHeader: "Authorization", AuthPrefix: "Bearer "}
+}
+
+// WithAccount completes a BaseURL that holds {accountId}.
+func (p Provider) WithAccount(accountID string) string {
+	return strings.ReplaceAll(p.BaseURL, "{accountId}", accountID)
 }
 
 // Captured from Claude Code 2.1.278 on 2026-09-20. The upstream rejects an OAuth
@@ -45,6 +65,22 @@ var registry = map[string]Provider{
 		BaseURL:    "https://integrate.api.nvidia.com/v1",
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
+	},
+	// Cloudflare Workers AI serves an OpenAI-compatible API under the account.
+	"cloudflare-ai": {
+		ID:         "cloudflare-ai",
+		BaseURL:    "https://api.cloudflare.com/client/v4/accounts/{accountId}/ai/v1",
+		AuthHeader: "Authorization",
+		AuthPrefix: "Bearer ",
+		Setup:      "account",
+	},
+	// OpenCode Zen's free models take no key; the client header is what the
+	// desktop app sends.
+	"opencode": {
+		ID:       "opencode",
+		BaseURL:  "https://opencode.ai/zen/v1",
+		Identity: map[string]string{"X-Opencode-Client": "desktop"},
+		Setup:    "none",
 	},
 	"openrouter": {
 		ID:         "openrouter",

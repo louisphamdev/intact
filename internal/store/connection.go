@@ -20,6 +20,8 @@ type Connection struct {
 	Provider string `json:"provider"`
 	Label    string `json:"label"`
 	IsActive bool   `json:"isActive"`
+	// BaseURL, when set, replaces the provider's upstream for this connection.
+	BaseURL string `json:"baseUrl"`
 }
 
 func newID() (string, error) {
@@ -50,7 +52,7 @@ func (s *Store) CreateConnection(provider, label, secret string) (Connection, er
 // ListConnections returns every connection, newest first, without secrets.
 func (s *Store) ListConnections() ([]Connection, error) {
 	rows, err := s.DB.Query(
-		`SELECT id, provider, label, is_active FROM connections ORDER BY created_at DESC`)
+		`SELECT id, provider, label, is_active, base_url FROM connections ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("query connections: %w", err)
 	}
@@ -60,7 +62,7 @@ func (s *Store) ListConnections() ([]Connection, error) {
 	for rows.Next() {
 		var c Connection
 		var active int
-		if err := rows.Scan(&c.ID, &c.Provider, &c.Label, &active); err != nil {
+		if err := rows.Scan(&c.ID, &c.Provider, &c.Label, &active, &c.BaseURL); err != nil {
 			return nil, fmt.Errorf("scan connection: %w", err)
 		}
 		c.IsActive = active != 0
@@ -95,6 +97,19 @@ func (s *Store) DeleteConnection(id string) error {
 		return fmt.Errorf("rows affected: %w", err)
 	}
 	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetBaseURL sets the upstream that replaces the provider's for one connection.
+func (s *Store) SetBaseURL(id, baseURL string) error {
+	res, err := s.DB.Exec(`UPDATE connections SET base_url = ?, updated_at = ? WHERE id = ?`,
+		baseURL, time.Now().UTC().Format(time.RFC3339), id)
+	if err != nil {
+		return fmt.Errorf("set base url: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
 	}
 	return nil

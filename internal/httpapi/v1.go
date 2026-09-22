@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"sort"
@@ -90,10 +91,44 @@ func (a *api) splitModel(model string) (prov, rest string) {
 	if i <= 0 {
 		return "", model
 	}
-	if _, ok := provider.Lookup(model[:i]); !ok {
+	if !a.knownProvider(model[:i]) {
 		return "", model
 	}
 	return model[:i], model[i+1:]
+}
+
+// knownProvider reports whether id is a registered provider or the id of a
+// custom provider that a stored connection defines.
+func (a *api) knownProvider(id string) bool {
+	if _, ok := provider.Lookup(id); ok {
+		return true
+	}
+	list, _ := a.store.ListConnections()
+	for _, c := range list {
+		if c.Provider == id && c.BaseURL != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// providerFor returns how to reach one connection: its registered provider,
+// with the connection's base URL when it sets one, or a generic
+// OpenAI-compatible upstream for a custom provider. It reports false when the
+// connection cannot be reached (unknown provider, or a URL still missing its
+// account id).
+func (a *api) providerFor(c store.Connection) (provider.Provider, bool) {
+	p, ok := provider.Lookup(c.Provider)
+	switch {
+	case ok && c.BaseURL != "":
+		p.BaseURL = c.BaseURL
+	case !ok && c.BaseURL != "":
+		p, ok = provider.Generic(c.Provider, c.BaseURL), true
+	}
+	if !ok || p.BaseURL == "" || strings.Contains(p.BaseURL, "{accountId}") {
+		return provider.Provider{}, false
+	}
+	return p, true
 }
 
 // providersServing returns, in id order, the providers with an active account
@@ -158,7 +193,7 @@ func (a *api) activeProviders() []string {
 	}
 	seen := map[string]bool{}
 	for _, c := range list {
-		if _, ok := provider.Lookup(c.Provider); ok && c.IsActive {
+		if _, ok := a.providerFor(c); ok && c.IsActive {
 			seen[c.Provider] = true
 		}
 	}
@@ -232,7 +267,10 @@ func (a *api) fetchModelIDs(ctx context.Context, conn store.Connection) ([]strin
 
 // getModels sends GET <base>/models for one account.
 func (a *api) getModels(ctx context.Context, conn store.Connection) (*http.Response, error) {
-	p, _ := provider.Lookup(conn.Provider)
+	p, ok := a.providerFor(conn)
+	if !ok {
+		return nil, errors.New("provider not reachable")
+	}
 	secret, err := a.secretFor(ctx, conn.ID)
 	if err != nil {
 		return nil, err
@@ -251,7 +289,9 @@ func (a *api) getModels(ctx context.Context, conn store.Connection) (*http.Respo
 	for k, v := range p.Identity {
 		req.Header.Set(k, v)
 	}
-	req.Header.Set(p.AuthHeader, p.AuthPrefix+secret)
+	if p.AuthHeader != "" {
+		req.Header.Set(p.AuthHeader, p.AuthPrefix+secret)
+	}
 	req.Header.Set("Accept-Encoding", "identity")
 	return upstream.Do(ctx, req, 2)
 }
@@ -278,7 +318,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 	tried := 0
 	for i := 0; i < len(targets); i++ {
 		conn := targets[(start+i)%len(targets)]
-		p, ok := provider.Lookup(conn.Provider)
+		p, ok := a.providerFor(conn)
 		if !ok {
 			continue
 		}

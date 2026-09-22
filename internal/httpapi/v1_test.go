@@ -114,3 +114,77 @@ func TestV1RejectsMissingOrUnknownModel(t *testing.T) {
 		t.Errorf("upstream called for a request that could not route: %q", f.calls)
 	}
 }
+
+func TestV1CustomProviderUsesItsBaseURL(t *testing.T) {
+	var gotPath, gotAuth, gotBody string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotPath, gotAuth, gotBody = r.URL.Path, r.Header.Get("Authorization"), string(b)
+		w.Write([]byte(`{}`))
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	c, _ := s.CreateConnection("tokenharbor", "TH", "th-key")
+	s.SetBaseURL(c.ID, up.URL+"/v1")
+	h := New(s, nil)
+
+	if rec := postV1(h, `{"model":"tokenharbor/gpt-x"}`); rec.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/v1/chat/completions" || gotAuth != "Bearer th-key" || gotBody != `{"model":"gpt-x"}` {
+		t.Errorf("upstream got path=%q auth=%q body=%q", gotPath, gotAuth, gotBody)
+	}
+}
+
+func TestNoAuthProviderSendsNoCredential(t *testing.T) {
+	var gotAuth, gotClient string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth, gotClient = r.Header.Get("Authorization"), r.Header.Get("X-Opencode-Client")
+		w.Write([]byte(`{}`))
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("opencode", "free", "")
+	h := New(s, map[string]string{"opencode": up.URL})
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"opencode/m"}`))
+	req.Header.Set("Authorization", "Bearer intact-token")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d", rec.Code)
+	}
+	if gotAuth != "" || gotClient != "desktop" {
+		t.Errorf("auth=%q client=%q, want no auth and the desktop client header", gotAuth, gotClient)
+	}
+}
+
+func TestCreateAccountFillsCloudflareAccountID(t *testing.T) {
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	h := New(s, nil)
+	form := "provider=cloudflare-ai&label=cf&secret=k&account_id=abc123"
+	req := httptest.NewRequest("POST", "/accounts", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	list, _ := s.ListConnections()
+	want := "https://api.cloudflare.com/client/v4/accounts/abc123/ai/v1"
+	if len(list) != 1 || list[0].BaseURL != want {
+		t.Fatalf("connections = %+v, want base %s", list, want)
+	}
+
+	// A custom provider without a base URL is refused.
+	req = httptest.NewRequest("POST", "/accounts", strings.NewReader("provider=mine&secret=k"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("custom provider without base url: code=%d", rec.Code)
+	}
+}

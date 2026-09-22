@@ -47,7 +47,7 @@ func (a *api) providerModelTable(w http.ResponseWriter, r *http.Request) {
 	for base, g := range e.groups {
 		variants[base] = g.Variants()
 	}
-	writeJSON(w, map[string]any{"models": list, "ok": e.ok, "fetchedAt": e.at.UTC().Format(time.RFC3339), "variants": variants,
+	writeJSON(w, map[string]any{"models": list, "ok": e.ok, "fetchedAt": e.at.UTC().Format(time.RFC3339), "variants": variants, "info": e.info,
 		"policy": a.modelPolicy(prov), "running": a.auto.isRunning(prov)})
 }
 
@@ -272,4 +272,20 @@ func (a *api) accountTests(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, out)
+}
+
+// providerModelsRaw serves the provider's last model list answer as it came,
+// fetching it first when there is none.
+func (a *api) providerModelsRaw(w http.ResponseWriter, r *http.Request) {
+	prov := r.PathValue("id")
+	a.catalogIDs(r.Context(), prov)
+	a.cat.mu.Lock()
+	raw := a.cat.m[prov].raw
+	a.cat.mu.Unlock()
+	if raw == nil {
+		writeError(w, http.StatusNotFound, "no list answer from this provider")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(raw)
 }

@@ -653,9 +653,21 @@ function nameFilter(q){
   });
   return name=>{const m=name.toLowerCase();return terms.every(f=>f(m))};
 }
-const MODEL_VIEWS=[['all','All'],['active','Active'],['inactive','Off'],['failed','Failed'],['untested','Untested']];
+const MODEL_VIEWS=[['all','All'],['active','Active'],['inactive','Off'],['thinking','Thinking'],['failed','Failed'],['untested','Untested']];
+// thinkChips shows what the provider's list says of a model's thinking: a
+// chip when it thinks, and the effort levels a request may ask for (the
+// default in bold). For folded variants the levels are the variants.
+function thinkChips(info,variants){
+  const paid=info&&info.paid?el('span',{class:'badge warn',style:'margin-left:.45rem',title:'The provider serves it only on a paid plan'},'paid plan'):null;
+  if(!info||!info.thinking)return paid;
+  const tip=variants?'One model per level upstream; intact picks the level from the effort the request asks for. Without one: '+(info.default||'none')+'.':
+    info.always?'Always thinks; it cannot be switched off.':'Supports thinking'+(info.efforts&&info.efforts.length?'; effort levels the request may ask for':'')+'.';
+  return el('span',{style:'margin-left:.45rem;display:inline-flex;gap:.3rem;align-items:center;flex-wrap:wrap',title:tip},
+    el('span',{class:'badge ok'},info.always?'thinking · always':'thinking'),
+    ...(info.efforts||[]).map(e=>el('span',{class:'small '+(e===info.default?'':'faint'),style:e===info.default?'font-weight:700':''},e||'none')),paid);
+}
 function modelTable(p){
-  const st={q:'',view:'all',rows:[],ok:true,sel:new Set(),policy:{},running:false,variants:{}};
+  const st={q:'',view:'all',rows:[],ok:true,sel:new Set(),policy:{},running:false,variants:{},info:{}};
   const acctName=id=>{const a=accountsOf(p).find(a=>a.id===id);return a?(a.label||short(a.id)):''};
   const card=el('div',{class:'card'});
   const q=el('input',{placeholder:'Filter by name — free, free|mini, -preview, /regex/',autocomplete:'off',spellcheck:'false',style:'max-width:26rem'});
@@ -664,7 +676,7 @@ function modelTable(p){
   const bar=el('div',{style:'display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;padding:.55rem 1.25rem;background:var(--accent-soft);border-bottom:1px solid var(--line)'});
   const body=el('tbody');
   const shown=()=>{const f=nameFilter(st.q);return st.rows.filter(r=>f(r.model)&&(
-    st.view==='all'||(st.view==='active'&&r.active)||(st.view==='inactive'&&!r.active)||
+    st.view==='all'||(st.view==='active'&&r.active)||(st.view==='inactive'&&!r.active)||(st.view==='thinking'&&st.info[r.model]&&st.info[r.model].thinking)||
     (st.view==='failed'&&r.testAt&&!r.testOk)||(st.view==='untested'&&!r.testAt)))};
   const selected=()=>st.rows.filter(r=>st.sel.has(r.model));
   const setActive=async(models,active)=>{
@@ -719,8 +731,7 @@ function modelTable(p){
         el('td',{style:'width:2.5rem'},pick),
         el('td',{style:'width:3.5rem'},el('label',{class:'switch',title:r.active?'On':'Off'},sw,el('span'))),
         el('td',{},el('button',{class:'plain mono',type:'button',title:'Copy '+p+'/'+r.model,style:'min-height:0;padding:.1rem .2rem;text-align:left',onclick:()=>copy(p+'/'+r.model)},r.model),
-          (st.variants[r.model]||[]).length?el('span',{class:'small faint',style:'margin-left:.4rem',title:'Picked by the effort the request asks for (reasoning_effort, reasoning.effort, thinking budget); without one, the first'},
-            ...st.variants[r.model].map((v,i)=>el('span',{class:'badge'+(i===0?' ok':''),style:'margin-left:.25rem'},v||'none'))):null),
+          thinkChips(st.info[r.model],!!st.variants[r.model])),
         el('td',{style:'max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'},res),
         el('td',{class:'num',style:'white-space:nowrap'},
           el('button',{class:'ghost',type:'button',style:'min-height:28px;padding:.15rem .6rem;font-size:.78rem',disabled:!!r.testing,onclick:()=>test(r)},'Test')));
@@ -764,7 +775,7 @@ function modelTable(p){
     if(!st.rows.length)body.replaceChildren(el('tr',{},el('td',{colspan:5,class:'empty',text:refresh?'Fetching…':'Loading…'})));
     try{const d=await api('/providers/'+p+'/model-table'+(refresh?'?refresh=1':''));
       const testing=new Set(st.rows.filter(r=>r.testing).map(r=>r.model));
-      st.rows=d.models;st.ok=d.ok;st.fetchedAt=d.fetchedAt;st.variants=d.variants||{};st.policy=d.policy||{};st.running=d.running;
+      st.rows=d.models;st.ok=d.ok;st.fetchedAt=d.fetchedAt;st.variants=d.variants||{};st.info=d.info||{};st.policy=d.policy||{};st.running=d.running;
       for(const r of st.rows)if(testing.has(r.model))r.testing=true;
       render();
       clearTimeout(poll);
@@ -1212,6 +1223,7 @@ const DOCS=[
       dt('tr',dt('td',dc('-preview')),dt('td','names without preview')),
       dt('tr',dt('td',dc('/^meta-llama\\//')),dt('td','a regular expression')))),
     dt('p','Tick rows (the header box ticks every row shown) and act on them from the bar that appears: turn on, turn off, keep only these on, test. A test goes through any account of the provider; the result names the account that answered. The Test button of an account tests that account alone; a TypeSafe test asks System One questions whose answers are known and checks them.'),
+    dt('p',dt('b','Thinking'),' — the chip shows a model the provider\'s own list says can think, with the effort levels a request may ask for (the default in bold). Anthropic, Codex, Copilot, OpenRouter, Groq, Cloudflare and Antigravity say it; NVIDIA, TokenHarbor and TypeSafe do not, so their models carry no chip. Cloudflare also marks the models its paid plan alone serves (paid plan).'),
     dt('p',dt('b','Variants'),' — Antigravity lists one model once per thinking level (',dc('gemini-3.8-flash-high'),', ',dc('-medium'),', ',dc('-low'),', ',dc('-tiered'),'). intact lists it once, as ',dc('gemini-3.8-flash'),', and picks the level from the effort the request asks for: ',dc('reasoning_effort'),', ',dc('reasoning.effort'),', Anthropic ',dc('output_config.effort'),' or ',dc('thinking.budget_tokens'),'. Without an effort, or with ',dc('none'),', it uses the default variant (the first badge, ',dc('tiered'),' when there is one). When every account refuses the chosen level as busy (429), the request is tried once more on the default variant; the header ',dc('X-Intact-Model'),' names the model that answered. A full id such as ',dc('gemini-3.8-flash-high'),' still works.'),
     dt('p',dt('b','Only free'),' switches on only the models whose name contains ',dc('free'),'; turning it off switches every model back on. ',dt('b','Auto test'),' fetches the list, tests each model (only the free ones under Only free) and keeps on only those that answer; it runs again every 6 hours, and a new model is tested before it is switched on. A model that fails is switched off; one refused for rate limit is tested again 30 minutes later. Under auto test, pressing Test also sets the switch.'),
     dt('h2','API and MCP'),

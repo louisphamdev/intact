@@ -47,6 +47,10 @@ type catalogEntry struct {
 	at  time.Time
 	// groups holds the models folded from level variants (Antigravity).
 	groups map[string]variantSet
+	// raw is the provider's last list answer, as it came.
+	raw []byte
+	// info is what that answer says of each model's thinking.
+	info map[string]ModelInfo
 }
 
 type catalog struct {
@@ -279,13 +283,14 @@ func (a *api) catalogIDs(ctx context.Context, prov string) []string {
 	}
 	ids, ok := []string(nil), false
 	var groups map[string]variantSet
+	var raw []byte
 	if conns := a.activeConnections(prov); len(conns) > 0 {
 		if p, _ := a.providerFor(conns[0]); p.API == translate.Antigravity {
-			if ids, ok = a.antigravityModels(ctx, conns[0]); ok {
+			if ids, raw, ok = a.antigravityModels(ctx, conns[0]); ok {
 				ids, groups = groupVariants(ids)
 			}
 		} else {
-			ids, ok = a.fetchModelIDs(ctx, conns[0])
+			ids, raw, ok = a.fetchModelIDs(ctx, conns[0])
 		}
 	}
 	live := ok && len(ids) > 0
@@ -302,7 +307,8 @@ func (a *api) catalogIDs(ctx context.Context, prov string) []string {
 		}
 	}
 	a.cat.mu.Lock()
-	a.cat.m[prov] = catalogEntry{ids: ids, ok: ok, at: time.Now(), groups: groups}
+	a.cat.m[prov] = catalogEntry{ids: ids, ok: ok, at: time.Now(), groups: groups, raw: raw,
+		info: foldInfos(modelInfos(raw), groups)}
 	a.cat.mu.Unlock()
 	return ids
 }
@@ -316,14 +322,18 @@ func (a *api) refreshCatalog(ctx context.Context, prov string) []string {
 }
 
 // fetchModelIDs reads one account's model list and returns its ids.
-func (a *api) fetchModelIDs(ctx context.Context, conn store.Connection) ([]string, bool) {
+func (a *api) fetchModelIDs(ctx context.Context, conn store.Connection) ([]string, []byte, bool) {
 	resp, err := a.getModels(ctx, conn)
 	if err != nil {
-		return nil, false
+		return nil, nil, false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, false
+		return nil, nil, false
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, nil, false
 	}
 	var d struct {
 		Data []struct {
@@ -336,9 +346,13 @@ func (a *api) fetchModelIDs(ctx context.Context, conn store.Connection) ([]strin
 			} `json:"policy"`
 		} `json:"data"`
 		Models []json.RawMessage `json:"models"`
+		// Cloudflare's model search.
+		Result []struct {
+			Name string `json:"name"`
+		} `json:"result"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&d); err != nil {
-		return nil, false
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return nil, nil, false
 	}
 	ids := []string{}
 	for _, m := range d.Data {
@@ -352,6 +366,11 @@ func (a *api) fetchModelIDs(ctx context.Context, conn store.Connection) ([]strin
 			ids = append(ids, m.Name)
 		}
 	}
+	for _, m := range d.Result {
+		if m.Name != "" {
+			ids = append(ids, m.Name)
+		}
+	}
 	for _, raw := range d.Models {
 		var s string
 		var o struct{ ID, Slug, Name string }
@@ -362,7 +381,7 @@ func (a *api) fetchModelIDs(ctx context.Context, conn store.Connection) ([]strin
 		}
 	}
 	sort.Strings(ids)
-	return ids, true
+	return ids, raw, true
 }
 
 // getModels sends GET <base>/models for one account.
@@ -383,6 +402,9 @@ func (a *api) getModels(ctx context.Context, conn store.Connection) (*http.Respo
 		base = over
 	}
 	url := base + "/models"
+	if p.ModelsPath != "" {
+		url = strings.TrimSuffix(base, "/v1") + p.ModelsPath
+	}
 	if p.ModelsQuery != "" {
 		url += "?" + p.ModelsQuery
 	}

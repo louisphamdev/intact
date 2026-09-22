@@ -47,6 +47,9 @@ type Provider struct {
 	SessionHeader string
 	// ModelsQuery is appended to the model list URL.
 	ModelsQuery string
+	// ModelsPath, when set, replaces "/models": the list lives at the base
+	// without its "/v1", plus this path (Cloudflare's model search).
+	ModelsPath string
 	// Watch turns on structure drift monitoring. It is set on the providers
 	// reached as a real tool (OAuth, impersonated clients), whose formats move
 	// with each tool release; a documented API does not need it.
@@ -171,7 +174,11 @@ var registry = map[string]Provider{
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
 		Setup:      "account",
-		// Workers AI has no OpenAI-style /models; these are its chat models.
+		// Workers AI has no OpenAI-style /models; its own search lists the
+		// text models with their properties (reasoning, paid plan).
+		ModelsPath:  "/models/search",
+		ModelsQuery: "task=Text%20Generation&per_page=100",
+		// Used when the search cannot be read.
 		Models: []string{
 			"@cf/deepseek-ai/deepseek-r1-distill-qwen-32b", "@cf/meta/llama-3.1-70b-instruct-fp8-fast",
 			"@cf/meta/llama-3.1-8b-instruct-awq", "@cf/meta/llama-3.1-8b-instruct-fp8-fast",

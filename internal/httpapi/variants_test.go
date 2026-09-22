@@ -150,3 +150,63 @@ func TestAntigravityVariantsFoldAndFallBack(t *testing.T) {
 		t.Errorf("off base, variant id: %d", rec.Code)
 	}
 }
+
+func TestModelInfos(t *testing.T) {
+	cases := map[string]string{
+		"anthropic":   `{"data":[{"id":"c","capabilities":{"thinking":{"supported":true},"effort":{"supported":true,"low":{"supported":true},"max":{"supported":true},"xhigh":{"supported":false}}}}]}`,
+		"codex":       `{"models":[{"slug":"g","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}],"default_reasoning_level":"low"}]}`,
+		"copilot":     `{"data":[{"id":"a","capabilities":{"supports":{"reasoning_effort":["high","low"]}}},{"id":"b","capabilities":{"supports":{"tool_calls":true}}},{"id":"h","capabilities":{"supports":{"max_thinking_budget":32000}}}]}`,
+		"openrouter":  `{"data":[{"id":"r","supported_parameters":["reasoning","reasoning_effort"],"reasoning":{"mandatory":true}},{"id":"n","supported_parameters":["tools"]}]}`,
+		"groq":        `{"data":[{"id":"q","supported_features":["tools","reasoning"]},{"id":"l","supported_features":["json_mode"]},{"id":"w"}]}`,
+		"antigravity": `{"models":{"x-high":{"supportsThinking":true},"x-low":{"supportsThinking":true},"img":{}}}`,
+		"nvidia":      `{"data":[{"id":"m","owned_by":"x"}]}`,
+		"cloudflare":  `{"result":[{"id":"0b1c-uuid","name":"@cf/a","properties":[{"property_id":"reasoning","value":"true"},{"property_id":"reasoning_effort","value":{"supported_efforts":["high","low"],"default_effort":"low","mandatory":true}},{"property_id":"require_workers_paid","value":"true"}]},{"name":"@cf/b","properties":[{"property_id":"context_window","value":"8000"}]}]}`,
+	}
+	got := map[string]string{}
+	for name, raw := range cases {
+		infos := modelInfos([]byte(raw))
+		if name == "antigravity" {
+			_, g := groupVariants([]string{"x-high", "x-low", "img"})
+			infos = foldInfos(infos, g)
+		}
+		b, _ := json.Marshal(infos)
+		got[name] = string(b)
+	}
+	want := map[string]string{
+		"anthropic":   `{"c":{"thinking":true,"efforts":["low","max"]}}`,
+		"codex":       `{"g":{"thinking":true,"efforts":["low","high"],"default":"low"}}`,
+		"copilot":     `{"a":{"thinking":true,"efforts":["low","high"]},"b":{"thinking":false},"h":{"thinking":true}}`,
+		"openrouter":  `{"n":{"thinking":false},"r":{"thinking":true,"always":true,"efforts":["low","medium","high"]}}`,
+		"groq":        `{"l":{"thinking":false},"q":{"thinking":true},"w":{"thinking":false}}`,
+		"antigravity": `{"img":{"thinking":false},"x":{"thinking":true,"efforts":["high","low"],"default":"high"}}`,
+		"nvidia":      `null`,
+		"cloudflare":  `{"@cf/a":{"thinking":true,"always":true,"efforts":["low","high"],"default":"low","paid":true},"@cf/b":{"thinking":false}}`,
+	}
+	for k := range cases {
+		if got[k] != want[k] {
+			t.Errorf("%s:\n got %s\nwant %s", k, got[k], want[k])
+		}
+	}
+}
+
+func TestCloudflareListsFromModelSearch(t *testing.T) {
+	var gotPath, gotQuery string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
+		w.Write([]byte(`{"success":true,"result":[{"name":"@cf/x/new","properties":[{"property_id":"reasoning","value":"true"}]}]}`))
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	c, _ := s.CreateConnection("cloudflare-ai", "cf", "k")
+	s.SetBaseURL(c.ID, up.URL+"/client/v4/accounts/acc/ai/v1")
+	h := New(s, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/providers/cloudflare-ai/model-table", nil))
+	if gotPath != "/client/v4/accounts/acc/ai/models/search" || !strings.Contains(gotQuery, "task=Text%20Generation") {
+		t.Errorf("list read at %s?%s", gotPath, gotQuery)
+	}
+	if b := rec.Body.String(); !strings.Contains(b, `"model":"@cf/x/new"`) || strings.Contains(b, "llama-3.2-1b") || !strings.Contains(b, `"thinking":true`) {
+		t.Errorf("table = %s", b)
+	}
+}

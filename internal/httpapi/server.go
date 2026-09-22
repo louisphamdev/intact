@@ -103,6 +103,7 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	mux.HandleFunc("GET /api/providers/{id}/model-policy", a.requireToken(a.getModelPolicy))
 	mux.HandleFunc("POST /api/providers/{id}/model-policy", a.requireToken(a.setModelPolicy))
 	mux.HandleFunc("GET /api/providers/{id}/models", a.requireToken(a.providerModelTable))
+	mux.HandleFunc("GET /api/providers/{id}/models/raw", a.requireToken(a.providerModelsRaw))
 	mux.HandleFunc("POST /api/providers/{id}/models/active", a.requireToken(a.setModelsActive))
 	mux.HandleFunc("POST /api/providers/{id}/models/delete", a.requireToken(a.deleteModels))
 	mux.HandleFunc("POST /api/providers/{id}/models/test", a.requireToken(a.testModel))

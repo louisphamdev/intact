@@ -141,10 +141,10 @@ func uuid4() string {
 }
 
 // antigravityModels lists an account's models with fetchAvailableModels.
-func (a *api) antigravityModels(ctx context.Context, conn store.Connection) ([]string, bool) {
+func (a *api) antigravityModels(ctx context.Context, conn store.Connection) ([]string, []byte, bool) {
 	token, err := a.secretFor(ctx, conn.ID)
 	if err != nil {
-		return nil, false
+		return nil, nil, false
 	}
 	project, _ := a.antigravityProject(ctx, conn, token)
 	p, _ := a.providerFor(conn)
@@ -155,7 +155,7 @@ func (a *api) antigravityModels(ctx context.Context, conn store.Connection) ([]s
 	body, _ := json.Marshal(map[string]any{"project": project})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1internal:fetchAvailableModels", bytes.NewReader(body))
 	if err != nil {
-		return nil, false
+		return nil, nil, false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", provider.AntigravityUserAgent)
@@ -164,11 +164,11 @@ func (a *api) antigravityModels(ctx context.Context, conn store.Connection) ([]s
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := upstream.Do(ctx, req, 2)
 	if err != nil {
-		return nil, false
+		return nil, nil, false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, false
+		return nil, nil, false
 	}
 	var d struct {
 		Models map[string]struct {
@@ -178,8 +178,9 @@ func (a *api) antigravityModels(ctx context.Context, conn store.Connection) ([]s
 		// names the replacement, which is listed on its own.
 		Deprecated map[string]json.RawMessage `json:"deprecatedModelIds"`
 	}
-	if json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&d) != nil {
-		return nil, false
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil || json.Unmarshal(raw, &d) != nil {
+		return nil, nil, false
 	}
 	ids := []string{}
 	for id, m := range d.Models {
@@ -188,5 +189,5 @@ func (a *api) antigravityModels(ctx context.Context, conn store.Connection) ([]s
 		}
 	}
 	sort.Strings(ids)
-	return ids, true
+	return ids, raw, true
 }

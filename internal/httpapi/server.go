@@ -18,9 +18,11 @@ type api struct {
 	baseOverride map[string]string
 	// auth gates the server. Nil means no gate (loopback use).
 	auth *auth.Config
-	// rrMu guards rrNext, the per-provider round-robin cursor.
+	// rrMu guards rrNext, the per-model rotation cursor.
 	rrMu   sync.Mutex
 	rrNext map[string]int
+	// cat caches each provider's model list for resolving a bare model id.
+	cat catalog
 }
 
 // New builds the route table with no authentication (loopback use and tests).
@@ -32,13 +34,12 @@ func New(s *store.Store, baseOverride map[string]string) http.Handler {
 // in with a password and a TOTP code to reach the dashboard, and a machine must
 // present the bearer token to use a provider.
 func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.Config) http.Handler {
-	a := &api{store: s, baseOverride: baseOverride, auth: authCfg, rrNext: map[string]int{}}
+	a := &api{store: s, baseOverride: baseOverride, auth: authCfg, rrNext: map[string]int{},
+		cat: catalog{m: map[string]catalogEntry{}}}
 	mux := http.NewServeMux()
-	// No method prefix: a provider exposes GET endpoints too, and a passthrough
-	// that only accepts POST is not a passthrough.
-	mux.HandleFunc("/p/{id}/{path...}", a.requireToken(a.proxy))
-	// Round-robin: choose an active account of the provider and fail over.
-	mux.HandleFunc("/r/{provider}/{path...}", a.requireToken(a.roundRobin))
+	// One base URL: the model in the body picks the provider and its accounts.
+	mux.HandleFunc("GET /v1/models", a.requireToken(a.models))
+	mux.HandleFunc("/v1/{path...}", a.requireToken(a.v1))
 	mux.HandleFunc("GET /accounts", a.requireSession(a.accounts))
 	mux.HandleFunc("POST /accounts", a.requireSession(a.createAccount))
 	mux.HandleFunc("POST /accounts/{id}/delete", a.requireSession(a.deleteAccount))

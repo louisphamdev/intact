@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/louisphamdev/intact/internal/provider"
-	"github.com/louisphamdev/intact/internal/upstream"
 )
 
 // accounts lists the connections so a caller can choose an id.
@@ -71,34 +70,11 @@ func (a *api) modelsForAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "unknown connection")
 		return
 	}
-	p, ok := provider.Lookup(conn.Provider)
-	if !ok {
+	if _, ok := provider.Lookup(conn.Provider); !ok {
 		writeError(w, http.StatusNotFound, "provider not supported in this build")
 		return
 	}
-	secret, err := a.store.Secret(id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "unknown connection")
-		return
-	}
-	base := p.BaseURL
-	if over, ok := a.baseOverride[conn.Provider]; ok {
-		base = over
-	}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, base+"/models", nil)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "bad upstream target")
-		return
-	}
-	for k, v := range p.Defaults {
-		req.Header.Set(k, v)
-	}
-	for k, v := range p.Identity {
-		req.Header.Set(k, v)
-	}
-	req.Header.Set(p.AuthHeader, p.AuthPrefix+secret)
-	req.Header.Set("Accept-Encoding", "identity")
-	resp, err := upstream.Do(r.Context(), req, 2)
+	resp, err := a.getModels(r.Context(), conn)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "upstream unreachable")
 		return

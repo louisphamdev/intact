@@ -38,7 +38,7 @@ func TestProxyRefreshesExpiredOAuthToken(t *testing.T) {
 
 	h := NewWithAuth(s, map[string]string{"claude": up.URL}, nil)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/p/"+c.ID+"/v1/messages", strings.NewReader("{}")))
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m"}`)))
 
 	if gotAuth != "Bearer fresh-token" {
 		t.Fatalf("upstream saw auth %q, want the refreshed Bearer fresh-token", gotAuth)
@@ -64,7 +64,7 @@ func TestProxyKeepsValidOAuthToken(t *testing.T) {
 	})
 	h := NewWithAuth(s, map[string]string{"claude": up.URL}, nil)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/p/"+c.ID+"/v1/messages", strings.NewReader("{}")))
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m"}`)))
 	if gotAuth != "Bearer good-token" {
 		t.Errorf("auth=%q, want the existing token (no refresh)", gotAuth)
 	}

@@ -30,14 +30,16 @@ func TestProxyForwardsPathBodyAndAuthUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	c, err := s.CreateConnection("groq", "test", "gsk-abc")
+	_, err = s.CreateConnection("groq", "test", "gsk-abc")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	h := New(s, map[string]string{"groq": up.URL})
+	// The provider prefix is the only byte range intact changes.
 	body := `{"model":"llama-3.3-70b-versatile","messages":[]}`
-	req := httptest.NewRequest("POST", "/p/"+c.ID+"/chat/completions?beta=1", strings.NewReader(body))
+	req := httptest.NewRequest("POST", "/v1/chat/completions?beta=1",
+		strings.NewReader(`{"model":"groq/llama-3.3-70b-versatile","messages":[]}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -78,10 +80,10 @@ func TestProxyReplacesAnyIncomingAuthorization(t *testing.T) {
 
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
-	c, _ := s.CreateConnection("groq", "test", "gsk-real")
+	s.CreateConnection("groq", "test", "gsk-real")
 
 	h := New(s, map[string]string{"groq": up.URL})
-	req := httptest.NewRequest("POST", "/p/"+c.ID+"/chat/completions", strings.NewReader("{}"))
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"groq/m"}`))
 	req.Header.Set("Authorization", "Bearer attacker-supplied")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -111,12 +113,12 @@ func TestProxyStreamsWithoutBuffering(t *testing.T) {
 
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
-	c, _ := s.CreateConnection("groq", "test", "gsk-abc")
+	s.CreateConnection("groq", "test", "gsk-abc")
 
 	srv := httptest.NewServer(New(s, map[string]string{"groq": up.URL}))
 	defer srv.Close()
 
-	resp, err := http.Post(srv.URL+"/p/"+c.ID+"/stream", "application/json", strings.NewReader("{}"))
+	resp, err := http.Post(srv.URL+"/v1/stream", "application/json", strings.NewReader(`{"model":"groq/m"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,13 +155,13 @@ func TestProxyAppliesClassAIdentityAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	c, err := s.CreateConnection("claude", "test", "oauth-token")
+	_, err = s.CreateConnection("claude", "test", "oauth-token")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	h := New(s, map[string]string{"claude": up.URL})
-	req := httptest.NewRequest("POST", "/p/"+c.ID+"/messages", strings.NewReader(`{}`))
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m"}`))
 	// The caller sends its own identity and its own feature selection.
 	req.Header.Set("User-Agent", "some-other-client/1.0")
 	req.Header.Set("Anthropic-Beta", "caller-chose-this")
@@ -183,11 +185,11 @@ func TestProxyAppliesClassAIdentityAndDefaults(t *testing.T) {
 	}
 }
 
-func TestProxyRejectsUnknownConnection(t *testing.T) {
+func TestV1RejectsProviderWithNoAccount(t *testing.T) {
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
 	h := New(s, nil)
-	req := httptest.NewRequest("POST", "/p/does-not-exist/chat/completions", strings.NewReader("{}"))
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"claude/m"}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -200,13 +202,13 @@ func TestProxyRejectsUnknownConnection(t *testing.T) {
 
 // A connection whose provider is class A must be refused in phase 1 rather than
 // reached with a class B code path that cannot impersonate the real tool.
-func TestProxyRefusesUnsupportedProvider(t *testing.T) {
+func TestV1RefusesUnwiredProvider(t *testing.T) {
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
-	c, _ := s.CreateConnection("antigravity", "class A", "token")
+	s.CreateConnection("antigravity", "class A", "token")
 
 	h := New(s, nil)
-	req := httptest.NewRequest("POST", "/p/"+c.ID+"/v1internal:generateContent", strings.NewReader("{}"))
+	req := httptest.NewRequest("POST", "/v1/v1internal:generateContent", strings.NewReader(`{"model":"antigravity/m"}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -216,27 +218,27 @@ func TestProxyRefusesUnsupportedProvider(t *testing.T) {
 
 // Passthrough is not a POST-only idea. A provider exposes GET endpoints too
 // (model listings, quota), and a proxy that refuses them is not transparent.
-func TestProxyForwardsNonPostMethods(t *testing.T) {
-	var gotMethod, gotPath string
+func TestModelsListsEveryProviderWithItsPrefix(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotMethod = r.Method
-		gotPath = r.URL.Path
-		w.Write([]byte(`{"data":[]}`))
+		if r.Method != "GET" || r.URL.Path != "/models" {
+			t.Errorf("upstream got %s %s, want GET /models", r.Method, r.URL.Path)
+		}
+		w.Write([]byte(`{"data":[{"id":"llama"},{"id":"qwen"}]}`))
 	}))
 	defer up.Close()
 
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
-	c, _ := s.CreateConnection("groq", "test", "gsk-abc")
+	s.CreateConnection("groq", "a", "k")
+	s.CreateConnection("nvidia", "b", "k")
+	h := New(s, map[string]string{"groq": up.URL, "nvidia": up.URL})
 
-	h := New(s, map[string]string{"groq": up.URL})
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/p/"+c.ID+"/models", nil))
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: GET must pass through", rec.Code)
-	}
-	if gotMethod != "GET" || gotPath != "/models" {
-		t.Errorf("upstream saw %s %s, want GET /models", gotMethod, gotPath)
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/models", nil))
+	body := rec.Body.String()
+	for _, want := range []string{`"groq/llama"`, `"groq/qwen"`, `"nvidia/llama"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("models = %s, missing %s", body, want)
+		}
 	}
 }

@@ -101,7 +101,7 @@ func TestToggleActiveThroughDashboard(t *testing.T) {
 	}
 	// An inactive account is skipped by round-robin.
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/r/groq/x", strings.NewReader("{}")))
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/x", strings.NewReader(`{"model":"groq/m"}`)))
 	if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusNotFound {
 		t.Errorf("round-robin with no active account: code=%d", rec.Code)
 	}

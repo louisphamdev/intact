@@ -11,7 +11,6 @@ import (
 
 	"github.com/louisphamdev/intact/internal/provider"
 	"github.com/louisphamdev/intact/internal/store"
-	"github.com/louisphamdev/intact/internal/upstream"
 	"github.com/louisphamdev/intact/internal/usage"
 )
 
@@ -34,64 +33,6 @@ var hopByHop = map[string]bool{
 	"Trailer":             true,
 	"Transfer-Encoding":   true,
 	"Upgrade":             true,
-}
-
-// proxy forwards one request to the account named in the path.
-//
-// It never reads the body and never re-serializes the response. The caller
-// already speaks the provider's own protocol; this handler only adds identity.
-func (a *api) proxy(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-
-	conn, err := a.connection(id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "unknown connection")
-		return
-	}
-	p, ok := provider.Lookup(conn.Provider)
-	if !ok {
-		writeError(w, http.StatusNotFound, "provider not supported in this build")
-		return
-	}
-	secret, err := a.secretFor(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "unknown connection")
-		return
-	}
-	// Buffer the body so a 401 on an OAuth account can be retried after a forced
-	// refresh (the token was revoked before its recorded expiry).
-	body, err := io.ReadAll(r.Body)
-	r.Body.Close()
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "cannot read body")
-		return
-	}
-	resp, err := a.callUpstream(r, p, conn.Provider, secret, body)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "upstream unreachable")
-		return
-	}
-	if resp.StatusCode == http.StatusUnauthorized && a.isOAuth(id) {
-		if fresh, ok := a.forceRefresh(r.Context(), id); ok {
-			resp.Body.Close()
-			resp, err = a.callUpstream(r, p, conn.Provider, fresh, body)
-			if err != nil {
-				writeError(w, http.StatusBadGateway, "upstream unreachable")
-				return
-			}
-		}
-	}
-	defer resp.Body.Close()
-	a.relay(w, resp, id)
-}
-
-// callUpstream builds and sends one upstream request for a connection.
-func (a *api) callUpstream(r *http.Request, p provider.Provider, providerID, secret string, body []byte) (*http.Response, error) {
-	out, err := a.newOutbound(r, p, providerID, secret, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	return upstream.Do(r.Context(), out, 3)
 }
 
 // newOutbound builds the upstream request for one connection: the target URL,

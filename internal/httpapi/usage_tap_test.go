@@ -30,8 +30,8 @@ func TestProxyRecordsUsageWithoutAlteringTheResponse(t *testing.T) {
 	c, _ := s.CreateConnection("groq", "test", "gsk-abc")
 
 	h := New(s, map[string]string{"groq": up.URL})
-	req := httptest.NewRequest("POST", "/p/"+c.ID+"/chat/completions",
-		strings.NewReader(`{"model":"llama-3.3-70b-versatile","messages":[]}`))
+	req := httptest.NewRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"groq/llama-3.3-70b-versatile","messages":[]}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -66,10 +66,10 @@ func TestProxyRecordsNothingWhenNoUsage(t *testing.T) {
 
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
-	c, _ := s.CreateConnection("groq", "test", "gsk-abc")
+	s.CreateConnection("groq", "test", "gsk-abc")
 
 	h := New(s, map[string]string{"groq": up.URL})
-	req := httptest.NewRequest("POST", "/p/"+c.ID+"/x", strings.NewReader("{}"))
+	req := httptest.NewRequest("POST", "/v1/x", strings.NewReader(`{"model":"groq/m"}`))
 	h.ServeHTTP(httptest.NewRecorder(), req)
 
 	rows, _ := s.Usage()
@@ -98,11 +98,11 @@ func TestProxyRecordsUsageWhenGzipEncoded(t *testing.T) {
 
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
-	c, _ := s.CreateConnection("claude", "test", "sk-abc")
+	s.CreateConnection("claude", "test", "sk-abc")
 
 	h := New(s, map[string]string{"claude": up.URL})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/p/"+c.ID+"/v1/messages", strings.NewReader("{}"))
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m"}`))
 	// The client accepts gzip, so the proxy forwards it and Go does not
 	// auto-decompress the upstream response. This is the case that broke usage.
 	req.Header.Set("Accept-Encoding", "gzip")
@@ -140,11 +140,11 @@ func TestProxyRecordsUsageOnStreamLargerThanTapLimit(t *testing.T) {
 
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
-	c, _ := s.CreateConnection("claude", "test", "sk-abc")
+	s.CreateConnection("claude", "test", "sk-abc")
 
 	h := New(s, map[string]string{"claude": up.URL})
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/p/"+c.ID+"/v1/messages", strings.NewReader("{}")))
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m"}`)))
 
 	if rec.Body.String() != stream {
 		t.Fatalf("caller stream altered")
@@ -169,10 +169,10 @@ func TestProxyForcesIdentityEncodingUpstream(t *testing.T) {
 
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
-	c, _ := s.CreateConnection("groq", "test", "gsk-abc")
+	s.CreateConnection("groq", "test", "gsk-abc")
 
 	h := New(s, map[string]string{"groq": up.URL})
-	req := httptest.NewRequest("POST", "/p/"+c.ID+"/chat/completions", strings.NewReader("{}"))
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"groq/m"}`))
 	req.Header.Set("Accept-Encoding", "br, gzip, zstd") // what curl --compressed sends
 	h.ServeHTTP(httptest.NewRecorder(), req)
 

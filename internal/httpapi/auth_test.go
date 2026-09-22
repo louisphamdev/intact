@@ -79,17 +79,17 @@ func TestProxyRequiresBearerToken(t *testing.T) {
 	defer up.Close()
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
-	c, _ := s.CreateConnection("groq", "x", "gsk")
+	s.CreateConnection("groq", "x", "gsk")
 	h := NewWithAuth(s, map[string]string{"groq": up.URL}, authConfig())
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/p/"+c.ID+"/chat/completions", strings.NewReader("{}")))
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"groq/m"}`)))
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("no bearer: code=%d, want 401", rec.Code)
 	}
 
 	rec2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest("POST", "/p/"+c.ID+"/chat/completions", strings.NewReader("{}"))
+	req2 := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"groq/m"}`))
 	req2.Header.Set("Authorization", "Bearer machine-tok")
 	h.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK {

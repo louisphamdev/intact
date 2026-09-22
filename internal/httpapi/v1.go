@@ -1,0 +1,357 @@
+package httpapi
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/louisphamdev/intact/internal/provider"
+	"github.com/louisphamdev/intact/internal/store"
+	"github.com/louisphamdev/intact/internal/upstream"
+)
+
+// intact has one base URL, /v1. The caller names a model and intact finds the
+// accounts that serve it:
+//
+//   - "groq/llama-3.3-70b-versatile" names the provider. intact strips the
+//     prefix from the body's model and uses that provider's active accounts.
+//   - "llama-3.3-70b-versatile" names only the model. intact looks it up in the
+//     model list of every provider and pools the accounts of all that list it.
+//
+// The pool is rotated per model so load spreads, and a busy account fails over
+// to the next one. The rest of the path goes to the provider as sent, so
+// /v1/chat/completions reaches <base>/chat/completions and /v1/messages reaches
+// Anthropic's /messages.
+
+// Model lists are cached so resolving a bare model does not cost an upstream
+// call per request. A failed fetch is retried sooner than a good one expires.
+const (
+	catalogTTL     = 10 * time.Minute
+	catalogFailTTL = time.Minute
+)
+
+type catalogEntry struct {
+	ids []string
+	ok  bool
+	at  time.Time
+}
+
+type catalog struct {
+	mu sync.Mutex
+	m  map[string]catalogEntry
+}
+
+// v1 forwards a request to the accounts that serve the model named in its body.
+func (a *api) v1(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "cannot read body")
+		return
+	}
+	model, ok := bodyModel(body)
+	if !ok || model == "" {
+		writeError(w, http.StatusBadRequest, "the request names no model; send \"model\": \"<provider>/<model>\" or a model id")
+		return
+	}
+	prov, upstreamModel := a.splitModel(model)
+	var targets []store.Connection
+	if prov != "" {
+		targets = a.activeConnections(prov)
+		if upstreamModel != model {
+			if body, ok = setModel(body, upstreamModel); !ok {
+				writeError(w, http.StatusBadRequest, "cannot rewrite the model")
+				return
+			}
+		}
+	} else {
+		for _, p := range a.providersServing(r.Context(), model) {
+			targets = append(targets, a.activeConnections(p)...)
+		}
+	}
+	if len(targets) == 0 {
+		writeError(w, http.StatusNotFound, "no active account serves this model")
+		return
+	}
+	a.failover(w, r, body, targets, a.nextIndex("m:"+model, len(targets)))
+}
+
+// splitModel reads a "<provider>/<model>" prefix. It reports the provider only
+// when the prefix is a registered provider, because model ids carry slashes of
+// their own (meta-llama/llama-3.3-70b-instruct at openrouter).
+func (a *api) splitModel(model string) (prov, rest string) {
+	i := strings.IndexByte(model, '/')
+	if i <= 0 {
+		return "", model
+	}
+	if _, ok := provider.Lookup(model[:i]); !ok {
+		return "", model
+	}
+	return model[:i], model[i+1:]
+}
+
+// providersServing returns, in id order, the providers with an active account
+// whose model list contains model. Lists are fetched in parallel when stale.
+func (a *api) providersServing(ctx context.Context, model string) []string {
+	provs := a.activeProviders()
+	lists := make([][]string, len(provs))
+	var wg sync.WaitGroup
+	for i, p := range provs {
+		wg.Add(1)
+		go func(i int, p string) {
+			defer wg.Done()
+			lists[i] = a.providerModels(ctx, p)
+		}(i, p)
+	}
+	wg.Wait()
+	out := []string{}
+	for i, p := range provs {
+		for _, id := range lists[i] {
+			if id == model {
+				out = append(out, p)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// models answers GET /v1/models with every provider's models, each named
+// "<provider>/<model>" so the id a client picks routes back to one provider.
+func (a *api) models(w http.ResponseWriter, r *http.Request) {
+	type entry struct {
+		ID      string `json:"id"`
+		Object  string `json:"object"`
+		OwnedBy string `json:"owned_by"`
+	}
+	provs := a.activeProviders()
+	lists := make([][]string, len(provs))
+	var wg sync.WaitGroup
+	for i, p := range provs {
+		wg.Add(1)
+		go func(i int, p string) {
+			defer wg.Done()
+			lists[i] = a.providerModels(r.Context(), p)
+		}(i, p)
+	}
+	wg.Wait()
+	data := []entry{}
+	for i, p := range provs {
+		for _, id := range lists[i] {
+			data = append(data, entry{ID: p + "/" + id, Object: "model", OwnedBy: p})
+		}
+	}
+	writeJSON(w, map[string]any{"object": "list", "data": data})
+}
+
+// activeProviders returns the registered providers that have an active account.
+func (a *api) activeProviders() []string {
+	list, err := a.store.ListConnections()
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	for _, c := range list {
+		if _, ok := provider.Lookup(c.Provider); ok && c.IsActive {
+			seen[c.Provider] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for p := range seen {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// providerModels returns a provider's model ids, from the cache when fresh.
+func (a *api) providerModels(ctx context.Context, prov string) []string {
+	a.cat.mu.Lock()
+	e, hit := a.cat.m[prov]
+	a.cat.mu.Unlock()
+	ttl := catalogTTL
+	if !e.ok {
+		ttl = catalogFailTTL
+	}
+	if hit && time.Since(e.at) < ttl {
+		return e.ids
+	}
+	ids, ok := []string(nil), false
+	if conns := a.activeConnections(prov); len(conns) > 0 {
+		ids, ok = a.fetchModelIDs(ctx, conns[0])
+	}
+	a.cat.mu.Lock()
+	a.cat.m[prov] = catalogEntry{ids: ids, ok: ok, at: time.Now()}
+	a.cat.mu.Unlock()
+	return ids
+}
+
+// fetchModelIDs reads one account's model list and returns its ids.
+func (a *api) fetchModelIDs(ctx context.Context, conn store.Connection) ([]string, bool) {
+	resp, err := a.getModels(ctx, conn)
+	if err != nil {
+		return nil, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, false
+	}
+	var d struct {
+		Data   []struct{ ID, Name string } `json:"data"`
+		Models []json.RawMessage           `json:"models"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&d); err != nil {
+		return nil, false
+	}
+	ids := []string{}
+	for _, m := range d.Data {
+		if m.ID != "" {
+			ids = append(ids, m.ID)
+		} else if m.Name != "" {
+			ids = append(ids, m.Name)
+		}
+	}
+	for _, raw := range d.Models {
+		var s string
+		var o struct{ ID, Name string }
+		if json.Unmarshal(raw, &s) == nil && s != "" {
+			ids = append(ids, s)
+		} else if json.Unmarshal(raw, &o) == nil && (o.ID != "" || o.Name != "") {
+			ids = append(ids, o.ID+o.Name)
+		}
+	}
+	sort.Strings(ids)
+	return ids, true
+}
+
+// getModels sends GET <base>/models for one account.
+func (a *api) getModels(ctx context.Context, conn store.Connection) (*http.Response, error) {
+	p, _ := provider.Lookup(conn.Provider)
+	secret, err := a.secretFor(ctx, conn.ID)
+	if err != nil {
+		return nil, err
+	}
+	base := p.BaseURL
+	if over, ok := a.baseOverride[conn.Provider]; ok {
+		base = over
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range p.Defaults {
+		req.Header.Set(k, v)
+	}
+	for k, v := range p.Identity {
+		req.Header.Set(k, v)
+	}
+	req.Header.Set(p.AuthHeader, p.AuthPrefix+secret)
+	req.Header.Set("Accept-Encoding", "identity")
+	return upstream.Do(ctx, req, 2)
+}
+
+// bodyModel returns the top-level "model" string of a JSON body.
+func bodyModel(body []byte) (string, bool) {
+	start, end, err := topLevelValue(body, "model")
+	if err != nil {
+		return "", false
+	}
+	var s string
+	if json.Unmarshal(body[start:end], &s) != nil {
+		return "", false
+	}
+	return s, true
+}
+
+// failover tries the accounts in order from start, wrapping around, and relays
+// the first answer that is not a busy status. The last account's answer is
+// relayed whatever it is, so the caller sees the real upstream error. An OAuth
+// account that answers 401 is refreshed and retried once, which recovers a token
+// the provider revoked before its recorded expiry.
+func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targets []store.Connection, start int) {
+	tried := 0
+	for i := 0; i < len(targets); i++ {
+		conn := targets[(start+i)%len(targets)]
+		p, ok := provider.Lookup(conn.Provider)
+		if !ok {
+			continue
+		}
+		secret, err := a.secretFor(r.Context(), conn.ID)
+		if err != nil {
+			continue
+		}
+		tried++
+		resp, err := a.send(r, p, conn.Provider, secret, body)
+		if err != nil {
+			continue
+		}
+		if resp.StatusCode == http.StatusUnauthorized && a.isOAuth(conn.ID) {
+			if fresh, ok := a.forceRefresh(r.Context(), conn.ID); ok {
+				resp.Body.Close()
+				if resp, err = a.send(r, p, conn.Provider, fresh, body); err != nil {
+					continue
+				}
+			}
+		}
+		// Fail over on a busy status only while another account remains.
+		if retryableStatus(resp.StatusCode) && i < len(targets)-1 {
+			resp.Body.Close()
+			continue
+		}
+		defer resp.Body.Close()
+		a.relay(w, resp, conn.ID)
+		return
+	}
+	if tried == 0 {
+		writeError(w, http.StatusInternalServerError, "no usable account")
+		return
+	}
+	writeError(w, http.StatusBadGateway, "all accounts failed")
+}
+
+// send builds and sends one upstream request for a connection.
+func (a *api) send(r *http.Request, p provider.Provider, providerID, secret string, body []byte) (*http.Response, error) {
+	out, err := a.newOutbound(r, p, providerID, secret, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	return upstream.Do(r.Context(), out, 1)
+}
+
+// activeConnections returns the active connections of one provider.
+func (a *api) activeConnections(prov string) []store.Connection {
+	list, err := a.store.ListConnections()
+	if err != nil {
+		return nil
+	}
+	out := []store.Connection{}
+	for _, c := range list {
+		if c.Provider == prov && c.IsActive {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// nextIndex returns the rotation start for a key and advances it.
+func (a *api) nextIndex(key string, n int) int {
+	a.rrMu.Lock()
+	defer a.rrMu.Unlock()
+	i := a.rrNext[key] % n
+	a.rrNext[key] = (i + 1) % n
+	return i
+}
+
+// retryableStatus reports a status that means "this account is busy, try another".
+func retryableStatus(code int) bool {
+	return code == http.StatusTooManyRequests ||
+		code == http.StatusInternalServerError ||
+		code == http.StatusServiceUnavailable ||
+		code == http.StatusConflict
+}

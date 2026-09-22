@@ -169,6 +169,9 @@
   .doc table{border:1px solid var(--line);border-radius:10px;border-collapse:separate;border-spacing:0;overflow:hidden}
   .doc th,.doc td{padding:.55rem .85rem;vertical-align:top}
   .doc td{color:var(--muted)}
+  .seg{display:inline-flex;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:3px;gap:2px}
+  .seg button{min-height:28px;padding:.2rem .7rem;font-size:.8rem;background:transparent;color:var(--muted);border-radius:6px}
+  .seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
   [hidden]{display:none!important}
   @media (max-width:820px){
     body{grid-template-columns:1fr}
@@ -545,17 +548,7 @@ function viewProvider(v,p){
       null),
     list.length?rows:el('div',{class:'empty'},el('b',{},'No connections yet'),ok?'Add an API key to start using '+pname(p)+'.':null,addBtn),
     list.length&&addBtn?el('div',{style:'padding:.8rem 1.25rem;border-top:1px solid var(--line)'},addBtn):null));
-  if(ok&&activeOf(p).length){
-    const box=el('div',{class:'chips'},el('span',{class:'muted',text:'Loading…'}));
-    v.append(el('div',{class:'card'},
-      el('div',{class:'cardh'},el('h2',{class:'grow'},'Available models')),
-      el('div',{style:'padding:1rem 1.25rem'},box)));
-    modelsFor(p).then(r=>{
-      if(r.error){box.replaceChildren(el('span',{class:'muted',text:r.error}));return}
-      if(!r.ids.length){box.replaceChildren(el('span',{class:'muted',text:'The provider returned no model list.'}));return}
-      box.replaceChildren(...r.ids.map(m=>el('button',{class:'chip mono',type:'button',title:'Copy '+p+'/'+m,onclick:()=>copy(p+'/'+m)},el('span',{text:m}))));
-    });
-  }
+  if(ok&&activeOf(p).length)v.append(modelTable(p));
 }
 // labelEditor shows an account's name with a pencil that edits it in place.
 function labelEditor(a){
@@ -575,6 +568,101 @@ function labelEditor(a){
   };
   show();return box;
 }
+// ---- Model table
+// A name filter: words must all match; "a|b" matches either, "-x" excludes,
+// "/re/" is a regular expression. Case does not matter.
+function nameFilter(q){
+  const terms=q.trim().toLowerCase().split(/\s+/).filter(Boolean).map(t=>{
+    if(t.length>2&&t.startsWith('/')&&t.endsWith('/')){try{const re=new RegExp(t.slice(1,-1),'i');return m=>re.test(m)}catch(e){return ()=>true}}
+    if(t.startsWith('-')&&t.length>1){const x=t.slice(1);return m=>!m.includes(x)}
+    const alts=t.split('|').filter(Boolean);return m=>alts.some(a=>m.includes(a));
+  });
+  return name=>{const m=name.toLowerCase();return terms.every(f=>f(m))};
+}
+const MODEL_VIEWS=[['all','All'],['active','Active'],['inactive','Off'],['stale','Stale'],['failed','Failed'],['untested','Untested']];
+function modelTable(p){
+  const st={q:'',view:'all',rows:[],ok:true};
+  const card=el('div',{class:'card'});
+  const q=el('input',{placeholder:'Filter by name — free, free|mini, -preview, /regex/',autocomplete:'off',spellcheck:'false',style:'max-width:26rem'});
+  const counts=el('span',{class:'faint small'});
+  const seg=el('span',{class:'seg'});
+  const body=el('tbody');
+  const shown=()=>{const f=nameFilter(st.q);return st.rows.filter(r=>f(r.model)&&(
+    st.view==='all'||(st.view==='active'&&r.active)||(st.view==='inactive'&&!r.active)||(st.view==='stale'&&r.stale)||
+    (st.view==='failed'&&r.testAt&&!r.testOk)||(st.view==='untested'&&!r.testAt)))};
+  const setActive=async(models,active)=>{
+    if(!models.length)return;
+    await postJSON('/providers/'+p+'/models/active',{models,active});
+    for(const r of st.rows)if(models.includes(r.model))r.active=active;
+    delete modelCache[p];render();
+  };
+  const test=async r=>{
+    r.testing=true;render();
+    try{const x=await postJSON('/providers/'+p+'/models/test',{model:r.model});
+      Object.assign(r,{testOk:x.ok,testMs:x.ms,testMsg:x.message,testAt:new Date().toISOString()})}
+    catch(e){Object.assign(r,{testOk:false,testMsg:e.message,testAt:new Date().toISOString()})}
+    r.testing=false;render();
+  };
+  const bulk=(label,title,fn)=>el('button',{class:'ghost',type:'button',title,style:'min-height:32px;font-size:.8rem',onclick:async()=>{
+    try{await fn()}catch(e){alert(e.message)}}},label);
+  const actions=el('div',{style:'display:flex;gap:.4rem;flex-wrap:wrap'},
+    bulk('Activate shown','Switch on every model shown',()=>setActive(shown().filter(r=>!r.active).map(r=>r.model),true)),
+    bulk('Deactivate shown','Switch off every model shown',()=>setActive(shown().filter(r=>r.active).map(r=>r.model),false)),
+    bulk('Only shown active','Switch on the models shown and off every other model',async()=>{
+      const keep=new Set(shown().map(r=>r.model));
+      if(!confirm('Keep '+keep.size+' model(s) on and switch off the other '+(st.rows.length-keep.size)+'?'))return;
+      await setActive(st.rows.filter(r=>keep.has(r.model)&&!r.active).map(r=>r.model),true);
+      await setActive(st.rows.filter(r=>!keep.has(r.model)&&r.active).map(r=>r.model),false);
+    }),
+    bulk('Test shown','Test every model shown, three at a time',async()=>{
+      const list=shown();if(list.length>40&&!confirm('Test '+list.length+' models?'))return;
+      let i=0;const next=async()=>{while(i<list.length){await test(list[i++])}};
+      await Promise.all([next(),next(),next()]);
+    }),
+    bulk('Delete stale shown','Forget the models shown that the provider no longer lists',async()=>{
+      const gone=shown().filter(r=>r.stale).map(r=>r.model);if(!gone.length){toast('No stale model shown');return}
+      if(!confirm('Delete '+gone.length+' stale model(s)?'))return;
+      await postJSON('/providers/'+p+'/models/delete',{models:gone});st.rows=st.rows.filter(r=>!gone.includes(r.model));render();
+    }),
+    bulk('Refresh list','Fetch the model list from the provider now',()=>load(true)));
+  const render=()=>{
+    const list=shown(), act=st.rows.filter(r=>r.active).length;
+    counts.textContent=act+' of '+st.rows.length+' on · '+list.length+' shown'+(st.ok?'':' · last fetch failed');
+    seg.replaceChildren(...MODEL_VIEWS.map(([k,n])=>el('button',{type:'button','aria-pressed':String(st.view===k),onclick:()=>{st.view=k;render()}},n)));
+    if(!list.length){body.replaceChildren(el('tr',{},el('td',{colspan:5,class:'empty',text:st.rows.length?'No model matches.':'No models yet.'})));return}
+    body.replaceChildren(...list.map(r=>{
+      const cb=el('input',{type:'checkbox',checked:r.active,'aria-label':'On: '+r.model,style:'width:auto;min-height:0'});
+      cb.onchange=()=>setActive([r.model],cb.checked).catch(e=>{alert(e.message);cb.checked=!cb.checked});
+      const res=r.testing?el('span',{class:'faint small',text:'testing…'}):r.testAt?el('span',{class:'small',title:r.testMsg||'',style:'color:'+(r.testOk?'var(--ok)':'var(--err)')},
+        (r.testOk?'✓ ':'✗ ')+(r.testOk?(r.testMs+' ms'):(r.testMsg||'failed')).slice(0,60)):el('span',{class:'faint small',text:'—'});
+      return el('tr',{class:r.active?'':'off'},
+        el('td',{style:'width:2.5rem'},cb),
+        el('td',{},el('button',{class:'plain mono',type:'button',title:'Copy '+p+'/'+r.model,style:'min-height:0;padding:.1rem .2rem;text-align:left',onclick:()=>copy(p+'/'+r.model)},r.model)),
+        el('td',{},r.stale?el('span',{class:'badge warn',title:'The provider no longer lists it'},'stale'):null),
+        el('td',{style:'max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'},res),
+        el('td',{class:'num',style:'white-space:nowrap'},
+          el('button',{class:'ghost',type:'button',style:'min-height:28px;padding:.15rem .6rem;font-size:.78rem',disabled:!!r.testing,onclick:()=>test(r)},'Test'),
+          r.stale?el('button',{class:'danger',type:'button',style:'min-height:28px;padding:.15rem .5rem;font-size:.78rem',onclick:async()=>{
+            await postJSON('/providers/'+p+'/models/delete',{models:[r.model]});st.rows=st.rows.filter(x=>x!==r);render()}},'Delete'):null));
+    }));
+  };
+  const load=async refresh=>{
+    body.replaceChildren(el('tr',{},el('td',{colspan:5,class:'empty',text:refresh?'Fetching…':'Loading…'})));
+    try{const d=await api('/providers/'+p+'/model-table'+(refresh?'?refresh=1':''));st.rows=d.models;st.ok=d.ok;render()}
+    catch(e){body.replaceChildren(el('tr',{},el('td',{colspan:5,class:'empty',text:e.message})))}
+  };
+  let t=null;q.oninput=()=>{clearTimeout(t);t=setTimeout(()=>{st.q=q.value;render()},120)};
+  const chip=(label,val)=>el('button',{class:'chip',type:'button',onclick:()=>{q.value=val;st.q=val;render()}},label);
+  card.append(
+    el('div',{class:'cardh'},el('h2',{class:'grow'},'Models'),counts),
+    el('div',{style:'padding:.8rem 1.25rem;display:grid;gap:.6rem;border-bottom:1px solid var(--line)'},
+      el('div',{style:'display:flex;gap:.5rem;align-items:center;flex-wrap:wrap'},q,chip('free','free'),chip('clear',''),seg),actions),
+    el('div',{class:'scroll'},el('table',{},
+      el('thead',{},el('tr',{},el('th',{},'On'),el('th',{},'Model'),el('th',{}),el('th',{},'Last test'),el('th',{}))),body)));
+  load(false);
+  return card;
+}
+
 function addAccount(p){
   // p is null for a new custom OpenAI-compatible provider.
   const setup=p?(setupOf(p)||(custom(p)?'custom':'key')):'custom';
@@ -901,6 +989,25 @@ const DOCS=[
       dt('p','The first start adds the fixes already found against real providers: the schema keys ',dc('encrypted'),', ',dc('cache_control'),', ',dc('$id'),' and ',dc('example'),' for all providers, and Claude Code\'s billing line for Antigravity, which answers a false 429 when it sees it. Edit or delete them like any other entry.'),
     ];
   }},
+  {id:'models',title:'Models',body:()=>[
+    dt('h2','The model table'),
+    dt('p','Each provider page lists the models the provider offers. intact records every fetch of the list: a new model starts on, and a model the provider no longer lists is marked stale instead of vanishing, so you decide when to delete it.'),
+    dt('ul',
+      dt('li',dt('b','On'),' — a model switched off leaves ',dc('/v1/models'),', is not picked for a bare model id, and a request naming it is refused.'),
+      dt('li',dt('b','Test'),' — sends a short chat request through the same ',dc('/v1'),' path a client uses and shows the answer time or the error. A model that is off can still be tested.'),
+      dt('li',dt('b','Refresh list'),' — fetches the list from the provider now instead of waiting for the ten-minute cache.')),
+    dt('h2','Filtering by name'),
+    el('table',{},dt('thead',dt('tr',dt('th','Filter'),dt('th','Shows'))),dt('tbody',
+      dt('tr',dt('td',dc('free')),dt('td','names containing free')),
+      dt('tr',dt('td',dc('free mini')),dt('td','names containing both')),
+      dt('tr',dt('td',dc('free|beta')),dt('td','names containing either')),
+      dt('tr',dt('td',dc('-preview')),dt('td','names without preview')),
+      dt('tr',dt('td',dc('/^meta-llama\\//')),dt('td','a regular expression')))),
+    dt('p','The bulk buttons act on the rows shown. To keep only the free models of a provider: filter ',dc('free'),', then Only shown active.'),
+    dt('h2','API and MCP'),
+    codeBlock('curl '+location.origin+'/api/providers/openrouter/models -H "Authorization: Bearer $INTACT_KEY"\ncurl '+location.origin+'/api/providers/openrouter/models/active -H "Authorization: Bearer $INTACT_KEY" -d \'{"models":["x"],"active":false}\''),
+    dt('p','MCP: ',dc('list_provider_models'),', ',dc('set_models_active'),'.'),
+  ]},
   {id:'drift',title:'Drift',body:()=>{
     const o=location.origin;
     return [

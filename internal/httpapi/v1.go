@@ -45,6 +45,8 @@ type catalogEntry struct {
 	ids []string
 	ok  bool
 	at  time.Time
+	// groups holds the models folded from level variants (Antigravity).
+	groups map[string]variantSet
 }
 
 type catalog struct {
@@ -69,7 +71,7 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 	prov, upstreamModel := a.splitModel(model)
 	var targets []store.Connection
 	if prov != "" {
-		if a.store.InactiveModels(prov)[upstreamModel] && r.Context().Value(modelTestKey{}) == nil {
+		if a.store.InactiveModels(prov)[a.variantBase(prov, upstreamModel)] && r.Context().Value(modelTestKey{}) == nil {
 			writeError(w, http.StatusForbidden, "this model is switched off in intact")
 			return
 		}
@@ -176,8 +178,9 @@ func (a *api) providersServing(ctx context.Context, model string) []string {
 	wg.Wait()
 	out := []string{}
 	for i, p := range provs {
+		want := a.variantBase(p, model)
 		for _, id := range lists[i] {
-			if id == model {
+			if id == want {
 				out = append(out, p)
 				break
 			}
@@ -275,9 +278,12 @@ func (a *api) catalogIDs(ctx context.Context, prov string) []string {
 		return e.ids
 	}
 	ids, ok := []string(nil), false
+	var groups map[string]variantSet
 	if conns := a.activeConnections(prov); len(conns) > 0 {
 		if p, _ := a.providerFor(conns[0]); p.API == translate.Antigravity {
-			ids, ok = a.antigravityModels(ctx, conns[0])
+			if ids, ok = a.antigravityModels(ctx, conns[0]); ok {
+				ids, groups = groupVariants(ids)
+			}
 		} else {
 			ids, ok = a.fetchModelIDs(ctx, conns[0])
 		}
@@ -296,7 +302,7 @@ func (a *api) catalogIDs(ctx context.Context, prov string) []string {
 		}
 	}
 	a.cat.mu.Lock()
-	a.cat.m[prov] = catalogEntry{ids: ids, ok: ok, at: time.Now()}
+	a.cat.m[prov] = catalogEntry{ids: ids, ok: ok, at: time.Now(), groups: groups}
 	a.cat.mu.Unlock()
 	return ids
 }
@@ -420,8 +426,9 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 	stream := translate.Stream(body)
 	translated := map[string][]byte{}
 	tried := 0
-	for i := 0; i < len(targets); i++ {
-		conn := targets[(start+i)%len(targets)]
+	attempts := a.attemptsFor(r.Context(), targets, start, body)
+	for i, at := range attempts {
+		conn := at.conn
 		p, ok := a.providerFor(conn)
 		if !ok {
 			continue
@@ -441,6 +448,9 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		// request translated, and the answer translated back. A caller that
 		// already speaks the provider's shape is passed through untouched.
 		model, _ := bodyModel(body)
+		if at.model != "" {
+			model = at.model
+		}
 		path, send, to, via := r.PathValue("path"), body, "", ""
 		prepare := func() error {
 			want, wantPath := shapeFor(p, model)
@@ -534,11 +544,15 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			}
 		}
 		// Fail over on a busy status only while another account remains.
-		if retryableStatus(resp.StatusCode) && i < len(targets)-1 {
+		if retryableStatus(resp.StatusCode) && i < len(attempts)-1 {
 			resp.Body.Close()
 			continue
 		}
 		defer resp.Body.Close()
+		if at.model != "" {
+			// The model that answered, when intact chose it (a level variant).
+			w.Header().Set("X-Intact-Model", at.model)
+		}
 		if to != "" {
 			a.relayVia(w, resp, conn.ID, to, via, stream, conn.Provider, path)
 		} else {

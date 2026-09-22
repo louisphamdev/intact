@@ -655,7 +655,7 @@ function nameFilter(q){
 }
 const MODEL_VIEWS=[['all','All'],['active','Active'],['inactive','Off'],['failed','Failed'],['untested','Untested']];
 function modelTable(p){
-  const st={q:'',view:'all',rows:[],ok:true,sel:new Set(),policy:{},running:false};
+  const st={q:'',view:'all',rows:[],ok:true,sel:new Set(),policy:{},running:false,variants:{}};
   const acctName=id=>{const a=accountsOf(p).find(a=>a.id===id);return a?(a.label||short(a.id)):''};
   const card=el('div',{class:'card'});
   const q=el('input',{placeholder:'Filter by name — free, free|mini, -preview, /regex/',autocomplete:'off',spellcheck:'false',style:'max-width:26rem'});
@@ -718,7 +718,9 @@ function modelTable(p){
       return el('tr',{class:(r.active?'':'off')+(st.sel.has(r.model)?' selrow':'')},
         el('td',{style:'width:2.5rem'},pick),
         el('td',{style:'width:3.5rem'},el('label',{class:'switch',title:r.active?'On':'Off'},sw,el('span'))),
-        el('td',{},el('button',{class:'plain mono',type:'button',title:'Copy '+p+'/'+r.model,style:'min-height:0;padding:.1rem .2rem;text-align:left',onclick:()=>copy(p+'/'+r.model)},r.model)),
+        el('td',{},el('button',{class:'plain mono',type:'button',title:'Copy '+p+'/'+r.model,style:'min-height:0;padding:.1rem .2rem;text-align:left',onclick:()=>copy(p+'/'+r.model)},r.model),
+          (st.variants[r.model]||[]).length?el('span',{class:'small faint',style:'margin-left:.4rem',title:'Picked by the effort the request asks for (reasoning_effort, reasoning.effort, thinking budget); without one, the first'},
+            ...st.variants[r.model].map((v,i)=>el('span',{class:'badge'+(i===0?' ok':''),style:'margin-left:.25rem'},v||'none'))):null),
         el('td',{style:'max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'},res),
         el('td',{class:'num',style:'white-space:nowrap'},
           el('button',{class:'ghost',type:'button',style:'min-height:28px;padding:.15rem .6rem;font-size:.78rem',disabled:!!r.testing,onclick:()=>test(r)},'Test')));
@@ -762,7 +764,7 @@ function modelTable(p){
     if(!st.rows.length)body.replaceChildren(el('tr',{},el('td',{colspan:5,class:'empty',text:refresh?'Fetching…':'Loading…'})));
     try{const d=await api('/providers/'+p+'/model-table'+(refresh?'?refresh=1':''));
       const testing=new Set(st.rows.filter(r=>r.testing).map(r=>r.model));
-      st.rows=d.models;st.ok=d.ok;st.fetchedAt=d.fetchedAt;st.policy=d.policy||{};st.running=d.running;
+      st.rows=d.models;st.ok=d.ok;st.fetchedAt=d.fetchedAt;st.variants=d.variants||{};st.policy=d.policy||{};st.running=d.running;
       for(const r of st.rows)if(testing.has(r.model))r.testing=true;
       render();
       clearTimeout(poll);
@@ -1210,6 +1212,7 @@ const DOCS=[
       dt('tr',dt('td',dc('-preview')),dt('td','names without preview')),
       dt('tr',dt('td',dc('/^meta-llama\\//')),dt('td','a regular expression')))),
     dt('p','Tick rows (the header box ticks every row shown) and act on them from the bar that appears: turn on, turn off, keep only these on, test. A test goes through any account of the provider; the result names the account that answered. The Test button of an account tests that account alone; a TypeSafe test asks System One questions whose answers are known and checks them.'),
+    dt('p',dt('b','Variants'),' — Antigravity lists one model once per thinking level (',dc('gemini-3.8-flash-high'),', ',dc('-medium'),', ',dc('-low'),', ',dc('-tiered'),'). intact lists it once, as ',dc('gemini-3.8-flash'),', and picks the level from the effort the request asks for: ',dc('reasoning_effort'),', ',dc('reasoning.effort'),', Anthropic ',dc('output_config.effort'),' or ',dc('thinking.budget_tokens'),'. Without an effort, or with ',dc('none'),', it uses the default variant (the first badge, ',dc('tiered'),' when there is one). When every account refuses the chosen level as busy (429), the request is tried once more on the default variant; the header ',dc('X-Intact-Model'),' names the model that answered. A full id such as ',dc('gemini-3.8-flash-high'),' still works.'),
     dt('p',dt('b','Only free'),' switches on only the models whose name contains ',dc('free'),'; turning it off switches every model back on. ',dt('b','Auto test'),' fetches the list, tests each model (only the free ones under Only free) and keeps on only those that answer; it runs again every 6 hours, and a new model is tested before it is switched on. A model that fails is switched off; one refused for rate limit is tested again 30 minutes later. Under auto test, pressing Test also sets the switch.'),
     dt('h2','API and MCP'),
     codeBlock('curl '+location.origin+'/api/providers/openrouter/models -H "Authorization: Bearer $INTACT_KEY"\ncurl '+location.origin+'/api/providers/openrouter/models/active -H "Authorization: Bearer $INTACT_KEY" -d \'{"models":["x"],"active":false}\''),

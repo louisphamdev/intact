@@ -174,13 +174,16 @@ func (a *api) antigravityModels(ctx context.Context, conn store.Connection) ([]s
 		Models map[string]struct {
 			IsInternal bool `json:"isInternal"`
 		} `json:"models"`
+		// Deprecated models stay listed but refuse calls (400); the value
+		// names the replacement, which is listed on its own.
+		Deprecated map[string]json.RawMessage `json:"deprecatedModelIds"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&d) != nil {
 		return nil, false
 	}
 	ids := []string{}
 	for id, m := range d.Models {
-		if !m.IsInternal {
+		if _, gone := d.Deprecated[id]; !m.IsInternal && !gone {
 			ids = append(ids, id)
 		}
 	}

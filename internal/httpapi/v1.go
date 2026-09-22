@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -255,14 +256,26 @@ func (a *api) fetchModelIDs(ctx context.Context, conn store.Connection) ([]strin
 		return nil, false
 	}
 	var d struct {
-		Data   []struct{ ID, Name string } `json:"data"`
-		Models []json.RawMessage           `json:"models"`
+		Data []struct {
+			ID, Name     string
+			Capabilities struct {
+				Type string `json:"type"`
+			} `json:"capabilities"`
+			Policy *struct {
+				State string `json:"state"`
+			} `json:"policy"`
+		} `json:"data"`
+		Models []json.RawMessage `json:"models"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&d); err != nil {
 		return nil, false
 	}
 	ids := []string{}
 	for _, m := range d.Data {
+		// Copilot lists embedding models and models the plan has not enabled.
+		if (m.Capabilities.Type != "" && m.Capabilities.Type != "chat") || (m.Policy != nil && m.Policy.State != "enabled") {
+			continue
+		}
 		if m.ID != "" {
 			ids = append(ids, m.ID)
 		} else if m.Name != "" {
@@ -290,6 +303,9 @@ func (a *api) getModels(ctx context.Context, conn store.Connection) (*http.Respo
 	}
 	secret, err := a.secretFor(ctx, conn.ID)
 	if err != nil {
+		return nil, err
+	}
+	if secret, err = a.exchanged(ctx, p, conn.ID, secret); err != nil {
 		return nil, err
 	}
 	base := p.BaseURL
@@ -346,6 +362,10 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		if err != nil {
 			continue
 		}
+		if secret, err = a.exchanged(r.Context(), p, conn.ID, secret); err != nil {
+			log.Printf("connection %s: %v", conn.ID, err)
+			continue
+		}
 		// A caller of one shape reaching a provider of the other gets its
 		// request translated, and the answer translated back.
 		path, send, to := r.PathValue("path"), body, ""
@@ -360,12 +380,22 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			}
 			path, send, to = shapePath[want], tb, client
 		}
+		send = adjustForProvider(p, send)
 		// Filters run last, on the exact bytes the provider will receive.
 		send, _ = filter.Apply(send, a.rulesFor(conn.Provider))
 		tried++
 		resp, err := a.send(r, p, conn.Provider, path, secret, send)
 		if err != nil {
 			continue
+		}
+		if resp.StatusCode == http.StatusUnauthorized && p.Exchange != "" {
+			a.dropExchanged(conn.ID)
+			if fresh, err := a.exchanged(r.Context(), p, conn.ID, secret0(a, r, conn.ID)); err == nil {
+				resp.Body.Close()
+				if resp, err = a.send(r, p, conn.Provider, path, fresh, send); err != nil {
+					continue
+				}
+			}
 		}
 		if resp.StatusCode == http.StatusUnauthorized && a.isOAuth(conn.ID) {
 			if fresh, ok := a.forceRefresh(r.Context(), conn.ID); ok {

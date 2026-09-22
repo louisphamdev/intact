@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -22,6 +23,8 @@ type Connection struct {
 	IsActive bool   `json:"isActive"`
 	// BaseURL, when set, replaces the provider's upstream for this connection.
 	BaseURL string `json:"baseUrl"`
+	// Meta holds provider-specific values that are not secret.
+	Meta map[string]string `json:"meta,omitempty"`
 }
 
 func newID() (string, error) {
@@ -52,7 +55,7 @@ func (s *Store) CreateConnection(provider, label, secret string) (Connection, er
 // ListConnections returns every connection, newest first, without secrets.
 func (s *Store) ListConnections() ([]Connection, error) {
 	rows, err := s.DB.Query(
-		`SELECT id, provider, label, is_active, base_url FROM connections ORDER BY created_at DESC`)
+		`SELECT id, provider, label, is_active, base_url, meta FROM connections ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("query connections: %w", err)
 	}
@@ -62,8 +65,12 @@ func (s *Store) ListConnections() ([]Connection, error) {
 	for rows.Next() {
 		var c Connection
 		var active int
-		if err := rows.Scan(&c.ID, &c.Provider, &c.Label, &active, &c.BaseURL); err != nil {
+		var meta string
+		if err := rows.Scan(&c.ID, &c.Provider, &c.Label, &active, &c.BaseURL, &meta); err != nil {
 			return nil, fmt.Errorf("scan connection: %w", err)
+		}
+		if meta != "" && meta != "{}" {
+			json.Unmarshal([]byte(meta), &c.Meta)
 		}
 		c.IsActive = active != 0
 		out = append(out, c)
@@ -98,6 +105,27 @@ func (s *Store) DeleteConnection(id string) error {
 	}
 	if n == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// SetMeta merges values into a connection's provider-specific metadata.
+func (s *Store) SetMeta(id string, kv map[string]string) error {
+	var raw string
+	if err := s.DB.QueryRow(`SELECT meta FROM connections WHERE id = ?`, id).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("read meta: %w", err)
+	}
+	m := map[string]string{}
+	json.Unmarshal([]byte(raw), &m)
+	for k, v := range kv {
+		m[k] = v
+	}
+	b, _ := json.Marshal(m)
+	if _, err := s.DB.Exec(`UPDATE connections SET meta = ? WHERE id = ?`, string(b), id); err != nil {
+		return fmt.Errorf("set meta: %w", err)
 	}
 	return nil
 }

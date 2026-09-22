@@ -23,6 +23,9 @@ var oauthColumns = []string{
 	// base_url overrides the provider's upstream for one connection: a
 	// Cloudflare account, or a custom OpenAI-compatible provider.
 	"base_url      TEXT NOT NULL DEFAULT ''",
+	// meta holds provider-specific values that are not secret, as a JSON
+	// object: an Antigravity project id, a ChatGPT account id.
+	"meta          TEXT NOT NULL DEFAULT '{}'",
 }
 
 // migrateOAuth adds the OAuth columns if they are missing. It is idempotent, so

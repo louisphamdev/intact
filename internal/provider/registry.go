@@ -34,6 +34,11 @@ type Provider struct {
 	Setup string
 	// Models is the list to use when the upstream has no model endpoint.
 	Models []string
+	// Exchange names how the stored credential becomes the bearer the upstream
+	// takes: "copilot" trades a GitHub OAuth token for a Copilot token.
+	Exchange string
+	// RequestIDHeader, when set, carries a fresh random id on each request.
+	RequestIDHeader string
 }
 
 // Generic is an OpenAI-compatible upstream that a connection defines itself
@@ -59,6 +64,27 @@ const claudeBeta = "claude-code-20250219,oauth-2025-04-20,context-1m-2025-08-07,
 	"extended-cache-ttl-2025-04-11,cache-diagnosis-2026-04-07"
 
 var registry = map[string]Provider{
+	// GitHub Copilot, as the VS Code Copilot Chat extension reaches it. The
+	// stored credential is the GitHub OAuth token (gho_…); it is traded for a
+	// short-lived Copilot token before each call (see internal/httpapi/copilot.go).
+	"github": {
+		ID:         "github",
+		BaseURL:    "https://api.githubcopilot.com",
+		AuthHeader: "Authorization",
+		AuthPrefix: "Bearer ",
+		Exchange:   "copilot",
+		Identity: map[string]string{
+			"Copilot-Integration-Id":              "vscode-chat",
+			"Editor-Version":                      "vscode/" + CopilotVSCodeVersion,
+			"Editor-Plugin-Version":               "copilot-chat/" + CopilotChatVersion,
+			"User-Agent":                          "GitHubCopilotChat/" + CopilotChatVersion,
+			"Openai-Intent":                       "conversation-panel",
+			"X-Github-Api-Version":                CopilotAPIVersion,
+			"X-Vscode-User-Agent-Library-Version": "electron-fetch",
+			"X-Initiator":                         "user",
+		},
+		RequestIDHeader: "X-Request-Id",
+	},
 	"groq": {
 		ID:         "groq",
 		BaseURL:    "https://api.groq.com/openai/v1",
@@ -131,6 +157,13 @@ var registry = map[string]Provider{
 		},
 	},
 }
+
+// The Copilot Chat versions intact presents, from 9router's registry.
+const (
+	CopilotVSCodeVersion = "1.110.0"
+	CopilotChatVersion   = "0.38.0"
+	CopilotAPIVersion    = "2025-04-01"
+)
 
 // Lookup returns the provider with this id.
 func Lookup(id string) (Provider, bool) {

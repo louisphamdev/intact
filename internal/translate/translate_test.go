@@ -175,3 +175,15 @@ func TestErrorShapes(t *testing.T) {
 		t.Errorf("to anthropic = %s", got)
 	}
 }
+
+func TestCollectOpenAIStream(t *testing.T) {
+	src := `data: {"id":"c1","model":"m","choices":[{"index":0,"delta":{"content":"Hel"}}]}` + "\n\n" +
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"content":"lo","tool_calls":[{"index":0,"id":"t","function":{"name":"f","arguments":"{\"a\""}}]}}]}` + "\n\n" +
+		`data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":":1}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3}}` + "\n\n" +
+		"data: [DONE]\n\n"
+	m := mustJSON(t, CollectOpenAIStream(strings.NewReader(src)))
+	msg := m["choices"].([]any)[0].(map[string]any)["message"].(map[string]any)
+	if msg["content"] != "Hello" || !strings.Contains(j(msg["tool_calls"]), `"arguments":"{\"a\":1}"`) || j(m["usage"]) != `{"completion_tokens":3,"prompt_tokens":2}` {
+		t.Errorf("collected = %s", j(m))
+	}
+}

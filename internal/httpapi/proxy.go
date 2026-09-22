@@ -3,7 +3,9 @@ package httpapi
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -71,6 +73,9 @@ func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, path
 	}
 	for k, v := range p.Identity {
 		out.Header.Set(k, v)
+	}
+	if p.RequestIDHeader != "" {
+		out.Header.Set(p.RequestIDHeader, newRequestID())
 	}
 	// Header filters run after the defaults and the identity, so they can drop
 	// one of those too; the credential itself is never dropped.
@@ -226,4 +231,13 @@ func (a *api) connection(id string) (store.Connection, error) {
 		}
 	}
 	return store.Connection{}, errors.New("not found")
+}
+
+// newRequestID returns a random UUIDv4 for a per-request id header.
+func newRequestID() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }

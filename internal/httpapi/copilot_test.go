@@ -65,3 +65,45 @@ func itoa(n int64) string {
 	}
 	return string(b)
 }
+
+func TestCopilotRoutesClaudeToMessagesAndLearnsResponses(t *testing.T) {
+	ex := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"token":"cop","expires_at":` + itoa(time.Now().Add(time.Hour).Unix()) + `}`))
+	}))
+	defer ex.Close()
+	old := copilotTokenURL
+	copilotTokenURL = ex.URL
+	defer func() { copilotTokenURL = old }()
+	paths := []string{}
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/v1/messages":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"id":"msg_1","type":"message","content":[{"type":"text","text":"from claude"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+		case "/chat/completions":
+			w.WriteHeader(400)
+			w.Write([]byte(`{"error":{"message":"The requested model is not supported.","code":"model_not_supported"}}`))
+		case "/responses":
+			w.Header().Set("Content-Type", "text/event-stream")
+			io.WriteString(w, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"from responses\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")
+		}
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("github", "gh", "gho")
+	h := New(s, map[string]string{"github": up.URL})
+
+	if rec := postV1(h, `{"model":"github/claude-haiku-4.5","messages":[{"role":"user","content":"hi"}]}`); !strings.Contains(rec.Body.String(), `"content":"from claude"`) {
+		t.Errorf("claude via messages: %s", rec.Body.String())
+	}
+	if rec := postV1(h, `{"model":"github/gpt-5-mini","messages":[{"role":"user","content":"hi"}]}`); !strings.Contains(rec.Body.String(), `"content":"from responses"`) {
+		t.Errorf("gpt-5 via responses: %s", rec.Body.String())
+	}
+	postV1(h, `{"model":"github/gpt-5-mini","messages":[{"role":"user","content":"hi"}]}`)
+	want := "/v1/messages,/chat/completions,/responses,/responses"
+	if strings.Join(paths, ",") != want {
+		t.Errorf("paths = %v, want %s (the second gpt-5 call goes straight to /responses)", paths, want)
+	}
+}

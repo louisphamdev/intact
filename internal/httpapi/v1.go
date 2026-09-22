@@ -367,26 +367,59 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			continue
 		}
 		// A caller of one shape reaching a provider of the other gets its
-		// request translated, and the answer translated back.
-		path, send, to := r.PathValue("path"), body, ""
-		if want := shapeOf(p); client != "" && want != client && (want == translate.OpenAI || want == translate.Anthropic) {
+		// request translated, and the answer translated back. A caller that
+		// already speaks the provider's shape is passed through untouched.
+		model, _ := bodyModel(body)
+		path, send, to, via := r.PathValue("path"), body, "", ""
+		prepare := func() error {
+			want, wantPath := shapeFor(p, model)
+			path, send, to, via = r.PathValue("path"), body, "", ""
+			if client == "" || !translatable(want) {
+				return nil
+			}
+			if want == client {
+				// Same shape: bytes pass through, at the provider's own path.
+				if wantPath != "" {
+					path = wantPath
+				}
+				return nil
+			}
 			tb, ok := translated[want]
 			if !ok {
-				if tb, err = translateRequest(body, client); err != nil {
-					writeError(w, http.StatusBadRequest, "cannot translate the request: "+err.Error())
-					return
+				var err error
+				if tb, err = toProvider(body, client, want); err != nil {
+					return err
 				}
 				translated[want] = tb
 			}
-			path, send, to = shapePath[want], tb, client
+			path, send, to, via = wantPath, tb, client, want
+			return nil
 		}
-		send = adjustForProvider(p, send)
-		// Filters run last, on the exact bytes the provider will receive.
-		send, _ = filter.Apply(send, a.rulesFor(conn.Provider))
+		if err := prepare(); err != nil {
+			writeError(w, http.StatusBadRequest, "cannot translate the request: "+err.Error())
+			return
+		}
+		send = filterFor(a, p, conn.Provider, send)
 		tried++
 		resp, err := a.send(r, p, conn.Provider, path, secret, send)
 		if err != nil {
 			continue
+		}
+		// Copilot answers some models only on /responses and says so with a
+		// 400; remember the model and send it there.
+		if p.Exchange == "copilot" && resp.StatusCode == http.StatusBadRequest && client != "" && path != "responses" {
+			if b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10)); isResponsesOnly(b) {
+				resp.Body.Close()
+				copilotResponsesModels.Store(model, true)
+				if err := prepare(); err == nil {
+					send = filterFor(a, p, conn.Provider, send)
+					if resp, err = a.send(r, p, conn.Provider, path, secret, send); err != nil {
+						continue
+					}
+				}
+			} else {
+				resp.Body = io.NopCloser(bytes.NewReader(b))
+			}
 		}
 		if resp.StatusCode == http.StatusUnauthorized && p.Exchange != "" {
 			a.dropExchanged(conn.ID)
@@ -412,7 +445,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		}
 		defer resp.Body.Close()
 		if to != "" {
-			a.relayTranslated(w, resp, conn.ID, to, stream)
+			a.relayVia(w, resp, conn.ID, to, via, stream)
 		} else {
 			a.relay(w, resp, conn.ID)
 		}
@@ -423,6 +456,21 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		return
 	}
 	writeError(w, http.StatusBadGateway, "all accounts failed")
+}
+
+// filterFor applies a provider's own request rules, then the blacklist, which
+// runs last on the exact bytes the provider will receive.
+func filterFor(a *api, p provider.Provider, prov string, body []byte) []byte {
+	body = adjustForProvider(p, body)
+	body, _ = filter.Apply(body, a.rulesFor(prov))
+	return body
+}
+
+// isResponsesOnly reports Copilot's refusal of a model on /chat/completions.
+func isResponsesOnly(b []byte) bool {
+	s := string(b)
+	return strings.Contains(s, "not accessible via the /chat/completions endpoint") ||
+		strings.Contains(s, "The requested model is not supported")
 }
 
 // send builds and sends one upstream request for a connection.

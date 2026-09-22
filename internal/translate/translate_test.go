@@ -187,3 +187,33 @@ func TestCollectOpenAIStream(t *testing.T) {
 		t.Errorf("collected = %s", j(m))
 	}
 }
+
+func TestOpenAIToResponsesAndBack(t *testing.T) {
+	in := `{"model":"gpt-5","reasoning_effort":"low","messages":[{"role":"system","content":"sys"},{"role":"user","content":"hi"},
+	 {"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{}"}}]},
+	 {"role":"tool","tool_call_id":"c1","content":"ok"}],"tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}]}`
+	out, err := OpenAIToResponses([]byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := mustJSON(t, out)
+	if m["instructions"] != "sys" || m["stream"] != true || m["store"] != false || j(m["reasoning"]) != `{"effort":"low","summary":"auto"}` {
+		t.Errorf("responses req = %s", out)
+	}
+	if s := j(m["input"]); !strings.Contains(s, `"function_call"`) || !strings.Contains(s, `"function_call_output"`) || !strings.Contains(s, `"input_text"`) {
+		t.Errorf("input = %s", s)
+	}
+	src := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"gpt-5\"}}\n\n" +
+		"data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hi\"}\n\n" +
+		"data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"c2\",\"name\":\"f\"}}\n\n" +
+		"data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"delta\":\"{}\"}\n\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":5,\"output_tokens\":2,\"input_tokens_details\":{\"cached_tokens\":1}}}}\n\n"
+	var o buf
+	ResponsesStreamToOpenAI(&o, strings.NewReader(src))
+	s := o.String()
+	for _, want := range []string{`"content":"Hi"`, `"id":"c2"`, `"arguments":"{}"`, `"finish_reason":"tool_calls"`, `"prompt_tokens":5`, `"cached_tokens":1`, "[DONE]"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("chunks missing %s:\n%s", want, s)
+		}
+	}
+}

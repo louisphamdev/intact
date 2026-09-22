@@ -72,11 +72,13 @@ func (a *api) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// requireToken lets a request through when auth is off or the bearer token
-// matches; otherwise it answers 401 for the machine caller.
+// requireToken lets a request through when auth is off or the API token
+// matches; otherwise it answers 401 for the machine caller. The token is read
+// from Authorization: Bearer, or from x-api-key, which Anthropic clients send.
 func (a *api) requireToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if a.auth == nil || a.auth.CheckAPIToken(r.Header.Get("Authorization")) {
+		if a.auth == nil || a.auth.CheckAPIToken(r.Header.Get("Authorization")) ||
+			(r.Header.Get("X-Api-Key") != "" && a.auth.CheckAPIToken("Bearer "+r.Header.Get("X-Api-Key"))) {
 			next(w, r)
 			return
 		}

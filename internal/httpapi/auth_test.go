@@ -117,3 +117,33 @@ func TestLoginPageRendersCleanly(t *testing.T) {
 		}
 	}
 }
+
+// An Anthropic client sends its key as x-api-key. intact accepts it as the API
+// token and never forwards it to the provider.
+func TestV1AcceptsXAPIKeyAndDoesNotForwardIt(t *testing.T) {
+	var gotKey, gotAuth string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKey, gotAuth = r.Header.Get("X-Api-Key"), r.Header.Get("Authorization")
+		w.Write([]byte(`{}`))
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("claude", "c", "oauth-tok")
+	cfg := authConfig()
+	h := NewWithAuth(s, map[string]string{"claude": up.URL}, cfg)
+
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/claude-sonnet-5"}`))
+	req.Header.Set("X-Api-Key", cfg.APIToken)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotKey != "" {
+		t.Errorf("x-api-key reached the provider: %q", gotKey)
+	}
+	if gotAuth != "Bearer oauth-tok" {
+		t.Errorf("provider auth = %q, want the stored credential", gotAuth)
+	}
+}

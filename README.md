@@ -10,9 +10,11 @@ and drops the parts that alter the payload.
 - **Passthrough proxy.** intact adds the account's identity and credential to a
   request, then sends the provider's bytes back to the caller unchanged. The
   caller speaks the provider's own protocol.
-- **One account or round-robin.** Call `/p/<id>/…` to use one account, or
-  `/r/<provider>/…` to let intact pick an active account and fail over on a busy
-  status (429/500/503/409).
+- **One base URL.** Point any client at `/v1`. The `model` in the request picks
+  the accounts: `groq/llama-3.3-70b-versatile` names the provider (intact strips
+  the prefix), a bare `llama-3.3-70b-versatile` goes to every provider whose
+  model list has it. Requests rotate across those accounts and fail over on a
+  busy status (429/500/503/409). See [Routing](#routing).
 - **Usage counter.** intact reads the `usage` object from each response and
   keeps a daily total per account and model. It reads the response; it never
   changes it.
@@ -26,7 +28,7 @@ and drops the parts that alter the payload.
 
 | Area | State |
 | --- | --- |
-| Core proxy, round-robin, failover | done, tested, live |
+| Core proxy, one `/v1` base URL routed by model, rotation, failover | done, tested |
 | Usage counter (JSON and SSE, gzip, cache tokens) | done, tested, live |
 | TOTP login + bearer token gate | done, tested, live |
 | Connection CRUD + model list (dashboard) | done, tested, live |
@@ -74,7 +76,7 @@ or the shell.
 | Variable | Meaning |
 | --- | --- |
 | `INTACT_TOTP_SECRET` | The base32 TOTP secret for the login. When empty, the server has no gate (loopback only). |
-| `INTACT_API_TOKEN` | The bearer token a machine sends to `/p` and `/r`. |
+| `INTACT_API_TOKEN` | The token a machine sends to `/v1`, as `Authorization: Bearer` or `x-api-key`. |
 | `INTACT_SESSION_KEY` | The key that signs the session cookie. A random key is generated when empty, so a restart then ends every session. |
 | `INTACT_SESSION_TTL` | The session lifetime in seconds (default 43200). |
 
@@ -88,8 +90,8 @@ To enroll:
 
 | Method and path | Gate | Purpose |
 | --- | --- | --- |
-| `POST/GET /p/{id}/{path...}` | bearer token | Proxy to one account. |
-| `POST/GET /r/{provider}/{path...}` | bearer token | Round-robin across a provider's active accounts, with failover. |
+| `GET /v1/models` | API token | Every model of every provider, as `<provider>/<model>`. |
+| `/v1/{path...}` | API token | Forward to the accounts that serve the body's model, with rotation and failover. |
 | `GET /` | session | The dashboard: Endpoint, Providers (accounts and models per provider), Usage. |
 | `GET /accounts` | session | The connection list as JSON. |
 | `POST /accounts` | session | Add a connection (`provider`, `label`, `secret`). |
@@ -99,6 +101,28 @@ To enroll:
 | `GET /providers` | session | The provider ids this build can proxy. |
 | `GET /usage` | session | The daily usage totals as JSON. |
 | `GET /login`, `POST /login`, `POST /logout` | open | The TOTP login. |
+
+## Routing
+
+```bash
+curl https://intact.example/v1/chat/completions \
+  -H "Authorization: Bearer $INTACT_API_TOKEN" -H "Content-Type: application/json" \
+  -d '{"model":"groq/llama-3.3-70b-versatile","messages":[{"role":"user","content":"hi"}]}'
+```
+
+- **Provider prefix.** When the model starts with a registered provider id and a
+  slash, that provider serves it and the prefix is removed from the body. The
+  rest of the body is sent byte for byte. A model id with its own slash
+  (`meta-llama/llama-3.3-70b-instruct`) is not mistaken for a prefix, because
+  `meta-llama` is not a provider.
+- **Bare model.** Otherwise intact looks the id up in each provider's model list
+  (cached for ten minutes) and pools the active accounts of every provider that
+  lists it. The body is sent unchanged.
+- **Path.** Everything after `/v1` goes to the provider as is, so
+  `/v1/chat/completions` reaches an OpenAI-shaped provider and `/v1/messages`
+  reaches Anthropic. intact does not translate between the two.
+- **Failover.** The pool rotates per model. A busy status moves to the next
+  account; an OAuth account that answers 401 is refreshed and retried once.
 
 ## Providers
 

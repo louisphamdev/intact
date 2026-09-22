@@ -89,7 +89,7 @@
   .copyline{display:flex;align-items:center;gap:.5rem;background:var(--bg);border:1px solid var(--line);border-radius:9px;
             padding:.3rem .3rem .3rem .75rem;min-width:0}
   .copyline code{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg);font-size:.85rem}
-  .kv{display:grid;grid-template-columns:7rem 1fr;gap:.6rem 1rem;align-items:center}
+  .kv{display:grid;grid-template-columns:max-content 1fr;gap:.6rem 1.25rem;align-items:baseline}
   .kv .k{color:var(--muted);font-size:.8rem}
   pre{margin:0;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:.85rem 1rem;overflow:auto;
       font:.8rem/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
@@ -331,21 +331,30 @@ window.addEventListener('hashchange',route);
 
 // ---- Endpoint
 function viewEndpoint(v){
-  header('Endpoint','Point your client at intact; it adds the credential and forwards the request unchanged.');
-  const o=location.origin;
+  header('Endpoint','One base URL for every provider. The model you ask for decides where the request goes.');
+  const base=location.origin+'/v1';
   const provs=S.providers.filter(p=>activeOf(p).length);
   const sel=el('select',{style:'width:auto','aria-label':'Provider'},provs.map(p=>el('option',{value:p,text:pname(p)})));
   const ex=el('pre');
-  const render=()=>{const p=sel.value||'groq';
-    ex.textContent='# OpenAI-compatible client\nbase_url = "'+o+'/r/'+p+'"\napi_key  = "<INTACT_API_TOKEN>"\n\n# curl\ncurl '+o+'/r/'+p+'/chat/completions \\\n  -H "Authorization: Bearer $INTACT_API_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"<model id>","messages":[{"role":"user","content":"hi"}]}\''};
+  const render=async()=>{
+    const p=sel.value||'groq';
+    const r=provs.length?await modelsFor(p):{ids:[]};
+    const m=p+'/'+((r.ids&&r.ids[0])||'<model>');
+    // Anthropic speaks the Messages API; every other provider here is OpenAI-shaped.
+    const anth=p==='claude';
+    ex.textContent='# '+(anth?'Anthropic':'OpenAI-compatible')+' client\nbase_url = "'+base+'"\napi_key  = "<INTACT_API_TOKEN>"\nmodel    = "'+m+'"\n\n# curl\ncurl '+base+(anth?'/messages':'/chat/completions')+' \\\n  -H "Authorization: Bearer $INTACT_API_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"'+m+'",'+(anth?'"max_tokens":256,':'')+'"messages":[{"role":"user","content":"hi"}]}\''};
   sel.onchange=render;render();
   v.append(
     el('div',{class:'card pad sec'},
-      el('h2',{},'Base URL'),copyLine(o),
+      el('h2',{},'Base URL'),copyLine(base),
+      el('p',{class:'muted',style:'margin:0'},'Use it as the OpenAI (or Anthropic) base URL in any client. ',
+        el('code',{},'GET /v1/models'),' lists every model you can call.')),
+    el('div',{class:'card pad sec'},
+      el('h2',{},'Choosing a model'),
       el('div',{class:'kv'},
-        el('span',{class:'k'},'Round-robin'),copyLine(o+'/r/<provider>/'),
-        el('span',{class:'k'},'One account'),copyLine(o+'/p/<connection-id>/')),
-      el('p',{class:'muted small',style:'margin:0'},'The round-robin route rotates the active accounts of a provider and fails over to the next one on 429/500/503/409. The rest of the path goes to the provider as is (for example ',el('code',{},'/chat/completions'),').')),
+        el('code',{},'groq/llama-3.3-70b-versatile'),el('span',{class:'muted'},'Provider and model. intact removes the ',el('code',{},'groq/'),' prefix before it sends the request.'),
+        el('code',{},'llama-3.3-70b-versatile'),el('span',{class:'muted'},'Model only. intact uses every provider that lists this model.')),
+      el('p',{class:'muted small',style:'margin:0'},'Requests rotate across the active accounts that serve the model, and move to the next account on 429/500/503/409.')),
     el('div',{class:'card pad sec'},
       el('h2',{},'Authentication'),
       el('p',{class:'muted',style:'margin:0'},'Send ',el('code',{},'Authorization: Bearer <INTACT_API_TOKEN>'),'. The token lives in the server environment file and is not shown here.')),
@@ -401,26 +410,23 @@ function viewProvider(v,p){
         el('div',{class:'meta'},
           el('span',{class:'badge'+(a.isActive?' ok':''),text:a.isActive?'active':'off'}),
           el('span',{class:'mono faint',title:a.id,text:short(a.id)}))),
-      ok?el('button',{class:'icon',type:'button',title:'Copy this account\'s URL','aria-label':'Copy this account\'s URL',
-        onclick:()=>copy(location.origin+'/p/'+a.id+'/','account URL')},svg(ICON.copy)):null,
       el('button',{class:'danger',type:'button',onclick:()=>deleteAccount(a)},svg(ICON.trash),'Delete'),
       el('label',{class:'switch',title:a.isActive?'Active':'Off'},sw,el('span')));
   });
   v.append(el('div',{class:'card'},
     el('div',{class:'cardh'},el('h2',{class:'grow'},'Connections'),
-      ok&&list.length?el('span',{class:'muted small',title:'Rotates the active accounts and fails over on 429/500/503/409'},'Round-robin'):null,
-      ok&&list.length?el('span',{class:'copyline',style:'padding-block:.1rem'},el('code',{text:'/r/'+p+'/'}),copyBtn(location.origin+'/r/'+p+'/')):null),
+      ok&&list.length>1?el('span',{class:'muted small'},'Requests rotate across the active accounts'):null),
     list.length?rows:el('div',{class:'empty'},el('b',{},'No connections yet'),ok?'Add an API key to start using '+pname(p)+'.':null,addBtn),
     list.length&&addBtn?el('div',{style:'padding:.8rem 1.25rem;border-top:1px solid var(--line)'},addBtn):null));
   if(ok&&activeOf(p).length){
     const box=el('div',{class:'chips'},el('span',{class:'muted',text:'Loading…'}));
     v.append(el('div',{class:'card'},
-      el('div',{class:'cardh'},el('h2',{class:'grow'},'Available models'),el('span',{class:'faint small',text:'Click to copy the id'})),
+      el('div',{class:'cardh'},el('h2',{class:'grow'},'Available models'),el('span',{class:'faint small',text:'Click to copy the model name for /v1'})),
       el('div',{style:'padding:1rem 1.25rem'},box)));
     modelsFor(p).then(r=>{
       if(r.error){box.replaceChildren(el('span',{class:'muted',text:r.error}));return}
       if(!r.ids.length){box.replaceChildren(el('span',{class:'muted',text:'The provider returned no model list.'}));return}
-      box.replaceChildren(...r.ids.map(m=>el('button',{class:'chip mono',type:'button',title:'Copy '+m,onclick:()=>copy(m)},el('span',{text:m}))));
+      box.replaceChildren(...r.ids.map(m=>el('button',{class:'chip mono',type:'button',title:'Copy '+p+'/'+m,onclick:()=>copy(p+'/'+m)},el('span',{text:m}))));
     });
   }
 }
@@ -458,7 +464,7 @@ function viewUsage(v){
     const sum=k=>rows.reduce((s,u)=>s+u[k],0);
     stats.replaceChildren(...[['Requests',sum('requests')],['Input tokens',sum('inputTokens')],['Output tokens',sum('outputTokens')]]
       .map(([k,n])=>el('div',{class:'stat'},el('div',{class:'k',text:k}),el('div',{class:'v',text:fmt(n)}))));
-    if(!rows.length){tb.replaceChildren(el('tr',{},el('td',{colspan:6},el('div',{class:'empty'},el('b',{},'No usage recorded yet'),'Requests through /r and /p show up here.'))));return}
+    if(!rows.length){tb.replaceChildren(el('tr',{},el('td',{colspan:6},el('div',{class:'empty'},el('b',{},'No usage recorded yet'),'Requests through /v1 show up here.'))));return}
     tb.replaceChildren(...rows.map(u=>{const a=accById(u.connectionId);
       return el('tr',{},el('td',{class:'faint',text:u.day}),
         el('td',{},a?el('span',{style:'display:inline-flex;align-items:center;gap:.45rem'},avatar(a.provider,true),a.label||short(a.id))

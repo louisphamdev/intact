@@ -53,7 +53,9 @@ func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, secr
 		return nil, err
 	}
 	for k, vs := range r.Header {
-		if hopByHop[k] || k == "Authorization" || k == "Host" || k == "Accept-Encoding" {
+		// Authorization and X-Api-Key carry intact's own token, which must never
+		// reach a provider; the account's credential replaces them below.
+		if hopByHop[k] || k == "Authorization" || k == "X-Api-Key" || k == "Host" || k == "Accept-Encoding" {
 			continue
 		}
 		for _, v := range vs {

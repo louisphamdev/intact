@@ -4,6 +4,8 @@
 // the exact headers are known.
 package provider
 
+import "sort"
+
 // Provider describes how to reach one upstream.
 //
 // Identity and Defaults differ in who wins. Identity names the tool and always
@@ -81,4 +83,14 @@ var registry = map[string]Provider{
 func Lookup(id string) (Provider, bool) {
 	p, ok := registry[id]
 	return p, ok
+}
+
+// IDs returns the registered provider ids in sorted order.
+func IDs() []string {
+	out := make([]string, 0, len(registry))
+	for id := range registry {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }

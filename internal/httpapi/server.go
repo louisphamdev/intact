@@ -39,10 +39,17 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	mux.HandleFunc("/p/{id}/{path...}", a.requireToken(a.proxy))
 	// Round-robin: choose an active account of the provider and fail over.
 	mux.HandleFunc("/r/{provider}/{path...}", a.requireToken(a.roundRobin))
+	// Group: round-robin or fallback across chosen accounts of any provider.
+	mux.HandleFunc("/g/{group}/{path...}", a.requireToken(a.groupProxy))
 	mux.HandleFunc("GET /accounts", a.requireSession(a.accounts))
 	mux.HandleFunc("POST /accounts", a.requireSession(a.createAccount))
 	mux.HandleFunc("POST /accounts/{id}/delete", a.requireSession(a.deleteAccount))
 	mux.HandleFunc("GET /accounts/{id}/models", a.requireSession(a.modelsForAccount))
+	mux.HandleFunc("POST /accounts/{id}/active", a.requireSession(a.setActive))
+	mux.HandleFunc("GET /groups", a.requireSession(a.groups))
+	mux.HandleFunc("POST /groups", a.requireSession(a.saveGroup))
+	mux.HandleFunc("POST /groups/{name}/delete", a.requireSession(a.deleteGroup))
+	mux.HandleFunc("GET /providers", a.requireSession(a.providers))
 	mux.HandleFunc("GET /usage", a.requireSession(a.usage))
 	mux.HandleFunc("GET /login", a.loginForm)
 	mux.HandleFunc("POST /login", a.loginSubmit)

@@ -10,9 +10,11 @@ and drops the parts that alter the payload.
 - **Passthrough proxy.** intact adds the account's identity and credential to a
   request, then sends the provider's bytes back to the caller unchanged. The
   caller speaks the provider's own protocol.
-- **One account or round-robin.** Call `/p/<id>/…` to use one account, or
-  `/r/<provider>/…` to let intact pick an active account and fail over on a busy
-  status (429/500/503/409).
+- **One account, a provider, or a group.** Call `/p/<id>/…` to use one account,
+  `/r/<provider>/…` to let intact pick an active account of that provider, or
+  `/g/<group>/…` to pick from a named group of accounts that can span providers
+  (see [Groups](#groups)). `/r` and `/g` fail over on a busy status
+  (429/500/503/409).
 - **Usage counter.** intact reads the `usage` object from each response and
   keeps a daily total per account and model. It reads the response; it never
   changes it.
@@ -27,6 +29,7 @@ and drops the parts that alter the payload.
 | Area | State |
 | --- | --- |
 | Core proxy, round-robin, failover | done, tested, live |
+| Groups across providers (round-robin / fallback, model override) | done, tested |
 | Usage counter (JSON and SSE, gzip, cache tokens) | done, tested, live |
 | TOTP login + bearer token gate | done, tested, live |
 | Connection CRUD + model list (dashboard) | done, tested, live |
@@ -90,13 +93,48 @@ To enroll:
 | --- | --- | --- |
 | `POST/GET /p/{id}/{path...}` | bearer token | Proxy to one account. |
 | `POST/GET /r/{provider}/{path...}` | bearer token | Round-robin across a provider's active accounts, with failover. |
+| `POST/GET /g/{group}/{path...}` | bearer token | Round-robin or fallback across a group's active members, with failover. |
 | `GET /` | session | The dashboard. |
 | `GET /accounts` | session | The connection list as JSON. |
 | `POST /accounts` | session | Add a connection (`provider`, `label`, `secret`). |
 | `POST /accounts/{id}/delete` | session | Delete a connection. |
 | `GET /accounts/{id}/models` | session | The provider's model list for one connection. |
+| `POST /accounts/{id}/active` | session | Turn a connection on or off (`{"active":bool}`). |
+| `GET /groups` | session | The groups and their members as JSON. |
+| `POST /groups` | session | Create or replace a group (JSON, see below). |
+| `POST /groups/{name}/delete` | session | Delete a group; its connections stay. |
+| `GET /providers` | session | The provider ids this build can proxy. |
 | `GET /usage` | session | The daily usage totals as JSON. |
 | `GET /login`, `POST /login`, `POST /logout` | open | The TOTP login. |
+
+## Groups
+
+A group pools connections behind one name. Its members can belong to different
+providers, so a group can spread load over, say, two groq keys, an nvidia key
+and an openrouter key.
+
+```json
+POST /groups
+{"name": "free-llama", "strategy": "round-robin", "members": [
+  {"connectionId": "…groq-1…"},
+  {"connectionId": "…nvidia…", "model": "meta/llama-3.3-70b-instruct"}
+]}
+```
+
+- **Strategy.** `round-robin` rotates the first member tried on each call.
+  `fallback` always tries the members in order, so the first takes the load and
+  the rest serve only when it is busy.
+- **Model override.** The same model has a different id at each provider. A
+  member with a `model` gets the top-level `model` of the request body replaced
+  for that member only. The value is spliced into the original bytes, so every
+  other byte of the body is sent as the caller wrote it. A member with no model
+  gets the body unchanged.
+- **Skipped members.** An inactive connection, or one whose provider this build
+  does not register, is skipped. Deleting a connection removes it from every
+  group.
+- **Protocols.** intact does not translate between APIs. Put only members that
+  accept the same request shape in one group (all OpenAI-compatible, or all
+  Anthropic). The dashboard warns when a group mixes them.
 
 ## Providers
 

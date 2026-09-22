@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -73,13 +74,15 @@ func walk(v any, path, parentKey string, depth int, out map[string]string) {
 		// field; keep the non-null type.
 		if prev, ok := out[path]; !ok || prev == "null" {
 			out[path] = t
-		} else if prev != t && t != "null" && !strings.Contains(prev, t) {
-			out[path] = prev + "|" + t
+		} else if t != "null" {
+			out[path] = MergeTypes(prev, t)
 		}
 	}
 	switch n := v.(type) {
 	case map[string]any:
-		dynamic := dynamicParents[parentKey] || len(n) > 24
+		// A very wide object is a map of names, not a record of fields (a
+		// Responses object has about 40 fields, so the bar sits well above).
+		dynamic := dynamicParents[parentKey] || len(n) > 96
 		for k, c := range n {
 			seg := k
 			if dynamic || idLike.MatchString(k) {
@@ -92,6 +95,39 @@ func walk(v any, path, parentKey string, depth int, out map[string]string) {
 			walk(c, path+"[]", parentKey, depth+1, out)
 		}
 	}
+}
+
+// MergeTypes joins two type sets ("string|number") in a stable order.
+func MergeTypes(a, b string) string {
+	set := map[string]bool{}
+	for _, t := range strings.Split(a+"|"+b, "|") {
+		if t != "" && t != "null" {
+			set[t] = true
+		}
+	}
+	if len(set) == 0 {
+		return "null"
+	}
+	out := make([]string, 0, len(set))
+	for t := range set {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return strings.Join(out, "|")
+}
+
+// SubsetOf reports whether every type in a is in b.
+func SubsetOf(a, b string) bool {
+	have := map[string]bool{}
+	for _, t := range strings.Split(b, "|") {
+		have[t] = true
+	}
+	for _, t := range strings.Split(a, "|") {
+		if t != "null" && !have[t] {
+			return false
+		}
+	}
+	return true
 }
 
 func join(path, seg string) string {

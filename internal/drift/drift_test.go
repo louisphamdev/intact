@@ -2,6 +2,7 @@ package drift
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/louisphamdev/intact/internal/store"
@@ -58,7 +59,7 @@ func TestObserverRecordsAddedTypeAndRemoved(t *testing.T) {
 	if _, ok := kinds["x_new:added"]; !ok {
 		t.Errorf("added not recorded: %v", kinds)
 	}
-	if kinds["temperature:type"] != "string" {
+	if kinds["temperature:type"] != "number|string" {
 		t.Errorf("type change not recorded: %v", kinds)
 	}
 	// temperature was in 5 of 5 early documents but only 5 times: too few to
@@ -103,5 +104,15 @@ func TestTopmostReportsANewObjectOnce(t *testing.T) {
 	cs := []store.ShapeChange{{Path: "messages[].cache_control", Kind: "added"}, {Path: "messages[].cache_control.type", Kind: "added"}, {Path: "x", Kind: "added"}}
 	if got := topmost(cs); len(got) != 2 {
 		t.Errorf("topmost = %+v", got)
+	}
+}
+
+func TestTypeSetsAreStable(t *testing.T) {
+	if MergeTypes("string|object", "number") != "number|object|string" || !SubsetOf("object|string", "number|object|string") || SubsetOf("array", "object") {
+		t.Error("type sets")
+	}
+	p := Paths([]byte(`{"response":{` + strings.Repeat(`"k`, 0) + `"a":1,"b":2}}`))
+	if _, ok := p["response.a"]; !ok {
+		t.Errorf("paths = %v", p)
 	}
 }

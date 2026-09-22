@@ -183,9 +183,14 @@ func (o *Observer) observe(dir, provider, endpoint, event string, paths map[stri
 			f.gone = false
 			change(p, "returned", "", t)
 		}
-		if t != f.typ && t != "null" && !strings.Contains(f.typ, t) {
-			change(p, "type", f.typ, t)
-			f.typ = t
+		// A type already in the field's set is not a change; a new one is, and
+		// joins the set.
+		if t != "null" && !SubsetOf(t, f.typ) {
+			merged := MergeTypes(f.typ, t)
+			if f.typ != "null" {
+				change(p, "type", f.typ, merged)
+			}
+			f.typ = merged
 		}
 		f.seen++
 		f.lastObs = kk.obs

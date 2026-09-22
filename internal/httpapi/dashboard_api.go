@@ -101,3 +101,45 @@ func (a *api) setLabel(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{"ok": true})
 }
+
+// uiSettingKeys are the dashboard preferences kept on the server, so every
+// browser shows the same view.
+var uiSettingKeys = map[string]bool{"quota-view": true}
+
+// getUISetting serves one dashboard preference as stored (JSON).
+func (a *api) getUISetting(w http.ResponseWriter, r *http.Request) {
+	k := r.PathValue("key")
+	if !uiSettingKeys[k] {
+		writeError(w, http.StatusNotFound, "unknown setting")
+		return
+	}
+	v, err := a.store.GetSetting("ui." + k)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot read setting")
+		return
+	}
+	if v == "" {
+		v = "{}"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(v))
+}
+
+// setUISetting stores one dashboard preference; the body must be JSON.
+func (a *api) setUISetting(w http.ResponseWriter, r *http.Request) {
+	k := r.PathValue("key")
+	if !uiSettingKeys[k] {
+		writeError(w, http.StatusNotFound, "unknown setting")
+		return
+	}
+	var v json.RawMessage
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&v); err != nil {
+		writeError(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	if err := a.store.SetSetting("ui."+k, string(v)); err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot save setting")
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}

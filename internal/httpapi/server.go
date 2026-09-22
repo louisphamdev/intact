@@ -63,6 +63,8 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	mux.HandleFunc("GET /api/usage", a.requireToken(a.usage))
 	mux.HandleFunc("GET /api/quota", a.requireToken(a.quotaList))
 	mux.HandleFunc("GET /quota", a.requireSession(a.quotaList))
+	mux.HandleFunc("GET /ui-settings/{key}", a.requireSession(a.getUISetting))
+	mux.HandleFunc("POST /ui-settings/{key}", a.requireSession(a.setUISetting))
 	mux.HandleFunc("GET /api/drift/changes", a.requireToken(a.driftChanges))
 	mux.HandleFunc("POST /api/drift/ack", a.requireToken(a.driftAck))
 	mux.HandleFunc("GET /api/drift/fields", a.requireToken(a.driftFields))

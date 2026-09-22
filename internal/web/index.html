@@ -986,35 +986,69 @@ function quotaWindow(w){
     el('div',{class:'qbar'},el('span',{style:'width:'+(w.unlimited?100:Math.max(0,Math.min(100,pct<0?0:pct)))+'%;background:'+color+(w.unlimited?';opacity:.35':'')})),
     w.resetAt?el('div',{class:'faint small',title:w.resetAt,text:untilText(w.resetAt)}):null);
 }
+// Which windows to show, per provider: {provider: [window names]}. With no
+// choice for a provider, its main windows show and per-model ones do not.
+let quotaView=null;
+const shownWindows=(q,view)=>{
+  const sel=view[q.provider];
+  return q.windows.filter(w=>sel?sel.includes(w.name):!w.name.startsWith('model '));
+};
 async function viewQuota(v,prov){
   const provs=[...new Set(S.accounts.filter(a=>a.isActive).map(a=>a.provider))].filter(wired).sort((a,b)=>pname(a).localeCompare(pname(b)));
   const sel=el('select',{style:'width:auto','aria-label':'Provider'},el('option',{value:'',text:'All providers'}),provs.map(p=>el('option',{value:p,text:pname(p)})));
   sel.value=prov||'';sel.onchange=()=>{location.hash='#/quota'+(sel.value?'/'+sel.value:'')};
   const grid=el('div',{class:'qgrid'},el('div',{class:'card empty',text:'Reading quota…'}));
   const refresh=el('button',{class:'ghost',type:'button'},'Refresh');
-  header('Quota',null,sel,refresh);
+  const edit=el('button',{class:'ghost',type:'button'},'Edit');
+  header('Quota',null,sel,edit,refresh);
   v.append(grid);
+  if(!quotaView){try{quotaView=await api('/ui-settings/quota-view')}catch(e){quotaView={}}}
+  let accounts=[],editing=false,draft=null;
+  const render=()=>{
+    const view=editing?draft:quotaView;
+    // Only accounts with quota data; in edit mode every window is offered.
+    const list=accounts.filter(q=>q.windows.length&&(editing||shownWindows(q,view).length));
+    if(!list.length){grid.replaceChildren(el('div',{class:'card empty',text:editing?'No quota data to choose from.':'Nothing to show. Use Edit to choose what to show.'}));return}
+    grid.replaceChildren(...list.map(q=>{
+      const head=el('div',{class:'cardh'},avatar(q.provider,true),
+        el('div',{class:'grow',style:'min-width:0'},el('div',{style:'font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap',text:q.label||q.provider}),
+          el('div',{class:'faint small',text:pname(q.provider)+(q.plan?' · '+q.plan:'')})),
+        q.source==='headers'?el('span',{class:'badge',title:'From the rate-limit headers of the last answer, '+q.fetchedAt},'last answer'):null);
+      if(!editing)return el('div',{class:'card'},head,el('div',{style:'padding:1rem 1.25rem;display:grid;gap:.9rem'},shownWindows(q,view).map(w=>quotaWindow({...w,name:w.name.replace(/^model /,'')}))));
+      // Edit: tick the windows to show for this provider.
+      const cur=new Set(shownWindows(q,view).map(w=>w.name));
+      const set=names=>{draft[q.provider]=names;render()};
+      const box=(w)=>{
+        const cb=el('input',{type:'checkbox',checked:cur.has(w.name),style:'width:auto;min-height:0'});
+        cb.onchange=()=>{const n=new Set(cur);cb.checked?n.add(w.name):n.delete(w.name);set(q.windows.map(x=>x.name).filter(x=>n.has(x)))};
+        return el('label',{style:'display:flex;gap:.5rem;align-items:center;font-size:.82rem;cursor:pointer;min-width:0'},cb,
+          el('span',{style:'overflow:hidden;text-overflow:ellipsis;white-space:nowrap',text:w.name.replace(/^model /,'')}),
+          el('span',{class:'faint small',style:'margin-left:auto',text:w.unlimited?'∞':w.usedPct<0?'':Math.round(w.usedPct)+'%'}));
+      };
+      const main=q.windows.filter(w=>!w.name.startsWith('model ')),models=q.windows.filter(w=>w.name.startsWith('model '));
+      return el('div',{class:'card'},head,el('div',{style:'padding:1rem 1.25rem;display:grid;gap:.6rem'},
+        el('div',{style:'display:flex;gap:.4rem'},
+          el('button',{class:'ghost',type:'button',style:'min-height:28px;font-size:.78rem',onclick:()=>set(q.windows.map(w=>w.name))},'All'),
+          el('button',{class:'ghost',type:'button',style:'min-height:28px;font-size:.78rem',onclick:()=>set(main.map(w=>w.name))},'Main only'),
+          el('button',{class:'ghost',type:'button',style:'min-height:28px;font-size:.78rem',onclick:()=>set([])},'None'),
+          el('span',{class:'faint small',style:'margin-left:auto;align-self:center',text:'applies to every '+pname(q.provider)+' account'})),
+        ...main.map(box),
+        models.length?el('div',{class:'faint small',style:'margin-top:.3rem',text:'Per model'}):null,
+        models.length?el('div',{style:'display:grid;gap:.35rem'},models.map(box)):null));
+    }));
+  };
   const load=async force=>{
     refresh.disabled=true;
     try{
       const d=await api('/quota?'+(prov?'provider='+encodeURIComponent(prov)+'&':'')+(force?'refresh=1':''));
-      if(!d.accounts.length){grid.replaceChildren(el('div',{class:'card empty',text:'No active account.'}));return}
-      grid.replaceChildren(...d.accounts.map(q=>{
-        const main=q.windows.filter(w=>!w.name.startsWith('model ')), models=q.windows.filter(w=>w.name.startsWith('model '));
-        return el('div',{class:'card'},
-          el('div',{class:'cardh'},avatar(q.provider,true),
-            el('div',{class:'grow',style:'min-width:0'},el('div',{style:'font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap',text:q.label||q.provider}),
-              el('div',{class:'faint small',text:pname(q.provider)+(q.plan?' · '+q.plan:'')})),
-            q.source==='headers'?el('span',{class:'badge',title:'From the rate-limit headers of the last answer, '+q.fetchedAt},'last answer'):null),
-          el('div',{style:'padding:1rem 1.25rem;display:grid;gap:.9rem'},
-            q.error&&!q.windows.length?el('div',{class:'err-msg',text:q.error}):null,
-            !q.error&&!q.windows.length?el('div',{class:'muted small',text:'No quota data yet. It appears after the next request through this account.'}):null,
-            ...main.map(quotaWindow),
-            models.length?el('details',{},el('summary',{class:'muted small',style:'cursor:pointer'},models.length+' per-model limits'),
-              el('div',{style:'display:grid;gap:.8rem;margin-top:.7rem'},models.map(w=>quotaWindow({...w,name:w.name.slice(6)})))):null));
-      }));
+      accounts=d.accounts;render();
     }catch(e){grid.replaceChildren(el('div',{class:'card empty',text:e.message}))}
     finally{refresh.disabled=false}
+  };
+  edit.onclick=async()=>{
+    if(!editing){editing=true;draft=JSON.parse(JSON.stringify(quotaView));edit.textContent='Done';edit.className='primary';render();return}
+    try{await postJSON('/ui-settings/quota-view',draft);quotaView=draft;toast('Saved')}catch(e){alert(e.message);return}
+    editing=false;edit.textContent='Edit';edit.className='ghost';render();
   };
   refresh.onclick=()=>load(true);
   load(false);

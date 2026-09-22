@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/louisphamdev/intact/internal/drift"
 	"github.com/louisphamdev/intact/internal/filter"
 	"github.com/louisphamdev/intact/internal/provider"
 	"github.com/louisphamdev/intact/internal/store"
@@ -116,6 +117,33 @@ func (a *api) relay(w http.ResponseWriter, resp *http.Response, connID string) {
 	w.WriteHeader(resp.StatusCode)
 	tapped := streamBody(w, resp)
 	a.recordUsage(connID, tapped, resp.Header.Get("Content-Encoding"))
+}
+
+// relayObserved relays a passthrough answer and shows it to the drift observer.
+func (a *api) relayObserved(w http.ResponseWriter, resp *http.Response, connID, provider, path string) {
+	for k, vs := range resp.Header {
+		if hopByHop[k] {
+			continue
+		}
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	tapped := streamBody(w, resp)
+	a.recordUsage(connID, tapped, resp.Header.Get("Content-Encoding"))
+	if resp.StatusCode < 300 && resp.Header.Get("Content-Encoding") == "" {
+		a.drift.Observe(drift.Response, provider, path, tapped, isEventStream(resp, tapped))
+	}
+}
+
+// isEventStream tells a stream from a whole body, by header or by content
+// (Codex labels its stream application/json).
+func isEventStream(resp *http.Response, body []byte) bool {
+	if strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
+		return true
+	}
+	return bytes.HasPrefix(body, []byte("event:")) || bytes.HasPrefix(body, []byte("data:"))
 }
 
 // recordUsage reads the token counts out of a response the proxy already sent

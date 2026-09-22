@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/louisphamdev/intact/internal/drift"
 	"github.com/louisphamdev/intact/internal/provider"
 	"github.com/louisphamdev/intact/internal/store"
 	"github.com/louisphamdev/intact/internal/translate"
@@ -105,7 +106,7 @@ const maxTranslatedBody = 32 << 20
 
 // relayVia answers the caller in its own shape (to) from a response in the
 // provider's shape (via). stream is what the caller asked for.
-func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, via string, stream bool) {
+func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, via string, stream bool, provider, path string) {
 	for k, vs := range resp.Header {
 		if hopByHop[k] || k == "Content-Length" || k == "Content-Type" || k == "Content-Encoding" {
 			continue
@@ -137,14 +138,17 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 		w.WriteHeader(resp.StatusCode)
 		w.Write(out)
 		a.recordUsage(connID, body, "")
+		a.drift.Observe(drift.Response, provider, path, body, false)
 		return
 	}
 
 	// Stream: provider events → chat chunks (in a goroutine) → the caller.
+	// The provider's own bytes are tapped too, for the drift observer.
+	raw := &respTap{headLimit: usageTapHeadLimit, tailLimit: usageTapTailLimit}
 	pr, pw := io.Pipe()
 	go func() {
 		defer pw.Close()
-		a.toChatChunks(pipeFlusher{pw}, resp.Body, via)
+		a.toChatChunks(pipeFlusher{pw}, io.TeeReader(resp.Body, tapWriter{raw}), via)
 	}()
 	tap := &respTap{headLimit: usageTapHeadLimit, tailLimit: usageTapTailLimit}
 	chunks := io.TeeReader(pr, tapWriter{tap})
@@ -173,6 +177,9 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 	}
 	io.Copy(io.Discard, pr)
 	a.recordUsage(connID, tap.bytes(), "")
+	if resp.StatusCode < 300 {
+		a.drift.Observe(drift.Response, provider, path, raw.bytes(), true)
+	}
 }
 
 // toChatChunks converts a provider's event stream to Chat Completions chunks.

@@ -156,6 +156,37 @@ var mcpTools = []mcpTool{
 			a.reloadFilters()
 			return map[string]any{"deleted": argStr(args, "id")}, nil
 		}},
+	{Name: "list_drift_changes", Description: "List structure changes seen in traffic: fields a client started or stopped sending (direction request), or a provider started or stopped answering (direction response). Use it to decide what to blacklist.",
+		InputSchema: schema(map[string]any{"provider": pString, "direction": map[string]any{"type": "string", "enum": []string{"request", "response"}},
+			"unacked": pBool, "since": map[string]any{"type": "integer"}, "limit": map[string]any{"type": "integer"}}),
+		run: func(a *api, args map[string]any) (any, error) {
+			f := store.ShapeChangeFilter{Provider: argStr(args, "provider"), Direction: argStr(args, "direction")}
+			f.Unacked, _ = args["unacked"].(bool)
+			if v, ok := args["since"].(float64); ok {
+				f.SinceID = int64(v)
+			}
+			if v, ok := args["limit"].(float64); ok {
+				f.Limit = int(v)
+			}
+			return a.store.ListShapeChanges(f)
+		}},
+	{Name: "ack_drift_changes", Description: "Mark structure changes as reviewed: the ids given, or all of them when ids is empty.",
+		InputSchema: schema(map[string]any{"ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}}}),
+		run: func(a *api, args map[string]any) (any, error) {
+			var ids []int64
+			for _, v := range list(args["ids"]) {
+				if f, ok := v.(float64); ok {
+					ids = append(ids, int64(f))
+				}
+			}
+			n, err := a.store.AckShapeChanges(ids)
+			return map[string]any{"acked": n}, err
+		}},
+	{Name: "list_drift_fields", Description: "List the field paths learned for a provider and direction, with their type and how often they were seen.",
+		InputSchema: schema(map[string]any{"provider": pString, "direction": map[string]any{"type": "string", "enum": []string{"request", "response"}}, "endpoint": pString}),
+		run: func(a *api, args map[string]any) (any, error) {
+			return a.drift.Fields(argStr(args, "direction"), argStr(args, "provider"), argStr(args, "endpoint")), nil
+		}},
 	{Name: "get_usage", Description: "Daily token totals per account and model, optionally for one day (YYYY-MM-DD).",
 		InputSchema: schema(map[string]any{"day": pString}),
 		run: func(a *api, args map[string]any) (any, error) {
@@ -319,3 +350,5 @@ func (a *api) mcpGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Allow", "POST")
 	writeError(w, http.StatusMethodNotAllowed, fmt.Sprintf("POST JSON-RPC messages to %s", r.URL.Path))
 }
+
+func list(v any) []any { l, _ := v.([]any); return l }

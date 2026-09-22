@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/louisphamdev/intact/internal/auth"
+	"github.com/louisphamdev/intact/internal/drift"
 	"github.com/louisphamdev/intact/internal/store"
 	"github.com/louisphamdev/intact/internal/web"
 )
@@ -30,6 +31,8 @@ type api struct {
 	copilot copilotCache
 	// sigs remembers Gemini thought signatures by function call id.
 	sigs sigStore
+	// drift learns the structure of what passes through and records changes.
+	drift *drift.Observer
 }
 
 // New builds the route table with no authentication (loopback use and tests).
@@ -43,7 +46,7 @@ func New(s *store.Store, baseOverride map[string]string) http.Handler {
 func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.Config) http.Handler {
 	a := &api{store: s, baseOverride: baseOverride, auth: authCfg, rrNext: map[string]int{},
 		cat: catalog{m: map[string]catalogEntry{}}, copilot: copilotCache{m: map[string]copilotToken{}},
-		sigs: sigStore{m: map[string]sigEntry{}}}
+		sigs: sigStore{m: map[string]sigEntry{}}, drift: drift.New(s)}
 	mux := http.NewServeMux()
 	// One base URL: the model in the body picks the provider and its accounts.
 	mux.HandleFunc("GET /v1/models", a.requireToken(a.models))
@@ -53,6 +56,12 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	mux.HandleFunc("GET /api/accounts", a.requireToken(a.accounts))
 	mux.HandleFunc("POST /api/accounts/{id}/active", a.requireToken(a.setActive))
 	mux.HandleFunc("GET /api/usage", a.requireToken(a.usage))
+	mux.HandleFunc("GET /api/drift/changes", a.requireToken(a.driftChanges))
+	mux.HandleFunc("POST /api/drift/ack", a.requireToken(a.driftAck))
+	mux.HandleFunc("GET /api/drift/fields", a.requireToken(a.driftFields))
+	mux.HandleFunc("GET /drift/changes", a.requireSession(a.driftChanges))
+	mux.HandleFunc("POST /drift/ack", a.requireSession(a.driftAck))
+	mux.HandleFunc("GET /drift/fields", a.requireSession(a.driftFields))
 	mux.HandleFunc("GET /api/filters", a.requireToken(a.listFilters))
 	mux.HandleFunc("POST /api/filters", a.requireToken(a.saveFilter))
 	mux.HandleFunc("DELETE /api/filters/{id}", a.requireToken(a.deleteFilter))

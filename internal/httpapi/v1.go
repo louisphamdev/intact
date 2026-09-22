@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/louisphamdev/intact/internal/drift"
 	"github.com/louisphamdev/intact/internal/filter"
 	"github.com/louisphamdev/intact/internal/provider"
 	"github.com/louisphamdev/intact/internal/store"
@@ -59,6 +60,7 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "cannot read body")
 		return
 	}
+	original := body
 	model, ok := bodyModel(body)
 	if !ok || model == "" {
 		writeError(w, http.StatusBadRequest, "the request names no model; send \"model\": \"<provider>/<model>\" or a model id")
@@ -83,6 +85,9 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no active account serves this model")
 		return
 	}
+	// The client's own request, before intact changes anything, is what shows
+	// a tool adding or dropping a field.
+	a.drift.Observe(drift.Request, targets[0].Provider, r.PathValue("path"), original, false)
 	if r.PathValue("path") == "messages/count_tokens" && !a.anyAnthropic(targets) {
 		countTokensEstimate(w, body)
 		return
@@ -477,9 +482,9 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		}
 		defer resp.Body.Close()
 		if to != "" {
-			a.relayVia(w, resp, conn.ID, to, via, stream)
+			a.relayVia(w, resp, conn.ID, to, via, stream, conn.Provider, path)
 		} else {
-			a.relay(w, resp, conn.ID)
+			a.relayObserved(w, resp, conn.ID, conn.Provider, path)
 		}
 		return
 	}

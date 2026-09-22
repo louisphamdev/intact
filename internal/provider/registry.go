@@ -28,9 +28,6 @@ type Provider struct {
 	// Setup tells the dashboard what a new connection needs besides a label:
 	// "key" (the default), "account" (a key and an account id) or "none".
 	Setup string
-	// FreshIDs are headers set on each request, when the caller sent none, to
-	// the prefix followed by a random hex id.
-	FreshIDs map[string]string
 	// Models is the list to use when the upstream has no model endpoint.
 	Models []string
 }
@@ -88,19 +85,13 @@ var registry = map[string]Provider{
 			"@cf/qwen/qwq-32b", "@cf/zai-org/glm-4.7-flash",
 		},
 	},
-	// OpenCode Zen's free tier answers only the OpenCode app, which sends the
-	// public token, its user agent, and a session and request id.
+	// OpenCode Zen with a Zen API key. The keyless free tier is reserved for the
+	// OpenCode app itself, so intact does not offer it.
 	"opencode": {
-		ID:      "opencode",
-		BaseURL: "https://opencode.ai/zen/v1",
-		Identity: map[string]string{
-			"Authorization":      "Bearer public",
-			"User-Agent":         "opencode",
-			"X-Opencode-Client":  "desktop",
-			"X-Opencode-Project": "global",
-		},
-		FreshIDs: map[string]string{"X-Opencode-Session": "ses_", "X-Opencode-Request": "msg_"},
-		Setup:    "none",
+		ID:         "opencode",
+		BaseURL:    "https://opencode.ai/zen/v1",
+		AuthHeader: "Authorization",
+		AuthPrefix: "Bearer ",
 	},
 	"openrouter": {
 		ID:         "openrouter",

@@ -137,31 +137,6 @@ func TestV1CustomProviderUsesItsBaseURL(t *testing.T) {
 	}
 }
 
-func TestOpenCodeSendsTheAppIdentity(t *testing.T) {
-	var gotAuth, gotClient, gotSession string
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth, gotClient, gotSession = r.Header.Get("Authorization"), r.Header.Get("X-Opencode-Client"), r.Header.Get("X-Opencode-Session")
-		w.Write([]byte(`{}`))
-	}))
-	defer up.Close()
-	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
-	defer s.Close()
-	s.CreateConnection("opencode", "free", "")
-	h := New(s, map[string]string{"opencode": up.URL})
-
-	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"opencode/m"}`))
-	req.Header.Set("Authorization", "Bearer intact-token")
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("code=%d", rec.Code)
-	}
-	// The caller's intact token is replaced by the app's public token.
-	if gotAuth != "Bearer public" || gotClient != "desktop" || !strings.HasPrefix(gotSession, "ses_") {
-		t.Errorf("auth=%q client=%q session=%q", gotAuth, gotClient, gotSession)
-	}
-}
-
 func TestCreateAccountFillsCloudflareAccountID(t *testing.T) {
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()

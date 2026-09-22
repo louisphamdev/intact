@@ -43,6 +43,8 @@ intact picked it (Antigravity variants). See [Routing](routing.md).
 | `POST /api/providers/{id}/models/active` | `{"models":[…],"active":bool}`. |
 | `POST /api/providers/{id}/models/delete` | `{"models":[…]}`. A model still listed comes back on the next fetch. |
 | `POST /api/providers/{id}/models/test` | `{"model":"…","account":"<connection id, optional>"}`. Returns `ok`, `status`, `ms`, `message`, `account`, and `active` when the test set the switch. |
+| `GET /api/providers/{id}/rotation` | `{"rotation":{mode,sticky,order},"next":"<connection id>","used":n}`. |
+| `POST /api/providers/{id}/rotation` | `{"mode":"round-robin"\|"fallback","sticky":1–1000,"order":[connection ids]}`; fields left out keep their value. |
 | `GET /api/providers/{id}/model-policy` | `{"policy":{autoTest,onlyFree,lastRun,lastResult},"running":bool}`. |
 | `POST /api/providers/{id}/model-policy` | `{"autoTest":bool,"onlyFree":bool}`: stores and applies it. |
 

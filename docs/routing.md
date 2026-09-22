@@ -51,7 +51,24 @@ Details worth knowing:
 ## Rotation and failover
 
 For each call intact builds the list of accounts that serve the model, and
-starts at the next account in a per-model rotation. Then, for each account:
+picks the account to try first by the provider's **rotation**. It is set at
+the top of the provider's Connections card, or at
+`/api/providers/{id}/rotation`:
+
+| Setting | Behaviour |
+| --- | --- |
+| Round robin, 1 request a turn (default) | Accounts take turns on every request. |
+| Round robin, N requests a turn | Each account serves N requests in a row, then the next takes over. This keeps a provider's prompt cache warm on one account. |
+| Fallback (round robin off) | The first account serves every request. The next one is tried only when it fails or is busy. |
+
+- **Priority.** The ▲▼ buttons set the accounts' order, which both modes
+  follow.
+- **Next account.** The card marks the account that takes the next request,
+  with its place in the turn (`next · 2/3`).
+- **Pools across providers.** A bare model listed by several providers pools
+  their accounts. Such a pool turns on every request, per model.
+
+Then, for each account, starting there:
 
 1. An OAuth token close to expiry is refreshed before use.
 2. The request is sent, after the [blacklist](blacklist.md) has run on the exact

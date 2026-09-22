@@ -20,9 +20,10 @@ type api struct {
 	baseOverride map[string]string
 	// auth gates the server. Nil means no gate (loopback use).
 	auth *auth.Config
-	// rrMu guards rrNext, the per-model rotation cursor.
+	// rrMu guards rrNext, the rotation cursors: per provider ("p:"), or per
+	// model for a pool across providers ("m:").
 	rrMu   sync.Mutex
-	rrNext map[string]int
+	rrNext map[string]rrCursor
 	// cat caches each provider's model list for resolving a bare model id.
 	cat catalog
 	// filters caches the compiled request filters.
@@ -52,7 +53,7 @@ func New(s *store.Store, baseOverride map[string]string) http.Handler {
 // in with a password and a TOTP code to reach the dashboard, and a machine must
 // present the bearer token to use a provider.
 func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.Config) http.Handler {
-	a := &api{store: s, baseOverride: baseOverride, auth: authCfg, rrNext: map[string]int{},
+	a := &api{store: s, baseOverride: baseOverride, auth: authCfg, rrNext: map[string]rrCursor{},
 		cat: catalog{m: map[string]catalogEntry{}}, copilot: copilotCache{m: map[string]copilotToken{}},
 		sigs: sigStore{m: map[string]sigEntry{}}, drift: drift.New(s),
 		rate: rateHeaders{m: map[string]rateSnapshot{}}, quota: quotaCache{m: map[string]AccountQuota{}},
@@ -102,6 +103,10 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	mux.HandleFunc("POST /providers/{id}/models/active", a.requireSession(a.setModelsActive))
 	mux.HandleFunc("POST /providers/{id}/models/delete", a.requireSession(a.deleteModels))
 	mux.HandleFunc("POST /providers/{id}/models/test", a.requireSession(a.testModel))
+	mux.HandleFunc("GET /providers/{id}/rotation", a.requireSession(a.getRotation))
+	mux.HandleFunc("POST /providers/{id}/rotation", a.requireSession(a.setRotation))
+	mux.HandleFunc("GET /api/providers/{id}/rotation", a.requireToken(a.getRotation))
+	mux.HandleFunc("POST /api/providers/{id}/rotation", a.requireToken(a.setRotation))
 	mux.HandleFunc("GET /providers/{id}/model-policy", a.requireSession(a.getModelPolicy))
 	mux.HandleFunc("POST /providers/{id}/model-policy", a.requireSession(a.setModelPolicy))
 	mux.HandleFunc("GET /api/providers/{id}/model-policy", a.requireToken(a.getModelPolicy))

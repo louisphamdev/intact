@@ -90,6 +90,9 @@
   .eff-high{--c:#f59e0b}.eff-xhigh{--c:#f97316}.eff-max{--c:#ef4444}.eff-ultra{--c:#d946ef}.eff-tiered{--c:#8b7cf6}
   @media (prefers-color-scheme:light){:root:not([data-theme=dark]) .eff-none{--c:#6b7280}:root:not([data-theme=dark]) .eff-minimal,:root:not([data-theme=dark]) .eff-extra-low{--c:#2563eb}:root:not([data-theme=dark]) .eff-low{--c:#0284c7}:root:not([data-theme=dark]) .eff-medium{--c:#0d9488}:root:not([data-theme=dark]) .eff-high{--c:#d97706}:root:not([data-theme=dark]) .eff-xhigh{--c:#ea580c}:root:not([data-theme=dark]) .eff-max{--c:#dc2626}:root:not([data-theme=dark]) .eff-ultra{--c:#c026d3}:root:not([data-theme=dark]) .eff-tiered{--c:#7c6cf6}}
   :root[data-theme=light] .eff-none{--c:#6b7280}:root[data-theme=light] .eff-minimal,:root[data-theme=light] .eff-extra-low{--c:#2563eb}:root[data-theme=light] .eff-low{--c:#0284c7}:root[data-theme=light] .eff-medium{--c:#0d9488}:root[data-theme=light] .eff-high{--c:#d97706}:root[data-theme=light] .eff-xhigh{--c:#ea580c}:root[data-theme=light] .eff-max{--c:#dc2626}:root[data-theme=light] .eff-ultra{--c:#c026d3}:root[data-theme=light] .eff-tiered{--c:#7c6cf6}
+  .order{display:inline-flex;flex-direction:column;gap:0;margin-right:-.25rem}
+  .order .icon{min-height:16px;min-width:22px;height:16px;padding:0}
+  .order .icon svg{width:14px;height:14px}
   .badge{display:inline-flex;align-items:center;gap:.25rem;font-size:.7rem;font-weight:500;border-radius:6px;
          padding:.05rem .45rem;background:var(--card2);color:var(--muted);white-space:nowrap}
   .badge.ok{background:var(--ok-soft);color:var(--ok)}
@@ -437,6 +440,14 @@ const VI={
 'Leaderboard match · {0}':'Map bảng xếp hạng · {0}','Now: {0} ({1}).':'Hiện tại: {0} ({1}).','Not matched now.':'Hiện chưa map.',
 'LMArena name':'Tên trên LMArena','Automatic':'Tự động','Not on the board':'Không có trên bảng',
 'Forget the hand-made match and match by name again':'Bỏ map tay, khớp lại theo tên','Show only tier S and A models':'Chỉ hiện model bậc S và A',
+// rotation
+'Round robin':'Round robin','Turn every':'Đổi lượt sau mỗi','requests':'request','Requests per turn':'Số request mỗi lượt',
+'How many requests in a row one account serves before the next takes over':'Số request liên tiếp một tài khoản phục vụ trước khi chuyển sang tài khoản kế tiếp',
+'On: accounts take turns. Off (fallback): the first account serves every request, the next only when it fails or is busy.':'Bật: các tài khoản thay phiên nhau. Tắt (fallback): tài khoản đầu tiên phục vụ mọi request, chỉ chuyển sang tài khoản sau khi nó lỗi hoặc bận.',
+'Each account serves {0} requests in a row.':'Mỗi tài khoản phục vụ {0} request liên tiếp.','Accounts take turns on every request.':'Các tài khoản thay phiên theo từng request.',
+'Fallback: the first account serves; the next only when it fails or is busy.':'Fallback: tài khoản đầu tiên phục vụ; chỉ chuyển sang tài khoản sau khi nó lỗi hoặc bận.',
+'Move up':'Lên','Move down':'Xuống','Move {0} up':'Chuyển {0} lên','Move {0} down':'Chuyển {0} xuống',
+'The next request goes to this account':'Request tiếp theo sẽ vào tài khoản này','next':'kế tiếp','next · {0}/{1}':'kế tiếp · {0}/{1}',
 // docs tabs
 'Introduction':'Giới thiệu',
 };
@@ -767,29 +778,67 @@ function viewProvider(v,p){
   const loginBtn=LOGIN[p]?el('button',{class:'primary',type:'button',onclick:()=>startLogin(p)},svg(ICON.plus),'Login'):null;
   const keyBtn=ok&&setupOf(p)!=='oauth'?el('button',{class:loginBtn?'ghost':'primary',type:'button',onclick:()=>addAccount(p)},svg(ICON.plus),loginBtn?'Add token':'Add'):null;
   const addBtn=loginBtn||keyBtn?el('span',{style:'display:inline-flex;gap:.5rem'},loginBtn,keyBtn):null;
-  const rows=list.map((a,i)=>{
+  // Rotation: whose turn it is, round-robin (N requests a turn) or fallback,
+  // and the accounts' priority (the ▲▼ buttons).
+  let rot={rotation:{mode:'round-robin',sticky:1,order:[]}};
+  const ordered=()=>{const pos=new Map((rot.rotation.order||[]).map((id,i)=>[id,i]));
+    return [...list].sort((x,y)=>(pos.has(x.id)?pos.get(x.id):1e6)-(pos.has(y.id)?pos.get(y.id):1e6))};
+  const saveRot=async body=>{try{rot=await postJSON('/providers/'+p+'/rotation',body);paint()}catch(e){alert(e.message)}};
+  const move=(id,d)=>{const ids=ordered().map(a=>a.id),i=ids.indexOf(id),j=i+d;if(j<0||j>=ids.length)return;
+    [ids[i],ids[j]]=[ids[j],ids[i]];saveRot({order:ids})};
+  const rowsBox=el('div');
+  const rrSw=el('input',{type:'checkbox','aria-label':'Round robin'});
+  rrSw.onchange=()=>saveRot({mode:rrSw.checked?'round-robin':'fallback'});
+  const sticky=el('input',{type:'number',min:1,max:1000,style:'width:4.5rem;min-height:30px;padding:.2rem .45rem','aria-label':'Requests per turn'});
+  sticky.onchange=()=>{const n=Math.max(1,Math.min(1000,parseInt(sticky.value)||1));sticky.value=n;saveRot({sticky:n})};
+  const stickyBox=el('label',{class:'small',style:'display:inline-flex;align-items:center;gap:.4rem',title:'How many requests in a row one account serves before the next takes over'},
+    tr('Turn every'),sticky,tr('requests'));
+  const modeNote=el('span',{class:'faint small'});
+  const rotBar=list.length>1&&ok?el('div',{style:'display:flex;gap:1rem;align-items:center;flex-wrap:wrap;padding:.6rem 1.25rem;border-bottom:1px solid var(--line)'},
+    el('label',{style:'display:inline-flex;align-items:center;gap:.5rem;cursor:pointer',title:'On: accounts take turns. Off (fallback): the first account serves every request, the next only when it fails or is busy.'},
+      el('span',{class:'switch'},rrSw,el('span')),el('b',{style:'font-size:.85rem'},'Round robin')),
+    stickyBox,modeNote):null;
+  const paint=()=>{
+    const R=rot.rotation,rr=R.mode!=='fallback';
+    rrSw.checked=rr;sticky.value=R.sticky||1;stickyBox.hidden=!rr;
+    modeNote.textContent=rr?(R.sticky>1?t('Each account serves {0} requests in a row.',R.sticky):t('Accounts take turns on every request.')):t('Fallback: the first account serves; the next only when it fails or is busy.');
+    const all=ordered();
+    rowsBox.replaceChildren(...all.map((a,i)=>{
     const sw=el('input',{type:'checkbox',checked:a.isActive,'aria-label':t('Active: {0}',a.label||a.id)});
     sw.onchange=async()=>{
       try{await postJSON('/accounts/'+a.id+'/active',{active:sw.checked});a.isActive=sw.checked;delete modelCache[p];route()}
       catch(e){sw.checked=!sw.checked;alert(e.message)}
     };
+    const isNext=a.isActive&&rot.next===a.id;
     return el('div',{class:'row'+(a.isActive?'':' off')},
+      all.length>1?el('span',{class:'order'},
+        el('button',{class:'icon',type:'button',title:'Move up','aria-label':t('Move {0} up',a.label||a.id),disabled:i===0,onclick:()=>move(a.id,-1)},svg(ICON.up)),
+        el('button',{class:'icon',type:'button',title:'Move down','aria-label':t('Move {0} down',a.label||a.id),disabled:i===all.length-1,onclick:()=>move(a.id,1)},svg(ICON.down))):null,
       el('span',{class:'idx',text:'#'+(i+1)}),
       el('div',{class:'who'},
         labelEditor(a),
         el('div',{class:'meta'},
           el('span',{class:'badge'+(a.isActive?' ok':''),text:a.isActive?'active':'off'}),
+          isNext&&list.length>1?el('span',{class:'badge accent',title:'The next request goes to this account'},
+            rr&&R.sticky>1?t('next · {0}/{1}',(rot.used||0)+1,R.sticky):tr('next')):null,
           el('span',{class:'mono faint',title:a.id,text:short(a.id)}),
           acctTest(a))),
       ok?acctTestBtn(a):null,
       el('button',{class:'danger',type:'button',onclick:()=>deleteAccount(a)},svg(ICON.trash),'Delete'),
       el('label',{class:'switch',title:a.isActive?'Active':'Off'},sw,el('span')));
-  });
-  v.append(el('div',{class:'card'},
+    }));
+  };
+  paint();
+  const card=el('div',{class:'card'},
     el('div',{class:'cardh'},el('h2',{class:'grow'},'Connections'),
       null),
-    list.length?rows:el('div',{class:'empty'},el('b',{},'No connections yet'),ok?t('Add an API key to start using {0}.',pname(p)):null,addBtn),
-    list.length&&addBtn?el('div',{style:'padding:.8rem 1.25rem;border-top:1px solid var(--line)'},addBtn):null));
+    rotBar,
+    list.length?rowsBox:el('div',{class:'empty'},el('b',{},'No connections yet'),ok?t('Add an API key to start using {0}.',pname(p)):null,addBtn),
+    list.length&&addBtn?el('div',{style:'padding:.8rem 1.25rem;border-top:1px solid var(--line)'},addBtn):null);
+  v.append(card);
+  // Keep "next" current while the page is open.
+  if(list.length>1&&ok){const poll=async()=>{if(!card.isConnected)return;
+    if(!document.hidden){try{rot=await api('/providers/'+p+'/rotation');paint()}catch(e){}}setTimeout(poll,5000)};poll()}
   if(ok&&activeOf(p).length)v.append(modelTable(p));
   loadAcctTests();
 }
@@ -1547,7 +1596,7 @@ const DOCS=[
         dt('li',dc('llama-3.3-70b-versatile'),' — model only. Every provider whose model list has it is used.')),
       dt('p','Copy the exact name from a provider page (click a model) or from ',dc('/v1/models'),'.'),
       dt('h2','Rotation and failover'),
-      dt('p','Requests for a model rotate across the active accounts that serve it. When an account answers 429, 500, 503 or 409, intact tries the next one. An OAuth account that answers 401 is refreshed and retried once. Turn an account off on its provider page to take it out of rotation.'),
+      dt('p','Each provider page sets how its accounts take turns, at the top of Connections. Round robin on: accounts take turns, each serving N requests in a row (1 by default). Round robin off (fallback): the first account serves every request, and the next only when it fails or is busy. The ▲▼ buttons set the order; the next account is marked. When an account answers 429, 500, 503 or 409, intact tries the next one; an OAuth account that answers 401 is refreshed and retried once. Turn an account off to take it out.'),
       dt('h2','Keys'),
       dt('p','Create API keys under Endpoint → API keys. Send one as ',dc('Authorization: Bearer <key>'),' or ',dc('x-api-key: <key>'),'. The same key works for ',dc('/v1'),', the management API ',dc('/api'),' and the MCP server ',dc('/mcp'),'.'),
     ];
@@ -1647,7 +1696,7 @@ const DOCS_VI={
         dt('li',dc('llama-3.3-70b-versatile'),' — chỉ model. Mọi nhà cung cấp có model này trong danh sách đều được dùng.')),
       dt('p','Sao chép đúng tên từ trang nhà cung cấp (bấm vào một model) hoặc từ ',dc('/v1/models'),'.'),
       dt('h2','Xoay vòng và failover'),
-      dt('p','Request cho một model được xoay vòng giữa các tài khoản đang bật có phục vụ model đó. Khi một tài khoản trả về 429, 500, 503 hoặc 409, intact thử tài khoản kế tiếp. Tài khoản OAuth trả về 401 sẽ được refresh và thử lại một lần. Tắt tài khoản trên trang nhà cung cấp để đưa nó ra khỏi vòng xoay.'),
+      dt('p','Mỗi trang nhà cung cấp chỉnh cách các tài khoản thay phiên, ở đầu thẻ Kết nối. Bật Round robin: các tài khoản thay phiên, mỗi tài khoản phục vụ N request liên tiếp (mặc định 1). Tắt Round robin (fallback): tài khoản đầu tiên phục vụ mọi request, chỉ chuyển sang tài khoản sau khi nó lỗi hoặc bận. Nút ▲▼ đặt thứ tự; tài khoản nhận request kế tiếp được đánh dấu. Khi một tài khoản trả 429, 500, 503 hoặc 409, intact thử tài khoản kế tiếp; tài khoản OAuth trả 401 được refresh và thử lại một lần. Tắt tài khoản để đưa nó ra khỏi vòng.'),
       dt('h2','Key'),
       dt('p','Tạo API key trong Endpoint → API key. Gửi key dưới dạng ',dc('Authorization: Bearer <key>'),' hoặc ',dc('x-api-key: <key>'),'. Cùng một key dùng được cho ',dc('/v1'),', API quản trị ',dc('/api'),' và MCP server ',dc('/mcp'),'.'),
     ];

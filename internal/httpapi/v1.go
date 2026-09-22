@@ -115,7 +115,8 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		countTokensEstimate(w, body)
 		return
 	}
-	a.failover(w, r, body, targets, a.nextIndex("m:"+model, len(targets)))
+	targets, start := a.startFor(model, targets)
+	a.failover(w, r, body, targets, start)
 }
 
 // splitModel reads a "<provider>/<model>" prefix. It reports the provider only
@@ -629,15 +630,6 @@ func (a *api) activeConnections(prov string) []store.Connection {
 		}
 	}
 	return out
-}
-
-// nextIndex returns the rotation start for a key and advances it.
-func (a *api) nextIndex(key string, n int) int {
-	a.rrMu.Lock()
-	defer a.rrMu.Unlock()
-	i := a.rrNext[key] % n
-	a.rrNext[key] = (i + 1) % n
-	return i
 }
 
 // retryableStatus reports a status that means "this account is busy, try another".

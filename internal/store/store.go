@@ -66,6 +66,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply drift schema: %w", err)
 	}
+	if err := (&Store{DB: db}).migrateDrift(); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if _, err := db.Exec(apiKeySchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply api key schema: %w", err)

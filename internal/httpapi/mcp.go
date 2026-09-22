@@ -246,6 +246,26 @@ var mcpTools = []mcpTool{
 			n, err := a.store.AckShapeChanges(ids)
 			return map[string]any{"acked": n}, err
 		}},
+	{Name: "drift_review", Description: "The drift review: the decision model (TypeSafe Jev) judges each structure change's cause and acknowledges the benign ones it is sure of. Without arguments, its state; enabled switches it; run judges the pending changes now.",
+		InputSchema: schema(map[string]any{"enabled": pBool, "run": pBool}),
+		run: func(a *api, args map[string]any) (any, error) {
+			if v, ok := args["enabled"].(bool); ok {
+				s := "on"
+				if !v {
+					s = "off"
+				}
+				a.store.SetSetting(reviewSettingKey, s)
+			}
+			out := map[string]any{"enabled": a.reviewEnabled(), "model": reviewModel, "ackConfidence": reviewAckConfidence}
+			if run, _ := args["run"].(bool); run {
+				n, err := a.reviewPending(context.Background())
+				if err != nil {
+					return nil, err
+				}
+				out["judged"] = n
+			}
+			return out, nil
+		}},
 	{Name: "list_drift_fields", Description: "List the field paths learned for a provider and direction, with their type and how often they were seen.",
 		InputSchema: schema(map[string]any{"provider": pString, "direction": map[string]any{"type": "string", "enum": []string{"request", "response"}}, "endpoint": pString}),
 		run: func(a *api, args map[string]any) (any, error) {

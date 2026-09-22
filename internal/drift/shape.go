@@ -25,8 +25,16 @@ const (
 var dynamicParents = map[string]bool{
 	"properties": true, "patternProperties": true, "$defs": true, "definitions": true,
 	"answers": true, "criteria": true, "legend": true, "probabilities": true,
-	"metadata": true, "client_metadata": true, "headers": true,
-	"args": true, "arguments": true, "extra_body": true,
+}
+
+// dataParents hold values chosen by a user or a tool (a tool call's
+// arguments, metadata), not structure of the API: their keys collapse to "{*}"
+// and nothing under them is learned but each value's type. A tool schema's
+// "properties" is not one of them: schema keywords under it are what the
+// blacklist acts on.
+var dataParents = map[string]bool{
+	"args": true, "arguments": true, "metadata": true, "client_metadata": true,
+	"extra_body": true, "headers": true,
 }
 
 var idLike = regexp.MustCompile(`^([a-z]{2,6}_[A-Za-z0-9]{8,}|[0-9a-fA-F-]{16,}|.*\d.*\d.*\d.*)$`)
@@ -80,6 +88,17 @@ func walk(v any, path, parentKey string, depth int, out map[string]string) {
 	}
 	switch n := v.(type) {
 	case map[string]any:
+		if dataParents[parentKey] {
+			for _, c := range n {
+				p := join(path, "{*}")
+				if prev, ok := out[p]; ok {
+					out[p] = MergeTypes(prev, typeOf(c))
+				} else {
+					out[p] = typeOf(c)
+				}
+			}
+			return
+		}
 		// A very wide object is a map of names, not a record of fields (a
 		// Responses object has about 40 fields, so the bar sits well above).
 		dynamic := dynamicParents[parentKey] || len(n) > 96

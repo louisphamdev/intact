@@ -39,8 +39,13 @@ tools) and wants to use them all from any client.
   tool-schema key, a system-prompt line, a header) before the request leaves.
   [Blacklist](docs/blacklist.md)
 - **Drift alerts.** For providers reached as a coding tool, intact learns the
-  structure of requests and answers and records when a field appears,
-  disappears or changes type. [Drift](docs/drift.md)
+  structure of requests (per client) and answers, and records when a field
+  appears, disappears or changes type.
+  - Each change is judged by TypeSafe's Jev decision model.
+  - The benign ones it is sure of are acknowledged on their own.
+  - A likely provider change waits for you.
+
+  The decision and its trial are in [Drift](docs/drift.md#review-by-jev).
 - **Quota and usage.** Quota is read from each provider (rolling windows, weekly
   pools, per-model shares). Token usage is counted per account, model and day.
   [Quota and usage](docs/quota-and-usage.md)

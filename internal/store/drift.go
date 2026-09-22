@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -31,6 +32,74 @@ type ShapeChange struct {
 	NewType   string `json:"newType"`
 	Sample    string `json:"sample"`
 	Acked     bool   `json:"acked"`
+	// Client is who sent a request change: the API key's name, "env" for the
+	// environment token, "internal" for intact's own calls.
+	Client string `json:"client,omitempty"`
+	// Verdict is the reviewer's category (see the drift review), with its
+	// confidence; AutoAcked marks a change the reviewer acknowledged itself.
+	Verdict     string  `json:"verdict,omitempty"`
+	VerdictConf float64 `json:"verdictConf,omitempty"`
+	VerdictAt   string  `json:"verdictAt,omitempty"`
+	AutoAcked   bool    `json:"autoAcked,omitempty"`
+}
+
+// migrateDrift adds the columns newer than the table.
+func (s *Store) migrateDrift() error {
+	for _, col := range []string{"client TEXT NOT NULL DEFAULT ''", "verdict TEXT NOT NULL DEFAULT ''",
+		"verdict_conf REAL NOT NULL DEFAULT 0", "verdict_at TEXT NOT NULL DEFAULT ''", "auto_acked INTEGER NOT NULL DEFAULT 0"} {
+		if _, err := s.DB.Exec("ALTER TABLE shape_changes ADD COLUMN " + col); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("migrate shape_changes: %w", err)
+		}
+	}
+	return nil
+}
+
+// UnreviewedShapeChanges returns the changes no reviewer has judged yet and
+// nobody has acknowledged, oldest first.
+func (s *Store) UnreviewedShapeChanges(limit int) ([]ShapeChange, error) {
+	return s.queryShapeChanges(`SELECT `+shapeChangeCols+` FROM shape_changes WHERE verdict = '' AND acked = 0 ORDER BY id LIMIT ?`, limit)
+}
+
+// SetShapeVerdict records a reviewer's verdict, and acknowledges the change
+// when ack is set.
+func (s *Store) SetShapeVerdict(id int64, verdict string, conf float64, ack bool) error {
+	a := 0
+	if ack {
+		a = 1
+	}
+	_, err := s.DB.Exec(`UPDATE shape_changes SET verdict = ?, verdict_conf = ?, verdict_at = ?,
+		auto_acked = ?, acked = CASE WHEN ? = 1 THEN 1 ELSE acked END WHERE id = ?`,
+		verdict, conf, time.Now().UTC().Format(time.RFC3339), a, a, id)
+	return err
+}
+
+// ShapeChangesSince returns the changes recorded after a time, for a
+// reviewer's context.
+func (s *Store) ShapeChangesSince(at string) ([]ShapeChange, error) {
+	return s.queryShapeChanges(`SELECT `+shapeChangeCols+` FROM shape_changes WHERE at >= ? ORDER BY id`, at)
+}
+
+const shapeChangeCols = `id, at, direction, provider, endpoint, event, path, kind, old_type, new_type, sample, acked,
+	client, verdict, verdict_conf, verdict_at, auto_acked`
+
+func (s *Store) queryShapeChanges(q string, args ...any) ([]ShapeChange, error) {
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query shape changes: %w", err)
+	}
+	defer rows.Close()
+	out := []ShapeChange{}
+	for rows.Next() {
+		var c ShapeChange
+		var acked, auto int
+		if err := rows.Scan(&c.ID, &c.At, &c.Direction, &c.Provider, &c.Endpoint, &c.Event, &c.Path, &c.Kind,
+			&c.OldType, &c.NewType, &c.Sample, &acked, &c.Client, &c.Verdict, &c.VerdictConf, &c.VerdictAt, &auto); err != nil {
+			return nil, err
+		}
+		c.Acked, c.AutoAcked = acked != 0, auto != 0
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 const driftSchema = `
@@ -131,9 +200,9 @@ func (s *Store) AddShapeChange(c ShapeChange) error {
 	if c.At == "" {
 		c.At = time.Now().UTC().Format(time.RFC3339)
 	}
-	_, err := s.DB.Exec(`INSERT INTO shape_changes (at, direction, provider, endpoint, event, path, kind, old_type, new_type, sample)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.At, c.Direction, c.Provider, c.Endpoint, c.Event, c.Path, c.Kind, c.OldType, c.NewType, c.Sample)
+	_, err := s.DB.Exec(`INSERT INTO shape_changes (at, direction, provider, endpoint, event, path, kind, old_type, new_type, sample, client)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.At, c.Direction, c.Provider, c.Endpoint, c.Event, c.Path, c.Kind, c.OldType, c.NewType, c.Sample, c.Client)
 	if err != nil {
 		return fmt.Errorf("add shape change: %w", err)
 	}
@@ -151,7 +220,7 @@ type ShapeChangeFilter struct {
 
 // ListShapeChanges returns changes, newest first.
 func (s *Store) ListShapeChanges(f ShapeChangeFilter) ([]ShapeChange, error) {
-	q := `SELECT id, at, direction, provider, endpoint, event, path, kind, old_type, new_type, sample, acked FROM shape_changes WHERE id > ?`
+	q := `SELECT ` + shapeChangeCols + ` FROM shape_changes WHERE id > ?`
 	args := []any{f.SinceID}
 	if f.Provider != "" {
 		q += ` AND provider = ?`
@@ -169,22 +238,7 @@ func (s *Store) ListShapeChanges(f ShapeChangeFilter) ([]ShapeChange, error) {
 	}
 	q += ` ORDER BY id DESC LIMIT ?`
 	args = append(args, f.Limit)
-	rows, err := s.DB.Query(q, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query shape changes: %w", err)
-	}
-	defer rows.Close()
-	out := []ShapeChange{}
-	for rows.Next() {
-		var c ShapeChange
-		var acked int
-		if err := rows.Scan(&c.ID, &c.At, &c.Direction, &c.Provider, &c.Endpoint, &c.Event, &c.Path, &c.Kind, &c.OldType, &c.NewType, &c.Sample, &acked); err != nil {
-			return nil, err
-		}
-		c.Acked = acked != 0
-		out = append(out, c)
-	}
-	return out, rows.Err()
+	return s.queryShapeChanges(q, args...)
 }
 
 // AckShapeChanges marks changes as seen: the ids given, or every change when

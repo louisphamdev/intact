@@ -45,9 +45,9 @@ type key struct {
 }
 
 type job struct {
-	dir, provider, endpoint string
-	body                    []byte
-	sse                     bool
+	dir, provider, endpoint, client string
+	body                            []byte
+	sse                             bool
 }
 
 // Observer learns structures and records their changes. Observe never blocks
@@ -89,11 +89,18 @@ func newObserver(s *store.Store, background bool) *Observer {
 
 // Observe queues one document. body is copied by the caller or not reused.
 func (o *Observer) Observe(dir, provider, endpoint string, body []byte, sse bool) {
+	o.ObserveFrom(dir, provider, "", endpoint, body, sse)
+}
+
+// ObserveFrom queues a document sent by a named client. Requests are learned
+// per client, so one client's habits (a field it always sends) do not read as
+// another client's change.
+func (o *Observer) ObserveFrom(dir, provider, client, endpoint string, body []byte, sse bool) {
 	if o == nil || len(body) == 0 {
 		return
 	}
 	select {
-	case o.q <- job{dir, provider, endpoint, body, sse}:
+	case o.q <- job{dir, provider, endpoint, client, body, sse}:
 	default:
 	}
 }
@@ -128,7 +135,7 @@ func (o *Observer) process(j job) {
 		if paths == nil {
 			continue
 		}
-		o.observe(j.dir, j.provider, j.endpoint, ev.Name, paths, ev.Body, false)
+		o.observe(j.dir, j.provider, j.endpoint, j.client, ev.Name, paths, ev.Body, false)
 	}
 }
 
@@ -144,17 +151,21 @@ func (o *Observer) Seed(dir, provider, endpoint string, body []byte, sse bool) i
 	n := 0
 	for _, ev := range events {
 		if paths := Paths(ev.Body); paths != nil {
-			o.observe(dir, provider, endpoint, ev.Name, paths, ev.Body, true)
+			o.observe(dir, provider, endpoint, "", ev.Name, paths, ev.Body, true)
 			n++
 		}
 	}
 	return n
 }
 
-func (o *Observer) observe(dir, provider, endpoint, event string, paths map[string]string, body []byte, quiet bool) {
+func (o *Observer) observe(dir, provider, endpoint, client, event string, paths map[string]string, body []byte, quiet bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	k := keyOf(dir, provider, endpoint, event)
+	ep := endpoint
+	if client != "" {
+		ep += "@" + client
+	}
+	k := keyOf(dir, provider, ep, event)
 	kk := o.keys[k]
 	if kk == nil {
 		kk = &key{fields: map[string]*field{}}
@@ -170,7 +181,7 @@ func (o *Observer) observe(dir, provider, endpoint, event string, paths map[stri
 			return
 		}
 		changes = append(changes, store.ShapeChange{At: now, Direction: dir, Provider: provider, Endpoint: endpoint,
-			Event: event, Path: path, Kind: kind, OldType: oldT, NewType: newT, Sample: sample(body)})
+			Event: event, Path: path, Kind: kind, OldType: oldT, NewType: newT, Sample: sample(body), Client: client})
 	}
 	for p, t := range paths {
 		f := kk.fields[p]
@@ -261,7 +272,11 @@ func (o *Observer) Fields(dir, provider, endpoint string) []store.ShapeField {
 	var out []store.ShapeField
 	for k, kk := range o.keys {
 		parts := strings.SplitN(k, "|", 4)
-		if len(parts) != 4 || (dir != "" && parts[0] != dir) || (provider != "" && parts[1] != provider) || (endpoint != "" && parts[2] != endpoint) {
+		if len(parts) != 4 {
+			continue
+		}
+		ep, _, _ := strings.Cut(parts[2], "@")
+		if (dir != "" && parts[0] != dir) || (provider != "" && parts[1] != provider) || (endpoint != "" && ep != endpoint) {
 			continue
 		}
 		for p, f := range kk.fields {

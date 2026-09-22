@@ -109,7 +109,7 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 	// The client's own request, before intact changes anything, is what shows
 	// a tool adding or dropping a field.
 	if watched(targets[0].Provider) {
-		a.drift.Observe(drift.Request, targets[0].Provider, r.PathValue("path"), original, false)
+		a.drift.ObserveFrom(drift.Request, targets[0].Provider, clientOf(r), r.PathValue("path"), original, false)
 	}
 	if r.PathValue("path") == "messages/count_tokens" && !a.anyAnthropic(targets) {
 		countTokensEstimate(w, body)
@@ -592,6 +592,9 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			continue
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			a.errs.note(conn.Provider)
+		}
 		if at.model != "" {
 			// The model that answered, when intact chose it (a level variant).
 			w.Header().Set("X-Intact-Model", at.model)

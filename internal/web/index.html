@@ -468,6 +468,14 @@ const VI={
 'JSON: {0}':'JSON: {0}','Form':'Form','Edit provider · {0}':'Sửa provider · {0}','Definition':'Định nghĩa','Copy the definition as JSON':'Sao chép định nghĩa dạng JSON',
 'Delete the provider "{0}"?':'Xoá provider "{0}"?','2. Enter it at {0}':'2. Nhập mã tại {0}','Waiting for {0}…':'Đang chờ {0}…',
 'After signing in, copy the address the browser ends on (it may fail to load), or the code the page shows, and paste it here.':'Sau khi đăng nhập, sao chép địa chỉ trình duyệt dừng lại (có thể không tải được), hoặc mã trang hiện ra, rồi dán vào đây.',
+// drift review
+'A client started using it':'Client bắt đầu dùng','Data, not API':'Dữ liệu, không phải API','Optional field':'Trường tuỳ chọn',
+'Provider changed format':'Provider đổi format','Judged by Jev at {0}':'Jev đánh giá lúc {0}','confidence {0}':'độ tự tin {0}',
+'auto-acknowledged':'tự đánh dấu đã xem','Jev review':'Jev đánh giá','Review now':'Đánh giá ngay','Judge the waiting changes now':'Đánh giá ngay các thay đổi đang chờ',
+'Jev judged {0} change(s)':'Jev đã đánh giá {0} thay đổi','The client that sent it':'Client đã gửi',
+'Jev (TypeSafe) judges what caused each change; it acknowledges the benign ones it is sure of (confidence ≥ 60%, no failed answer since), and leaves the rest to you.':'Jev (TypeSafe) đánh giá nguyên nhân từng thay đổi; tự đánh dấu đã xem những thay đổi lành tính mà nó chắc chắn (độ tự tin ≥ 60%, không có lỗi sau đó), phần còn lại để bạn xem.',
+'no TypeSafe account':'chưa có tài khoản TypeSafe','Add a TypeSafe account to use the review':'Thêm tài khoản TypeSafe để dùng tính năng đánh giá',
+'paused after an error':'tạm dừng do lỗi',
 // docs tabs
 'Introduction':'Giới thiệu',
 };
@@ -1572,7 +1580,7 @@ const toFieldPattern=p=>p.replace(/\[\]/g,'.*').replace(/\{\*\}/g,'*');
 function viewDrift(v,tab){
   if(!['new','all','fields'].includes(tab))tab='new';
   const unacked=S.drift.filter(c=>!c.acked);
-  header('Drift',null,tab==='new'&&unacked.length?el('button',{class:'ghost',type:'button',onclick:()=>ackDrift([])},'Acknowledge all'):null);
+  header('Drift',null,reviewBar(),tab==='new'&&unacked.length?el('button',{class:'ghost',type:'button',onclick:()=>ackDrift([])},'Acknowledge all'):null);
   v.append(el('div',{class:'tabs',role:'tablist'},[['new','New',unacked.length],['all','All',0],['fields','Fields',0]].map(([k,n,c])=>
     el('a',{role:'tab',href:'#/drift/'+k,'aria-selected':String(k===tab),class:k===tab?'on':''},n,c?el('span',{class:'ct',text:String(c)}):null))));
   if(tab==='fields'){v.append(driftFields());return}
@@ -1589,7 +1597,9 @@ function viewDrift(v,tab){
         el('div',{class:'p',text:c.path}),
         el('div',{class:'faint small',style:'display:flex;gap:.4rem;align-items:center;flex-wrap:wrap'},avatar(c.provider,true),pname(c.provider),
           el('code',{class:'faint',text:c.endpoint+(c.event?' · '+c.event:'')}),
-          c.oldType||c.newType?el('span',{text:(c.oldType||'—')+' → '+(c.newType||'—')}):null)),
+          c.oldType||c.newType?el('span',{text:(c.oldType||'—')+' → '+(c.newType||'—')}):null,
+          c.client?el('span',{class:'badge',title:'The client that sent it'},c.client):null),
+        verdictChip(c)),
       el('div',{class:'acts'},
         blocked?el('span',{class:'badge',text:'blocked'}):null,
         canBlock?el('button',{class:'primary',type:'button',title:t('Add {0} to the blacklist of {1}',toFieldPattern(c.path),pname(c.provider)),
@@ -1597,6 +1607,37 @@ function viewDrift(v,tab){
         c.acked?null:el('button',{class:'ghost',type:'button',onclick:()=>ackDrift([c.id])},'Ack')),
       c.sample?el('details',{},el('summary',{class:'faint small'},'Sample'),el('pre',{text:c.sample})):null);
   })));
+}
+// The decision model's verdict on a change, and whether it acknowledged it.
+const CAUSES={new_client_usage:['A client started using it','ok'],data_noise:['Data, not API','ok'],
+  optional_field_flap:['Optional field','ok'],provider_format_change:['Provider changed format','err']};
+function verdictChip(c){
+  if(!c.verdict)return null;
+  const [label,tone]=CAUSES[c.verdict]||[c.verdict,''];
+  return el('div',{class:'small',style:'display:flex;gap:.4rem;align-items:center;margin-top:.3rem;flex-wrap:wrap',
+      title:t('Judged by Jev at {0}',(c.verdictAt||'').replace('T',' ').slice(0,16))},
+    el('span',{class:'badge '+tone},'Jev: '+tr(label)),
+    el('span',{class:'faint',text:t('confidence {0}',Math.round((c.verdictConf||0)*100)+'%')}),
+    c.autoAcked?el('span',{class:'badge'},tr('auto-acknowledged')):null);
+}
+// The review switch and state, at the top of the Drift page.
+function reviewBar(){
+  const box=el('span',{style:'display:inline-flex;gap:.6rem;align-items:center'});
+  const paint=st=>{
+    const sw=el('input',{type:'checkbox',checked:st.enabled,'aria-label':'Jev review'});
+    sw.onchange=async()=>{try{paint(await postJSON('/drift/review',{enabled:sw.checked}))}catch(e){alert(e.message)}};
+    const run=el('button',{class:'ghost',type:'button',disabled:!st.enabled||!st.ready,title:'Judge the waiting changes now'},'Review now');
+    run.onclick=async()=>{run.disabled=true;try{const r=await postJSON('/drift/review',{run:true});toast(t('Jev judged {0} change(s)',r.judged));await load()}catch(e){alert(e.message);run.disabled=false}};
+    box.replaceChildren(...[
+      el('label',{style:'display:inline-flex;align-items:center;gap:.45rem;cursor:pointer',
+        title:tr('Jev (TypeSafe) judges what caused each change; it acknowledges the benign ones it is sure of (confidence ≥ 60%, no failed answer since), and leaves the rest to you.')},
+        el('span',{class:'switch'},sw,el('span')),el('b',{style:'font-size:.85rem'},'Jev review')),
+      !st.ready?el('span',{class:'badge warn',title:'Add a TypeSafe account to use the review'},tr('no TypeSafe account')):
+        st.lastError?el('span',{class:'badge err',title:st.lastError},tr('paused after an error')):null,
+      run].filter(Boolean));
+  };
+  api('/drift/review').then(paint).catch(()=>{});
+  return box;
 }
 async function ackDrift(ids){
   try{await postJSON('/drift/ack',{ids});await load()}catch(e){alert(e.message)}
@@ -1816,6 +1857,8 @@ const DOCS=[
         dt('tr',dt('td','removed'),dt('td','A field that was nearly always there has been missing for 20 documents in a row.')),
         dt('tr',dt('td','returned'),dt('td','A removed field came back.')))),
       dt('p','Each endpoint learns quietly for its first three documents, then every change is recorded with a sample of the document it was seen in.'),
+      dt('h2','Review by Jev'),
+      dt('p','Each change is judged by TypeSafe\'s Jev decision model. intact tells it what it knows (the path lies in tool arguments or a tool schema, the field came and went today, a client started streaming or tools that hour, which client sent it, answers that failed since), and Jev chooses the cause: a client started using something, data rather than API, an optional field, or a provider changing its format. A benign cause with confidence of at least 60% and no failed answer since is acknowledged on its own; the rest waits here with the verdict. Chosen after a trial on 48 real changes: Jev matched a hand review on 44. Switch it with Jev review at the top.'),
       dt('h2','Acting on a change'),
       dt('p','On the Drift page, Block adds the field to the blacklist for that provider (the path ',dc('messages[].x'),' becomes the pattern ',dc('messages.*.x'),'), and Ack marks the change as reviewed.'),
       dt('h2','Reference captures'),
@@ -1916,6 +1959,8 @@ const DOCS_VI={
         dt('tr',dt('td','removed'),dt('td','Một field gần như lúc nào cũng có đã vắng mặt 20 document liên tiếp.')),
         dt('tr',dt('td','returned'),dt('td','Một field đã bị removed nay xuất hiện lại.')))),
       dt('p','Mỗi endpoint học lặng lẽ trong ba document đầu tiên, sau đó mọi thay đổi đều được ghi lại kèm một mẫu của document chứa nó.'),
+      dt('h2','Jev đánh giá'),
+      dt('p','Mỗi thay đổi được model ra quyết định Jev của TypeSafe đánh giá. intact cho Jev biết những gì nó biết chắc (đường dẫn nằm trong tham số hay schema của tool, trường vừa mất rồi xuất hiện lại trong ngày, có client bắt đầu dùng stream hoặc tool trong giờ đó, client nào đã gửi, số response lỗi sau đó), và Jev chọn nguyên nhân: client bắt đầu dùng, dữ liệu chứ không phải API, trường tuỳ chọn, hoặc provider đổi format. Nguyên nhân lành tính với độ tự tin từ 60% và không có lỗi sau đó thì tự được đánh dấu đã xem; phần còn lại nằm đây kèm kết luận. Quyết định này đưa ra sau khi thử trên 48 thay đổi thật: Jev khớp với đánh giá tay ở 44. Bật tắt bằng công tắc Jev đánh giá ở đầu trang.'),
       dt('h2','Xử lý một thay đổi'),
       dt('p','Trên trang Drift, Chặn thêm field vào blacklist cho nhà cung cấp đó (đường dẫn ',dc('messages[].x'),' trở thành pattern ',dc('messages.*.x'),'), còn Đã xem đánh dấu thay đổi là đã xem xét.'),
       dt('h2','Capture tham chiếu'),

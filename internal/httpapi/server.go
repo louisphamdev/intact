@@ -2,9 +2,11 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/louisphamdev/intact/internal/auth"
 	"github.com/louisphamdev/intact/internal/drift"
@@ -42,6 +44,9 @@ type api struct {
 	auto autoState
 	// arena holds the model leaderboard and its name index.
 	arena arenaState
+	// errs counts failed answers per provider; review is the drift review.
+	errs   errTrack
+	review reviewState
 }
 
 // New builds the route table with no authentication (loopback use and tests).
@@ -53,16 +58,23 @@ func New(s *store.Store, baseOverride map[string]string) http.Handler {
 // in with a password and a TOTP code to reach the dashboard, and a machine must
 // present the bearer token to use a provider.
 func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.Config) http.Handler {
+	_, h := newServer(s, baseOverride, authCfg)
+	return h
+}
+
+// newServer builds the api and its routes; tests reach the api through it.
+func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Config) (*api, http.Handler) {
 	a := &api{store: s, baseOverride: baseOverride, auth: authCfg, rrNext: map[string]rrCursor{},
 		cat: catalog{m: map[string]catalogEntry{}}, copilot: copilotCache{m: map[string]copilotToken{}},
 		sigs: sigStore{m: map[string]sigEntry{}}, drift: drift.New(s),
 		rate: rateHeaders{m: map[string]rateSnapshot{}}, quota: quotaCache{m: map[string]AccountQuota{}},
-		auto: autoState{running: map[string]*autoRun{}}}
+		auto: autoState{running: map[string]*autoRun{}}, errs: errTrack{m: map[string][]time.Time{}}}
 	go a.autoTestLoop()
 	a.loadDefs()
 	a.migrateCustomEndpoints()
 	a.loadArena()
 	go a.arenaLoop()
+	go a.reviewLoop()
 	mux := http.NewServeMux()
 	// One base URL: the model in the body picks the provider and its accounts.
 	mux.HandleFunc("GET /v1/models", a.requireToken(a.models))
@@ -81,6 +93,10 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	mux.HandleFunc("GET /api/drift/fields", a.requireToken(a.driftFields))
 	mux.HandleFunc("POST /api/drift/seed", a.requireToken(a.driftSeed))
 	mux.HandleFunc("GET /drift/changes", a.requireSession(a.driftChanges))
+	mux.HandleFunc("GET /drift/review", a.requireSession(a.driftReview))
+	mux.HandleFunc("POST /drift/review", a.requireSession(a.driftReview))
+	mux.HandleFunc("GET /api/drift/review", a.requireToken(a.driftReview))
+	mux.HandleFunc("POST /api/drift/review", a.requireToken(a.driftReview))
 	mux.HandleFunc("POST /drift/ack", a.requireSession(a.driftAck))
 	mux.HandleFunc("GET /drift/fields", a.requireSession(a.driftFields))
 	mux.HandleFunc("GET /api/filters", a.requireToken(a.listFilters))
@@ -155,7 +171,7 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	// "{$}" matches the root and nothing else. A bare "/" would be a catch-all
 	// and would answer every mistyped path with the dashboard.
 	mux.HandleFunc("GET /{$}", a.requireSession(a.dashboard))
-	return mux
+	return a, mux
 }
 
 // requireSession lets a request through when auth is off or the session cookie
@@ -184,7 +200,17 @@ func (a *api) requireToken(next http.HandlerFunc) http.HandlerFunc {
 		if b, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
 			tok = b
 		}
-		if a.auth == nil || (tok != "" && (a.auth.CheckAPIToken("Bearer "+tok) || a.store.ValidAPIKey(tok))) {
+		// The caller's name (its key's, or "env" for the environment token)
+		// travels with the request, so drift can learn each client apart.
+		if tok != "" && a.auth != nil && a.auth.CheckAPIToken("Bearer "+tok) {
+			next(w, r.WithContext(context.WithValue(r.Context(), clientKey{}, "env")))
+			return
+		}
+		if name, ok := a.store.APIKeyName(tok); ok {
+			next(w, r.WithContext(context.WithValue(r.Context(), clientKey{}, name)))
+			return
+		}
+		if a.auth == nil {
 			next(w, r)
 			return
 		}
@@ -201,4 +227,16 @@ func (a *api) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(b)
+}
+
+// clientKey carries the calling client's name in a request's context.
+type clientKey struct{}
+
+// clientOf names who made a request: its API key's name, "env", or
+// "internal" for intact's own calls (tests, reviews) and an open server.
+func clientOf(r *http.Request) string {
+	if n, _ := r.Context().Value(clientKey{}).(string); n != "" {
+		return n
+	}
+	return "internal"
 }

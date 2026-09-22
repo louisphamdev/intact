@@ -99,6 +99,8 @@ its `scores` per board: `rating`, `rank`, `votes`, `tier`) and `arenaMeta`.
 | `GET /api/drift/changes` | `?provider=&direction=request\|response&unacked=1&since=<id>&limit=` |
 | `POST /api/drift/ack` | `{"ids":[…]}`; no ids acknowledges every change. |
 | `GET /api/drift/fields` | `?provider=&direction=&endpoint=`: learned paths, types and counts. |
+| `GET /api/drift/review` | The Jev review's state: `enabled`, `ready` (a TypeSafe account exists), `lastError`. |
+| `POST /api/drift/review` | `{"enabled":bool}` switches it; `{"run":true}` judges the waiting changes now. |
 | `POST /api/drift/seed` | `{"direction","provider","endpoint","sse":bool,"documents":[…]}`: learn reference captures, recording no change. |
 
 ### Quota and usage
@@ -131,7 +133,8 @@ claude mcp add --transport http intact https://intact.example/mcp \
 | `list_provider_defs`, `put_provider_def`, `delete_provider_def` | Declared providers. |
 | `get_model_rankings` | LMArena rating, rank and tier of a provider's models on each board. |
 | `list_filters`, `add_filter`, `update_filter`, `delete_filter` | The blacklist. |
-| `list_drift_changes`, `ack_drift_changes`, `list_drift_fields` | Drift. |
+| `list_drift_changes`, `ack_drift_changes`, `list_drift_fields` | Drift. Changes carry `client`, `verdict`, `verdictConf`, `autoAcked`. |
+| `drift_review` | The Jev review: state, switch, run now. |
 | `get_quota` | Quota of every active account. |
 | `get_usage` | Daily token totals, optionally for one day. |
 

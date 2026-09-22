@@ -126,3 +126,15 @@ func (s *Store) ValidAPIKey(k string) bool {
 	var one int
 	return s.DB.QueryRow(`SELECT 1 FROM api_keys WHERE key = ? AND enabled = 1`, k).Scan(&one) == nil
 }
+
+// APIKeyName returns the name of an enabled key, for telling clients apart.
+func (s *Store) APIKeyName(k string) (string, bool) {
+	if k == "" {
+		return "", false
+	}
+	var name string
+	if s.DB.QueryRow(`SELECT name FROM api_keys WHERE key = ? AND enabled = 1`, k).Scan(&name) != nil {
+		return "", false
+	}
+	return name, true
+}

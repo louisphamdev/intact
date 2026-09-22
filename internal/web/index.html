@@ -313,6 +313,10 @@ async function api(path,opts){
 }
 const postJSON=(path,body)=>api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 
+// A form sends once: a second submit while the first is in flight is dropped.
+function guard(f){if(f.dataset.busy)return true;f.dataset.busy='1';f.querySelector('button[type=submit]').disabled=true;return false}
+function release(f){delete f.dataset.busy;f.querySelector('button[type=submit]').disabled=false}
+
 // ---- modals
 function openModal(id){$(id).hidden=false;const f=$(id).querySelector('input:not([type=hidden]):not(:disabled),select');if(f)f.focus()}
 function closeModal(id){$(id).hidden=true}
@@ -509,6 +513,7 @@ function addAccount(p){
 $('aId').oninput=()=>{$('aProv').value=$('aId').value.trim().toLowerCase()};
 $('aForm').onsubmit=async e=>{
   e.preventDefault();
+  if(guard($('aForm')))return;
   try{
     const fd=new FormData($('aForm'));
     if(!$('aKeyRow').hidden&&!$('aKey').value)throw new Error('The API key is required.');
@@ -520,6 +525,7 @@ $('aForm').onsubmit=async e=>{
     const np=$('aProv').value;delete modelCache[np];closeModal('aModal');toast('Connection added');await load();
     if(!location.hash.endsWith('/'+np))location.hash='#/providers/'+encodeURIComponent(np);
   }catch(err){$('aErr').textContent=err.message}
+  finally{release($('aForm'))}
 };
 async function deleteAccount(a){
   if(!confirm('Delete "'+(a.label||a.id)+'"?'))return;
@@ -557,16 +563,21 @@ function createKey(){
   $('kBody').replaceChildren(el('label',{class:'f'},'Name',name),err);
   const go=el('button',{class:'primary',type:'button'},'Create');
   $('kFoot').replaceChildren(el('button',{class:'ghost',type:'button','data-close':true},'Cancel'),go);
+  let busy=false;
   const submit=async()=>{
+    if(busy)return;
+    busy=true;go.disabled=true;
     try{
       const k=await postJSON('/keys',{name:name.value.trim()});
       $('kTitle').textContent='Key created';
       $('kBody').replaceChildren(copyLine(k.key));
       $('kFoot').replaceChildren(el('button',{class:'primary',type:'button','data-close':true},'Done'));
       await load();
-    }catch(e){err.textContent=e.message}
+    }catch(e){err.textContent=e.message;busy=false;go.disabled=false}
   };
-  go.onclick=submit;name.onkeydown=e=>{if(e.key==='Enter')submit()};
+  // An input method sends its own Enter while composing (Vietnamese Telex, …);
+  // only a plain Enter submits.
+  go.onclick=submit;name.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing&&e.keyCode!==229)submit()};
   openModal('kModal');
 }
 
@@ -614,10 +625,12 @@ function editFilter(f){
 }
 $('fForm').onsubmit=async e=>{
   e.preventDefault();
+  if(guard($('fForm')))return;
   try{
     await postJSON('/filters',{...F,provider:$('fProv').value,kind:$('fKind').value,pattern:$('fPat').value.trim(),note:$('fNote').value.trim()});
     closeModal('fModal');toast('Filter saved');await load();
   }catch(err){$('fErr').textContent=err.message}
+  finally{release($('fForm'))}
 };
 
 // ---- Usage

@@ -311,7 +311,7 @@ function svg(paths,cls){
   for(const d of paths){const p=document.createElementNS(ns,'path');p.setAttribute('d',d);s.append(p)}
   return s;
 }
-const ICON={copy:['M9 9h11v11H9z','M5 15H4V4h11v1'],up:['m6 15 6-6 6 6'],down:['m6 9 6 6 6-6'],x:['M6 6l12 12M18 6 6 18'],
+const ICON={copy:['M9 9h11v11H9z','M5 15H4V4h11v1'],fetch:['M20 11a8 8 0 0 0-14.3-4.9L4 8','M4 4v4h4','M4 13a8 8 0 0 0 14.3 4.9L20 16','M20 20v-4h-4'],up:['m6 15 6-6 6 6'],down:['m6 9 6 6 6-6'],x:['M6 6l12 12M18 6 6 18'],
   trash:['M4 7h16','M10 11v6M14 11v6','M6 7l1 13h10l1-13','M9 7V4h6v3'],edit:['M4 20h4L19 9l-4-4L4 16v4Z'],
   plus:['M12 5v14M5 12h14'],back:['M19 12H5m0 0 6-6m-6 6 6 6'],layers:['M12 3 3 8l9 5 9-5-9-5Z','m3 13 9 5 9-5'],
   search:['M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Z','m20 20-3.5-3.5']};
@@ -748,8 +748,18 @@ function modelTable(p){
       st.policy.autoTest?'':'New models start on'+(st.policy.onlyFree?' when free':'')+'.';
   };
   let poll=null;
+  const fetchBtn=el('button',{class:'primary',type:'button',style:'min-height:30px;font-size:.8rem',title:'Fetch the model list from the provider now',onclick:async()=>{
+    const before=new Set(st.rows.map(r=>r.model));
+    fetchBtn.disabled=true;fetchBtn.lastChild.textContent='Fetching…';
+    try{await load(true);
+      if(!st.ok){toast('Fetch failed; nothing was removed');return}
+      const after=new Set(st.rows.map(r=>r.model));
+      const added=[...after].filter(m=>!before.has(m)).length,gone=[...before].filter(m=>!after.has(m)).length;
+      toast('Fetched '+after.size+' models'+(added?' · '+added+' new':'')+(gone?' · '+gone+' removed':'')+(!added&&!gone?' · no change':''));
+    }finally{fetchBtn.disabled=false;fetchBtn.lastChild.textContent='Fetch now'}
+  }},svg(ICON.fetch),el('span',{},'Fetch now'));
   const load=async refresh=>{
-    if(!st.rows.length||refresh)body.replaceChildren(el('tr',{},el('td',{colspan:5,class:'empty',text:refresh?'Fetching…':'Loading…'})));
+    if(!st.rows.length)body.replaceChildren(el('tr',{},el('td',{colspan:5,class:'empty',text:refresh?'Fetching…':'Loading…'})));
     try{const d=await api('/providers/'+p+'/model-table'+(refresh?'?refresh=1':''));
       const testing=new Set(st.rows.filter(r=>r.testing).map(r=>r.model));
       st.rows=d.models;st.ok=d.ok;st.fetchedAt=d.fetchedAt;st.policy=d.policy||{};st.running=d.running;
@@ -764,7 +774,7 @@ function modelTable(p){
   const chip=(label,val)=>el('button',{class:'chip',type:'button',onclick:()=>{q.value=val;st.q=val;render()}},label);
   card.append(
     el('div',{class:'cardh'},el('h2',{class:'grow'},'Models'),counts,
-      el('button',{class:'ghost',type:'button',style:'min-height:30px;font-size:.8rem',title:'Fetch the model list from the provider now',onclick:()=>load(true)},'Refresh list')),
+      fetchBtn),
     polBox,
     el('div',{style:'padding:.8rem 1.25rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)'},q,chip('free','free'),chip('clear',''),seg),
     bar,
@@ -1191,7 +1201,7 @@ const DOCS=[
     dt('ul',
       dt('li',dt('b','On'),' — a model switched off leaves ',dc('/v1/models'),', is not picked for a bare model id, and a request naming it is refused.'),
       dt('li',dt('b','Test'),' — sends a short chat request through the same ',dc('/v1'),' path a client uses and shows the answer time or the error. A model that is off can still be tested.'),
-      dt('li',dt('b','Refresh list'),' — fetches the list from the provider now. intact also fetches every provider\'s list by itself each hour (a failed fetch is retried within ten minutes), so new models appear and dropped ones go without a click.')),
+      dt('li',dt('b','Fetch now'),' — fetches the list from the provider now. intact also fetches every provider\'s list by itself each hour (a failed fetch is retried within ten minutes), so new models appear and dropped ones go without a click.')),
     dt('h2','Filtering by name'),
     el('table',{},dt('thead',dt('tr',dt('th','Filter'),dt('th','Shows'))),dt('tbody',
       dt('tr',dt('td',dc('free')),dt('td','names containing free')),

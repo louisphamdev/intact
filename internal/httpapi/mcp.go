@@ -1,11 +1,13 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"sort"
 	"strings"
 	"time"
@@ -270,6 +272,40 @@ var mcpTools = []mcpTool{
 			n, err := a.store.AckShapeChanges(ids)
 			return map[string]any{"acked": n}, err
 		}},
+	{Name: "error_review", Description: "The error review: a chat model (such as antigravity/gemini-3.8-flash) reads each recurring group of refused requests, fake 429s and sign-in errors, and proposes blacklisting what the provider refuses, switching off a model the provider dropped or an account whose sign-in is revoked, or leaving it. intact replays the failing request to check a rule before keeping it. Without arguments, its state. enabled needs a model. run judges the groups due now.",
+		InputSchema: schema(map[string]any{"enabled": pBool, "model": pString, "minErrors": map[string]any{"type": "integer"}, "replay": pBool, "run": pBool}),
+		run: func(a *api, args map[string]any) (any, error) {
+			if v, ok := args["minErrors"].(float64); ok {
+				args["minErrors"] = int(v)
+			}
+			return callHandler(a.errorReview, http.MethodPost, nil, args)
+		}},
+	{Name: "list_error_verdicts", Description: "The error review's verdicts, newest first: the group (provider and signature), the action, whether it was applied and checked by a replay, the rule, model or account acted on, and why.",
+		InputSchema: schema(map[string]any{}),
+		run: func(a *api, args map[string]any) (any, error) {
+			return callHandler(a.errorVerdicts, http.MethodGet, nil, nil)
+		}},
+	{Name: "list_notify_channels", Description: "The alert channels (secrets masked), the channel types with their fields, and the events a channel can take.",
+		InputSchema: schema(map[string]any{}),
+		run: func(a *api, args map[string]any) (any, error) {
+			return callHandler(a.notifyInfo, http.MethodGet, nil, nil)
+		}},
+	{Name: "put_notify_channel", Description: "Create an alert channel, or replace one with its id. type is telegram (config botToken, chatId, threadId for a forum topic, link) or webhook (config url, secret, link). events: the events it takes, empty for all. A secret left empty keeps the stored one.",
+		InputSchema: schema(map[string]any{"id": pString, "name": pString, "type": pString, "enabled": pBool,
+			"events": map[string]any{"type": "array", "items": pString}, "config": map[string]any{"type": "object"}}, "type"),
+		run: func(a *api, args map[string]any) (any, error) {
+			return callHandler(a.putChannel, http.MethodPost, map[string]string{"id": argStr(args, "id")}, args)
+		}},
+	{Name: "test_notify_channel", Description: "Send a test alert to one channel.",
+		InputSchema: schema(map[string]any{"id": pString}, "id"),
+		run: func(a *api, args map[string]any) (any, error) {
+			return callHandler(a.testChannel, http.MethodPost, map[string]string{"id": argStr(args, "id")}, nil)
+		}},
+	{Name: "delete_notify_channel", Description: "Delete an alert channel.",
+		InputSchema: schema(map[string]any{"id": pString}, "id"),
+		run: func(a *api, args map[string]any) (any, error) {
+			return callHandler(a.deleteChannel, http.MethodDelete, map[string]string{"id": argStr(args, "id")}, nil)
+		}},
 	{Name: "drift_review", Description: "The drift review: a System One decision model (such as typesafe/jev-latest) judges each structure change's cause and acknowledges the benign ones it is sure of; a resolver chat model (such as antigravity/gemini-3.8-flash), when set, settles every other change on its own: acknowledge, or blacklist a request field a provider refuses. Without arguments, its state. enabled needs a decisionModel. run judges the waiting changes now.",
 		InputSchema: schema(map[string]any{"enabled": pBool, "decisionModel": pString, "resolverModel": pString, "ackConfidence": map[string]any{"type": "number"}, "run": pBool}),
 		run: func(a *api, args map[string]any) (any, error) {
@@ -491,3 +527,29 @@ func (a *api) mcpGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func list(v any) []any { l, _ := v.([]any); return l }
+
+// callHandler runs a dashboard handler for an MCP tool and returns its JSON,
+// or its error message as an error.
+func callHandler(h http.HandlerFunc, method string, vals map[string]string, body any) (any, error) {
+	raw, _ := json.Marshal(body)
+	if body == nil {
+		raw = nil
+	}
+	r := httptest.NewRequest(method, "/", bytes.NewReader(raw))
+	for k, v := range vals {
+		r.SetPathValue(k, v)
+	}
+	rec := httptest.NewRecorder()
+	h(rec, r)
+	var out any
+	json.Unmarshal(rec.Body.Bytes(), &out)
+	if rec.Code >= 400 {
+		if m, ok := out.(map[string]any); ok {
+			if e, ok := m["error"].(string); ok {
+				return nil, errors.New(e)
+			}
+		}
+		return nil, fmt.Errorf("status %d", rec.Code)
+	}
+	return out, nil
+}

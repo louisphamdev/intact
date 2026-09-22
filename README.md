@@ -57,7 +57,15 @@ tools) and wants to use them all from any client.
   - A 429 is marked a real limit or a fake one: a fake one comes back at once
     while the account's quota is left.
 
+  - **Auto-fix errors**: a configured chat model proposes a fix for each
+    recurring group (blacklist what the provider refuses, switch off a
+    dropped model or a revoked account). intact replays the failing request
+    to prove a rule before keeping it.
+
   [Errors](docs/errors.md)
+- **Alerts.** intact tells the channels you declare what it fixed on its own
+  and what it could not fix: a Telegram chat or topic, or a webhook.
+  [Alerts](docs/alerts.md)
 - **Quota and usage.** Quota is read from each provider (rolling windows, weekly
   pools, per-model shares). Token usage is counted per account, model and day.
   [Quota and usage](docs/quota-and-usage.md)
@@ -100,7 +108,8 @@ and Cloudflare Tunnel deployment.
 | [Models](docs/models.md) | The model table, fetching, switches, tests, auto test, only free, thinking |
 | [Blacklist](docs/blacklist.md) | Request filters: kinds, scope, seeded rules |
 | [Drift](docs/drift.md) | Structure learning and change alerts |
-| [Errors](docs/errors.md) | The error log: what is kept, classes, fake 429s, reading |
+| [Errors](docs/errors.md) | The error log: what is kept, classes, fake 429s, the automatic review |
+| [Alerts](docs/alerts.md) | Alert channels (Telegram, webhook) and events |
 | [Quota and usage](docs/quota-and-usage.md) | Quota sources, the Quota page, usage counting |
 | [API](docs/api.md) | Every HTTP endpoint and MCP tool |
 | [Security](docs/security.md) | Sign-in, API keys, where credentials live |

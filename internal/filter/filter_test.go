@@ -72,3 +72,20 @@ func TestCompileRejectsBadRules(t *testing.T) {
 		t.Errorf("header not canonical: %v", Headers([]Rule{r}))
 	}
 }
+
+// Every shape a provider receives: the Antigravity envelope (Gemini inside
+// "request"), Gemini, and Responses.
+func TestSystemLinesAndSchemasInEveryShape(t *testing.T) {
+	re := `^x-anthropic-billing-header:.*$`
+	for name, in := range map[string]string{
+		"antigravity": `{"model":"m","project":"p","request":{"systemInstruction":{"role":"user","parts":[{"text":"x-anthropic-billing-header: cc=1\nBe kind"}]},"contents":[{"role":"user","parts":[{"text":"x-anthropic-billing-header: keep"}]}],"tools":[{"functionDeclarations":[{"name":"f","parameters":{"type":"object","$id":"x","properties":{"a":{"type":"string"}}}}]}]}}`,
+		"gemini":      `{"systemInstruction":{"parts":[{"text":"x-anthropic-billing-header: cc=1\nBe kind"}]},"contents":[{"role":"user","parts":[{"text":"x-anthropic-billing-header: keep"}]}],"tools":[{"functionDeclarations":[{"name":"f","parametersJsonSchema":{"$id":"x"}}]}]}`,
+		"responses":   `{"instructions":"x-anthropic-billing-header: cc=1\nBe kind","input":[{"role":"developer","content":[{"type":"input_text","text":"x-anthropic-billing-header: z"}]},{"role":"user","content":"x-anthropic-billing-header: keep"}],"tools":[{"type":"function","name":"f","parameters":{"$id":"x"}}]}`,
+	} {
+		out, changed := Apply([]byte(in), rules(t, System, re, Schema, "$id"))
+		s := string(out)
+		if !changed || strings.Count(s, "billing-header") != 1 || !strings.Contains(s, "keep") || !strings.Contains(s, "Be kind") || strings.Contains(s, "$id") {
+			t.Errorf("%s: %s", name, s)
+		}
+	}
+}

@@ -258,7 +258,8 @@ func (t *respTap) bytes() []byte {
 func writeError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	w.Write([]byte(`{"error":"` + msg + `"}`))
+	b, _ := json.Marshal(map[string]string{"error": msg})
+	w.Write(b)
 }
 
 func (a *api) connection(id string) (store.Connection, error) {

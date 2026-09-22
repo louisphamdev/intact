@@ -11,13 +11,17 @@ import (
 	"github.com/louisphamdev/intact/internal/store"
 )
 
-// keysServer answers every call and records which key made it; keys in busy
-// are refused with 429.
+// keysServer answers every call and records which key made each chat call
+// (not the quota reads that follow a 429); keys in busy are refused with 429.
 func keysServer(busy map[string]bool) (*httptest.Server, func() []string) {
 	var mu sync.Mutex
 	var seen []string
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		k := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if r.Method != http.MethodPost {
+			w.Write([]byte(`{}`))
+			return
+		}
 		mu.Lock()
 		seen = append(seen, k)
 		mu.Unlock()

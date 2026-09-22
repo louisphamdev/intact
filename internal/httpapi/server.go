@@ -45,6 +45,9 @@ type api struct {
 	arena arenaState
 	// review is the drift review.
 	review reviewState
+	// notes throttles alerts; errReview is the error review's state.
+	notes     notifier
+	errReview reviewState
 }
 
 // New builds the route table with no authentication (loopback use and tests).
@@ -73,6 +76,7 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	a.loadArena()
 	go a.arenaLoop()
 	go a.reviewLoop()
+	go a.errorReviewLoop()
 	mux := http.NewServeMux()
 	// One base URL: the model in the body picks the provider and its accounts.
 	mux.HandleFunc("GET /v1/models", a.requireToken(a.models))
@@ -90,6 +94,20 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	mux.HandleFunc("POST /api/drift/ack", a.requireToken(a.driftAck))
 	mux.HandleFunc("GET /api/drift/fields", a.requireToken(a.driftFields))
 	mux.HandleFunc("POST /api/drift/seed", a.requireToken(a.driftSeed))
+	for _, pre := range []string{"", "/api"} {
+		wrap := a.requireSession
+		if pre != "" {
+			wrap = a.requireToken
+		}
+		mux.HandleFunc("GET "+pre+"/notify", wrap(a.notifyInfo))
+		mux.HandleFunc("POST "+pre+"/notify/channels", wrap(a.putChannel))
+		mux.HandleFunc("PUT "+pre+"/notify/channels/{id}", wrap(a.putChannel))
+		mux.HandleFunc("DELETE "+pre+"/notify/channels/{id}", wrap(a.deleteChannel))
+		mux.HandleFunc("POST "+pre+"/notify/channels/{id}/test", wrap(a.testChannel))
+		mux.HandleFunc("GET "+pre+"/errors/review", wrap(a.errorReview))
+		mux.HandleFunc("POST "+pre+"/errors/review", wrap(a.errorReview))
+		mux.HandleFunc("GET "+pre+"/errors/verdicts", wrap(a.errorVerdicts))
+	}
 	mux.HandleFunc("GET /errors", a.requireSession(a.errorsList))
 	mux.HandleFunc("GET /errors/stats", a.requireSession(a.errorStats))
 	mux.HandleFunc("GET /errors/{id}", a.requireSession(a.errorGet))

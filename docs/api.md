@@ -109,7 +109,18 @@ its `scores` per board: `rating`, `rank`, `votes`, `tier`) and `arenaMeta`.
 | --- | --- |
 | `GET /api/errors` | `?provider=&class=&status=&signature=&since=<RFC 3339>&limit=`: provider errors, newest first, without bodies. |
 | `GET /api/errors/{id}` | One error with its headers, answer and request. |
+| `GET /api/errors/review`, `POST /api/errors/review` | The error review: `{"enabled","model","minErrors","replay"}`; `{"run":true}` judges the groups due now. |
+| `GET /api/errors/verdicts` | The review's verdicts, newest first. |
 | `GET /api/errors/stats` | `?provider=&since=`: errors grouped by signature, with count, classes, models, median latency, first and last time. |
+
+### Alerts
+
+| Route | Meaning |
+| --- | --- |
+| `GET /api/notify` | Channels (secrets masked), channel types and their fields, events. |
+| `POST /api/notify/channels`, `PUT /api/notify/channels/{id}` | Create or replace `{"name","type","enabled","events","config"}`. |
+| `DELETE /api/notify/channels/{id}` | Delete. |
+| `POST /api/notify/channels/{id}/test` | Send a test alert. |
 
 ### Quota and usage
 
@@ -143,6 +154,8 @@ claude mcp add --transport http intact https://intact.example/mcp \
 | `list_filters`, `add_filter`, `update_filter`, `delete_filter` | The blacklist. |
 | `list_drift_changes`, `ack_drift_changes`, `list_drift_fields` | Drift. Changes carry `client`, `verdict`, `verdictConf`, `verdictBy`, `verdictNote`, `resolved`, `autoAcked`. |
 | `list_errors`, `get_error`, `error_stats` | The [error log](errors.md). |
+| `error_review`, `list_error_verdicts` | The [error review](errors.md#automatic-review). |
+| `list_notify_channels`, `put_notify_channel`, `test_notify_channel`, `delete_notify_channel` | [Alerts](alerts.md). |
 | `drift_review` | The automatic review: state, models, switch, run now. |
 | `get_quota` | Quota of every active account. |
 | `get_usage` | Daily token totals, optionally for one day. |
@@ -167,7 +180,8 @@ The dashboard calls these routes. They mirror the management API.
 | `GET/POST /keys`, `POST /keys/{id}/reveal`, `/active`, `/delete` | API keys. |
 | `GET/POST /filters`, `POST /filters/{id}/delete` | The blacklist. |
 | `GET /drift/changes`, `POST /drift/ack`, `GET /drift/fields` | Drift. |
-| `GET /errors`, `GET /errors/stats`, `GET /errors/{id}` | Errors. |
+| `GET /errors`, `GET /errors/stats`, `GET /errors/{id}`, `/errors/review`, `/errors/verdicts` | Errors. |
+| `/notify`, `/notify/channels…` | Alerts. |
 | `GET /quota`, `GET /usage` | Quota and usage. |
 | `GET /rankings`, `POST /rankings/refresh`, `POST /rankings/alias` | Rankings, as the API. |
 | `GET/POST /provider-defs`, `GET /provider-defs/{id}`, `POST /provider-defs/{id}/delete` | Declared providers, as the API. |

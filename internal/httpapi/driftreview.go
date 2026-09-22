@@ -269,7 +269,7 @@ func (a *api) resolveChange(ctx context.Context, cfg ReviewConfig, c store.Shape
 	desc := reviewDescription(c, facts)
 	desc["decision_model"] = map[string]any{"leaning": jev.Choice, "confidence": jevConf, "probabilities": jev.Probabilities}
 	in, _ := json.Marshal(desc)
-	body, _ := json.Marshal(map[string]any{"model": cfg.ResolverModel, "max_tokens": 1024,
+	body, _ := json.Marshal(map[string]any{"model": cfg.ResolverModel, "max_tokens": reviewMaxTokens,
 		"messages": []any{map[string]any{"role": "system", "content": resolverPrompt}, map[string]any{"role": "user", "content": string(in)}}})
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
@@ -339,6 +339,9 @@ func (a *api) autoBlacklist(c store.ShapeChange, facts map[string]any) string {
 		Note: "drift review: " + c.Kind + " on " + c.Endpoint, Enabled: true}); err != nil {
 		return "blacklist failed: " + err.Error()
 	}
+	a.notify(EventDriftAction, "", 0, notifyMsg{Title: "Drift: blacklisted " + pattern,
+		Lines: []string{"Provider: " + pnameOf(c.Provider), "Field " + c.Kind + " on " + c.Endpoint,
+			fmt.Sprintf("Refused requests since: %d", facts["failed_answers_since"].(int))}, Path: "#/drift/all"})
 	return "blacklisted " + pattern
 }
 
@@ -395,6 +398,8 @@ func (a *api) reviewLoop() {
 			a.drift.Flush()
 			if n, err := a.reviewPending(context.Background()); err != nil {
 				log.Printf("drift review: %v", err)
+				a.notify(EventReviewPaused, "paused|drift", 6*time.Hour, notifyMsg{Title: "Drift review paused for 10 minutes",
+					Lines: []string{truncate(err.Error(), 300)}, Path: "#/drift"})
 				a.review.mu.Lock()
 				a.review.pauseTill, a.review.lastError = time.Now().Add(reviewBackoff), err.Error()
 				a.review.mu.Unlock()

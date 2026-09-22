@@ -18,6 +18,9 @@ func (a *api) secretFor(ctx context.Context, connID string) (string, error) {
 		tok, newRT, exp, rerr := oauth.Refresh(ctx, creds.TokenURL, creds.ClientID, creds.ClientSecret, creds.RefreshToken)
 		if rerr != nil {
 			log.Printf("refresh oauth for connection %s: %v", connID, rerr)
+			go a.notify(EventAccountAuth, "auth|"+connID, 6*time.Hour, notifyMsg{Title: "An account's sign-in failed to renew",
+				Lines: []string{"Account: " + connID, "Error: " + truncate(rerr.Error(), 200), "Sign in again on the provider's page."},
+				Path:  "#/providers"})
 		} else if uerr := a.store.UpdateAfterRefresh(connID, tok, newRT, exp.UTC().Format(time.RFC3339)); uerr != nil {
 			log.Printf("store refreshed token for connection %s: %v", connID, uerr)
 		} else {

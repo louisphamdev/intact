@@ -7,9 +7,16 @@
 //   - field: a dot path into the JSON body; "*" matches any key or array item.
 //     "thinking", "messages.*.cache_control", "tools.*.function.strict".
 //   - schema: a key removed at every depth of each tool's JSON schema (OpenAI
-//     tools[].function.parameters, Anthropic tools[].input_schema). "$id".
+//     tools[].function.parameters, Anthropic tools[].input_schema, Responses
+//     tools[].parameters, Gemini tools[].functionDeclarations[].parameters).
+//     "$id".
 //   - system: a regular expression; matching lines are removed from the system
-//     prompt (Anthropic "system", OpenAI system and developer messages).
+//     prompt (Anthropic "system", OpenAI system and developer messages,
+//     Responses "instructions" and system/developer input, Gemini
+//     "systemInstruction").
+//
+// Rules run on the exact body sent, so Antigravity's envelope is looked into:
+// its Gemini request is under "request".
 //   - header: a request header that is not sent. "anthropic-beta".
 package filter
 
@@ -162,18 +169,43 @@ func dropPath(v any, path []string) bool {
 	return false
 }
 
-// toolSchemas returns the JSON schema of each tool, in either shape.
+// bodies returns the request object and, for Antigravity's envelope, the
+// Gemini request inside it ("request").
+func bodies(m map[string]any) []map[string]any {
+	out := []map[string]any{m}
+	if in, ok := m["request"].(map[string]any); ok {
+		out = append(out, in)
+	}
+	return out
+}
+
+// toolSchemas returns the JSON schema of each tool, in every shape: Anthropic
+// input_schema, OpenAI function.parameters, Responses parameters, Gemini
+// functionDeclarations[].parameters (or parametersJsonSchema).
 func toolSchemas(m map[string]any) []any {
 	var out []any
-	tools, _ := m["tools"].([]any)
-	for _, t := range tools {
-		tm, _ := t.(map[string]any)
-		if s, ok := tm["input_schema"]; ok {
-			out = append(out, s)
-		}
-		if fn, ok := tm["function"].(map[string]any); ok {
-			if s, ok := fn["parameters"]; ok {
-				out = append(out, s)
+	for _, b := range bodies(m) {
+		tools, _ := b["tools"].([]any)
+		for _, t := range tools {
+			tm, _ := t.(map[string]any)
+			for _, k := range []string{"input_schema", "parameters"} {
+				if s, ok := tm[k]; ok {
+					out = append(out, s)
+				}
+			}
+			if fn, ok := tm["function"].(map[string]any); ok {
+				if s, ok := fn["parameters"]; ok {
+					out = append(out, s)
+				}
+			}
+			decls, _ := tm["functionDeclarations"].([]any)
+			for _, d := range decls {
+				dm, _ := d.(map[string]any)
+				for _, k := range []string{"parameters", "parametersJsonSchema"} {
+					if s, ok := dm[k]; ok {
+						out = append(out, s)
+					}
+				}
 			}
 		}
 	}
@@ -245,13 +277,25 @@ func cleanSystem(m map[string]any, re *regexp.Regexp) bool {
 		}
 		return c
 	}
-	if s, ok := m["system"]; ok {
-		m["system"] = cleanContent(s)
-	}
-	msgs, _ := m["messages"].([]any)
-	for _, x := range msgs {
-		if mm, ok := x.(map[string]any); ok && (mm["role"] == "system" || mm["role"] == "developer") {
-			mm["content"] = cleanContent(mm["content"])
+	for _, b := range bodies(m) {
+		// Anthropic system; Responses instructions.
+		for _, k := range []string{"system", "instructions"} {
+			if s, ok := b[k]; ok {
+				b[k] = cleanContent(s)
+			}
+		}
+		// OpenAI messages; Responses input items.
+		for _, k := range []string{"messages", "input"} {
+			msgs, _ := b[k].([]any)
+			for _, x := range msgs {
+				if mm, ok := x.(map[string]any); ok && (mm["role"] == "system" || mm["role"] == "developer") {
+					mm["content"] = cleanContent(mm["content"])
+				}
+			}
+		}
+		// Gemini systemInstruction, also inside Antigravity's envelope.
+		if si, ok := b["systemInstruction"].(map[string]any); ok {
+			si["parts"] = cleanContent(si["parts"])
 		}
 	}
 	return changed

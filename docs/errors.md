@@ -61,6 +61,71 @@ cached for a while, so a burst of 429s does not become a burst of quota calls.
 A fake 429 is a refusal. It counts as one for the [drift review](drift.md#automatic-review),
 so a field that started such refusals can be blacklisted.
 
+## Automatic review
+
+The error review settles recurring errors with no person involved. It is set
+under **Errors → ⚙**, at `POST /api/errors/review`, or with the MCP tool
+`error_review`:
+
+| Setting | Meaning |
+| --- | --- |
+| **Model** | Any chat model intact serves, such as `antigravity/gemini-3.8-flash`. **Required**: the *Auto-fix errors* switch stays off without it. |
+| **Errors before a review** | A group is reviewed once it has this many errors in a day. 3 by default. |
+| **Replay to check** | Send the failing request again to check a fix. On by default. Each check is one provider call. |
+
+Only these classes are reviewed:
+- `rejected`;
+- `fake_rate_limit`;
+- `auth`.
+
+Real limits, timeouts, network and server errors have no fix on intact's
+side. They only raise an alert when they come in a burst.
+
+For each group that is due, the review goes through these steps:
+1. **Replay first.** It sends the newest failing request again, through the
+   same account, exactly as it was sent. The model is not asked when:
+   - **the request succeeds now**: the group is closed as a passing failure;
+   - **the blacklist in place already removes the cause** and the request
+     then succeeds: the group is closed as fixed already.
+2. **The model proposes** one action. It receives:
+   - the group: status, classes, count, models, latency;
+   - the newest failing request, with long text shortened;
+   - the answer and its headers;
+   - the request fields drift saw appear for that provider before the errors;
+   - the rules already in place;
+   - the result of the replay.
+3. **intact checks the action before acting:**
+
+   | Action | Carried out only when |
+   | --- | --- |
+   | `blacklist` (up to 3 candidate rules, tried in order) | The rule removes something from the failing request, and the request replayed without it is accepted. When the request cannot be replayed (a body over 64 KB, the account gone), the rule's name must appear in the provider's message. A rule never strips what a request needs (`model`, `messages`, `contents`, `tools`, the whole system prompt, the auth headers), and a system-line expression must not match every line. |
+   | `disable_model` | Every error of the group is on that one model, the status is 400, 403 or 404, the provider's message speaks of the model, and the model is in the model table. A level variant turns off its base model. |
+   | `disable_account` | One account has enough sign-in errors, over ten minutes or more. |
+   | `ignore` | Always: nothing is changed. |
+
+4. The verdict is kept, with:
+   - the model and its reason;
+   - what intact checked;
+   - whether a replay proved it.
+
+   It is shown in the group's **Verdict** column and on the **Verdicts**
+   tab.
+
+When a group comes back:
+- **After an applied fix:** it is reviewed again as soon as it has enough new
+  errors.
+- **After it was left alone, or the fix was refused:** it is reviewed again a
+  day later.
+
+### Why replay decides (decision, 2026-09-22)
+
+A model reading an error can name the wrong field. The blacklist is applied
+to every request of that provider, so a wrong rule harms good traffic, and a
+right one stays silent. So a model only proposes, and the provider's own
+answer decides: a rule is kept only when the same request, without it, is
+accepted. The replay also closes passing failures without spending a model
+call.
+
 ## Keeping
 
 - Errors are kept 14 days.
@@ -84,6 +149,11 @@ so a field that started such refusals can be blacklisted.
     request.
   - `GET /api/errors/stats?provider=&since=` groups errors by signature.
   - `since` is an RFC 3339 time.
-- **MCP.** The tools are `list_errors`, `get_error` and `error_stats`. An
+  - `GET /api/errors/review` returns the review's state; `POST` takes any of
+    `{"enabled","model","minErrors","replay"}`, and `{"run":true}` judges the
+    groups due now.
+  - `GET /api/errors/verdicts` lists the verdicts.
+- **MCP.** The tools are `list_errors`, `get_error`, `error_stats`,
+  `error_review` and `list_error_verdicts`. An
   agent can start from `error_stats`, then open the newest error of a group
   with `get_error`.

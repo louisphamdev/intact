@@ -270,6 +270,7 @@
   <a href="#/blacklist" data-nav="blacklist"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>Blacklist<span class="ct" id="ctFilter"></span></a>
   <a href="#/drift" data-nav="drift"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Drift<span class="ct" id="ctDrift"></span></a>
   <a href="#/errors" data-nav="errors"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 2.5 20h19z"/><path d="M12 10v4M12 17.2v.3"/></svg>Errors</a>
+  <a href="#/alerts" data-nav="alerts"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>Alerts</a>
   <a href="#/docs" data-nav="docs"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h7"/></svg>Docs</a>
   <a href="#/quota" data-nav="quota"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 16a8 8 0 1 1 16 0"/><path d="m12 16 4-5"/></svg>Quota</a>
   <a href="#/usage" data-nav="usage"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Usage</a>
@@ -478,6 +479,29 @@ const VI={
 'Last 24 hours':'24 giờ qua','Last 7 days':'7 ngày qua','Everything kept':'Toàn bộ đã lưu','Show the errors of this group':'Xem các lỗi của nhóm này',
 'A 429 answered at once while quota was left: the provider refused the content, not a real limit.':'429 trả về ngay trong khi quota còn: provider từ chối nội dung, không phải giới hạn thật.',
 'Errors (24h)':'Lỗi (24h)','Signatures':'Chữ ký','Fake 429':'429 giả','Real limits':'Giới hạn thật',
+// error review, alerts
+'Verdicts':'Kết luận','Verdict':'Kết luận','left alone':'để yên','not fixed':'chưa xử lý được','blacklisted':'đã blacklist','model off':'đã tắt model','account off':'đã tắt account',
+'replayed':'đã gửi lại','A replay of the failing request proved it':'Gửi lại request lỗi đã chứng minh','Why':'Lý do','No verdicts yet':'Chưa có kết luận nào',
+'Turn on the error review (above) and its model settles recurring errors.':'Bật tự xử lý lỗi (phía trên), model sẽ xử lý các lỗi lặp lại.',
+'Auto-fix errors':'Tự xử lý lỗi','Judge the groups due now':'Đánh giá ngay các nhóm đến hạn','Judged {0} group(s)':'Đã đánh giá {0} nhóm',
+'A model reads each recurring group of refused requests, fake 429s and sign-in errors, and blacklists what the provider refuses, or switches off a model or an account. intact replays the failing request to prove a rule before keeping it.':'Một model đọc từng nhóm lỗi lặp lại (request bị từ chối, 429 giả, lỗi đăng nhập) rồi blacklist thứ provider từ chối, hoặc tắt model hay account. intact gửi lại request lỗi để chứng minh rule trước khi giữ nó.',
+'Set a model first (⚙).':'Hãy đặt model trước (⚙).','no account for the model':'chưa có tài khoản cho model','paused after an error':'tạm dừng sau lỗi',
+'Error review settings':'Cấu hình tự xử lý lỗi','Any chat model. Required to turn the review on; empty turns it off.':'Model chat bất kỳ. Bắt buộc để bật; để trống là tắt.',
+'Errors before a review':'Số lỗi trước khi đánh giá','A group is reviewed once it has this many errors in a day.':'Một nhóm được đánh giá khi có ngần này lỗi trong một ngày.',
+'Replay to check':'Gửi lại để kiểm chứng','Send the failing request again to prove a rule, and to close passing failures without the model. Each check is one provider call.':'Gửi lại request lỗi để chứng minh rule, và khép các lỗi thoáng qua mà không cần model. Mỗi lần kiểm là một lần gọi provider.',
+'Alerts':'Cảnh báo','Add channel':'Thêm kênh','Edit channel · {0}':'Sửa kênh · {0}','No channel yet':'Chưa có kênh nào','Add a Telegram chat or topic, or a webhook.':'Thêm một chat hoặc topic Telegram, hoặc một webhook.',
+'intact tells these channels what it did on its own and what it could not fix: rules it added, models or accounts it switched off, bursts of errors, reviews that stopped, sign-ins that expired.':'intact báo cho các kênh này những gì nó tự làm và những gì nó không xử lý được: rule đã thêm, model hay account đã tắt, lỗi tăng vọt, đánh giá bị dừng, đăng nhập hết hạn.',
+'Events':'Sự kiện','All events':'Mọi sự kiện','Last sent':'Gửi lần cuối','Delete the channel "{0}"?':'Xoá kênh "{0}"?','Sent':'Đã gửi','unchanged':'giữ nguyên',
+'None ticked: every event.':'Không chọn gì: mọi sự kiện.','Bot token':'Bot token','Chat id':'Chat id','Topic id':'Topic id','Dashboard address':'Địa chỉ dashboard','Bearer token':'Bearer token',
+'From @BotFather. The bot must be a member of the chat.':'Lấy từ @BotFather. Bot phải là thành viên của chat.',
+'A user, group or channel id, such as -1001234567890.':'Id của người dùng, nhóm hoặc kênh, ví dụ -1001234567890.',
+"For a forum group: the topic's message_thread_id. Empty: the general topic.":'Với nhóm dạng forum: message_thread_id của topic. Để trống: topic chung.',
+'Alerts link back here, such as https://intact.example. Empty: no link.':'Cảnh báo có link về đây, ví dụ https://intact.example. Để trống: không có link.',
+'Sent as Authorization: Bearer. Optional.':'Gửi dạng Authorization: Bearer. Không bắt buộc.',
+'The error review acted: a rule added, a model or an account switched off':'Tự xử lý lỗi đã hành động: thêm rule, tắt model hoặc account',
+'The error review could not fix a group of errors':'Tự xử lý lỗi không sửa được một nhóm lỗi','A group of errors grew fast':'Một nhóm lỗi tăng nhanh',
+'The drift review blacklisted a field':'Đánh giá drift đã blacklist một trường','A review stopped: its model cannot be reached':'Một bộ đánh giá dừng: không gọi được model',
+"An account's sign-in stopped working":'Đăng nhập của một account không còn dùng được',
 // drift review
 'A client started using it':'Client bắt đầu dùng','Data, not API':'Dữ liệu, không phải API','Optional field':'Trường tuỳ chọn',
 'Provider changed format':'Provider đổi format','Judged by Jev at {0}':'Jev đánh giá lúc {0}','confidence {0}':'độ tự tin {0}',
@@ -682,6 +706,7 @@ function route(){
   if(page==='docs')return viewDocs(v,parts[1]);
   if(page==='drift')return viewDrift(v,parts[1]);
   if(page==='errors')return viewErrors(v,parts[1]);
+  if(page==='alerts')return viewAlerts(v);
   if(page==='quota')return viewQuota(v,parts[1]);
   if(page==='providers'&&parts[1])return viewProvider(v,decodeURIComponent(parts[1]));
   if(page!=='providers'){location.hash='#/providers';return}
@@ -1634,15 +1659,18 @@ const errChip=c=>el('span',{class:'badge '+(ERR_CLASS[c]||''),title:c==='fake_ra
 const errTime=s=>(s||'').replace('T',' ').replace('Z','').slice(0,19);
 let errSince='24h';
 async function viewErrors(v,tab){
-  if(!['groups','all'].includes(tab))tab='groups';
+  if(!['groups','all','verdicts'].includes(tab))tab='groups';
   const range=el('select',{'aria-label':'Time',style:'width:auto'},[['24h','Last 24 hours'],['7d','Last 7 days'],['all','Everything kept']].map(([k,n])=>el('option',{value:k,selected:k===errSince},n)));
   range.onchange=()=>{errSince=range.value;route()};
-  header('Errors',null,range);
-  v.append(el('div',{class:'tabs',role:'tablist'},[['groups','Groups'],['all','All']].map(([k,n])=>
+  header('Errors',null,errReviewBar(),range);
+  v.append(el('div',{class:'tabs',role:'tablist'},[['groups','Groups'],['all','All'],['verdicts','Verdicts']].map(([k,n])=>
     el('a',{role:'tab',href:'#/errors/'+k,'aria-selected':String(k===tab),class:k===tab?'on':''},n))));
   const since=errSince==='all'?'':new Date(Date.now()-(errSince==='7d'?7*864e5:864e5)).toISOString().slice(0,19)+'Z';
   const q=since?'since='+encodeURIComponent(since):'';
   const box=el('div',{});v.append(box);
+  if(tab==='verdicts')return viewVerdicts(box);
+  let verdicts={};
+  if(tab==='groups')try{for(const x of (await api('/errors/verdicts')).verdicts||[])if(!verdicts[x.provider+'|'+x.signature])verdicts[x.provider+'|'+x.signature]=x}catch(e){}
   let data;
   try{data=tab==='groups'?(await api('/errors/stats?'+q)).groups||[]:(await api('/errors?limit=5000&'+q)).errors||[]}
   catch(e){box.append(el('div',{class:'card empty'},el('b',{},e.message)));return}
@@ -1658,6 +1686,8 @@ async function viewErrors(v,tab){
       {id:'class',label:'Class',type:'chip',chips:g=>Object.keys(g.classes||{}),chipLabel:tr,
         td:g=>el('span',{style:'display:inline-flex;gap:.3rem;flex-wrap:wrap'},Object.entries(g.classes||{}).map(([c,n])=>el('span',{style:'display:inline-flex;gap:.2rem;align-items:center'},errChip(c),n>1&&Object.keys(g.classes).length>1?el('span',{class:'faint small',text:'×'+n}):null)))},
       {id:'count',label:'Count',type:'num',cls:'num',get:g=>g.count,td:g=>fmt(g.count)},
+      {id:'verdict',label:'Verdict',type:'chip',get:g=>{const x=verdicts[g.provider+'|'+g.signature];return x?verdictLabel(x):''},chipLabel:tr,
+        td:g=>{const x=verdicts[g.provider+'|'+g.signature];return x?errVerdictChip(x):null}},
       {id:'msg',label:'Message',type:'text',get:g=>g.message||g.signature,
         td:g=>el('div',{style:'min-width:18rem;max-width:44rem'},el('div',{class:'small',style:'word-break:break-word',text:g.message||g.signature}),
           el('div',{class:'faint small mono',text:(g.models||[]).join(', ')}))},
@@ -1688,6 +1718,141 @@ async function viewErrors(v,tab){
   stats.style.marginBottom='1.2rem';
   box.append(stats,el('div',{style:'display:flex;justify-content:flex-end;margin-bottom:.4rem'},tbl.clearBtn),el('div',{class:'card scroll'},tbl.table));
   tbl.render();
+}
+// The error review's verdict on a group: what it did, and whether a replay
+// proved it.
+const verdictLabel=x=>x.action==='ignore'?'left alone':!x.applied?'not fixed':({blacklist:'blacklisted',disable_model:'model off',disable_account:'account off'})[x.action]||x.action;
+function errVerdictChip(x){
+  const tone=x.action==='ignore'?'':!x.applied?'warn':'ok';
+  return el('div',{class:'small',style:'display:grid;gap:.2rem;min-width:10rem',title:[x.reason,x.note].filter(Boolean).join(' — ')},
+    el('span',{style:'display:inline-flex;gap:.3rem;align-items:center;flex-wrap:wrap'},
+      el('span',{class:'badge '+tone},tr(verdictLabel(x))),x.verified?el('span',{class:'badge ok',title:tr('A replay of the failing request proved it')},'✓ '+tr('replayed')):null),
+    x.detail?el('code',{class:'faint',style:'word-break:break-all',text:x.detail}):null,
+    el('span',{class:'faint',text:(x.by||'').split('/').pop()+' · '+errTime(x.at).slice(5,16)}));
+}
+async function viewVerdicts(box){
+  let list=[];try{list=(await api('/errors/verdicts')).verdicts||[]}catch(e){box.append(el('div',{class:'card empty'},el('b',{},e.message)));return}
+  if(!list.length){box.append(el('div',{class:'card empty'},el('b',{},'No verdicts yet'),'Turn on the error review (above) and its model settles recurring errors.'));return}
+  const tbl=dataTable({rows:()=>list,cols:[
+    {id:'at',label:'Time',type:'text',get:x=>errTime(x.at),cls:'faint',tdStyle:'white-space:nowrap'},
+    {id:'prov',label:'Provider',type:'chip',get:x=>x.provider,chipLabel:pname,td:x=>el('span',{style:'display:inline-flex;align-items:center;gap:.45rem'},avatar(x.provider,true),pname(x.provider))},
+    {id:'verdict',label:'Verdict',type:'chip',get:verdictLabel,chipLabel:tr,td:errVerdictChip},
+    {id:'sig',label:'Signature',type:'text',get:x=>x.signature,td:x=>el('code',{class:'small',style:'word-break:break-word;min-width:14rem;display:block',text:x.signature})},
+    {id:'why',label:'Why',type:'text',get:x=>(x.cause||'')+' '+(x.reason||'')+' '+(x.note||''),
+      td:x=>el('div',{class:'small',style:'min-width:18rem;max-width:40rem;display:grid;gap:.2rem'},x.cause?el('b',{text:x.cause}):null,x.reason?el('span',{text:x.reason}):null,x.note?el('span',{class:'faint',text:x.note}):null)},
+    {id:'n',label:'Errors',type:'num',cls:'num',get:x=>x.errors},
+  ]});
+  box.append(el('div',{style:'display:flex;justify-content:flex-end;margin-bottom:.4rem'},tbl.clearBtn),el('div',{class:'card scroll'},tbl.table));
+  tbl.render();
+}
+// The error review: its switch, state and settings.
+function errReviewBar(){
+  const box=el('span',{style:'display:inline-flex;gap:.6rem;align-items:center;flex-wrap:wrap'});
+  const paint=st=>{
+    const sw=el('input',{type:'checkbox',checked:st.enabled,disabled:!st.model,'aria-label':'Auto-fix errors'});
+    sw.onchange=async()=>{try{paint(await postJSON('/errors/review',{enabled:sw.checked}))}catch(e){alert(e.message);sw.checked=!sw.checked}};
+    const run=el('button',{class:'ghost',type:'button',disabled:!st.enabled||!st.ready,title:tr('Judge the groups due now')},'Review now');
+    run.onclick=async()=>{run.disabled=true;try{const r=await postJSON('/errors/review',{run:true});toast(t('Judged {0} group(s)',r.judged));route()}catch(e){alert(e.message);run.disabled=false}};
+    box.replaceChildren(...[
+      el('label',{style:'display:inline-flex;align-items:center;gap:.45rem;cursor:pointer',
+        title:st.model?tr('A model reads each recurring group of refused requests, fake 429s and sign-in errors, and blacklists what the provider refuses, or switches off a model or an account. intact replays the failing request to prove a rule before keeping it.'):tr('Set a model first (⚙).')},
+        el('span',{class:'switch'},sw,el('span')),el('b',{style:'font-size:.85rem'},'Auto-fix errors')),
+      st.model&&!st.ready?el('span',{class:'badge warn',title:st.model},tr('no account for the model')):
+        st.lastError?el('span',{class:'badge err',title:st.lastError},tr('paused after an error')):null,
+      el('button',{class:'icon',type:'button',title:tr('Error review settings'),'aria-label':'Error review settings',onclick:()=>errReviewSettings(st,paint)},'⚙'),
+      run].filter(Boolean));
+  };
+  api('/errors/review').then(paint).catch(()=>{});
+  return box;
+}
+async function errReviewSettings(st,paint){
+  let ids=[];try{ids=(await api('/v1/models')).data.map(m=>m.id)}catch(e){}
+  const model=el('input',{list:'errRevModel',value:st.model||'',placeholder:'antigravity/gemini-3.8-flash',autocomplete:'off',spellcheck:'false'});
+  const minE=el('input',{type:'number',min:1,max:1000,value:st.minErrors||3,style:'max-width:7rem'});
+  const rep=el('input',{type:'checkbox',checked:st.replay!==false});
+  const err=el('div',{class:'err-msg'});
+  const close=()=>ov.remove();
+  const save=async()=>{try{paint(await postJSON('/errors/review',{model:model.value.trim(),minErrors:+minE.value||3,replay:rep.checked}));close();toast('Saved')}catch(e){err.textContent=e.message}};
+  const ov=el('div',{class:'overlay',onclick:e=>{if(e.target===ov)close()}},el('div',{class:'modal sm',role:'dialog','aria-modal':'true'},
+    el('div',{class:'mh'},el('strong',{},'Error review settings'),el('button',{class:'icon',type:'button','aria-label':'Close',onclick:close},'✕')),
+    el('div',{class:'mb'},
+      el('label',{class:'f'},'Model',model,el('datalist',{id:'errRevModel'},ids.filter(i=>!i.startsWith('typesafe/')).map(v=>el('option',{value:v}))),
+        el('span',{class:'faint small',text:tr('Any chat model. Required to turn the review on; empty turns it off.')})),
+      el('label',{class:'f'},'Errors before a review',minE,
+        el('span',{class:'faint small',text:tr('A group is reviewed once it has this many errors in a day.')})),
+      el('label',{style:'display:flex;gap:.5rem;align-items:flex-start;cursor:pointer'},el('span',{class:'switch'},rep,el('span')),
+        el('span',{},el('b',{style:'font-size:.85rem'},'Replay to check'),el('div',{class:'faint small',text:tr('Send the failing request again to prove a rule, and to close passing failures without the model. Each check is one provider call.')}))),
+      err),
+    el('div',{class:'mf'},el('button',{class:'ghost',type:'button',onclick:close},'Cancel'),el('button',{class:'primary',type:'button',onclick:save},'Save'))));
+  document.body.append(ov);model.focus();
+}
+
+// ---- Alerts
+// Channels intact sends alerts to. A channel is a type and that type's
+// fields, as the server describes them.
+async function viewAlerts(v){
+  header('Alerts',null,el('button',{class:'primary',type:'button',onclick:()=>channelForm(info)},'Add channel'));
+  let info;
+  try{info=await api('/notify')}catch(e){v.append(el('div',{class:'card empty'},el('b',{},e.message)));return}
+  v.append(el('p',{class:'faint',style:'margin:0 0 1rem',text:tr('intact tells these channels what it did on its own and what it could not fix: rules it added, models or accounts it switched off, bursts of errors, reviews that stopped, sign-ins that expired.')}));
+  if(!info.channels.length){v.append(el('div',{class:'card empty'},el('b',{},'No channel yet'),'Add a Telegram chat or topic, or a webhook.'));return}
+  const evLabel=id=>(info.events.find(e=>e.id===id)||{label:id}).label;
+  v.append(el('div',{style:'display:grid;gap:1rem'},info.channels.map(c=>{
+    const ty=info.types.find(x=>x.id===c.type)||{name:c.type,fields:[]};
+    const sw=el('input',{type:'checkbox',checked:c.enabled,'aria-label':'On'});
+    sw.onchange=async()=>{try{await api('/notify/channels/'+c.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...c,enabled:sw.checked})});route()}catch(e){alert(e.message);sw.checked=!sw.checked}};
+    const test=el('button',{class:'ghost',type:'button'},'Test');
+    test.onclick=async()=>{test.disabled=true;try{await postJSON('/notify/channels/'+c.id+'/test',{});toast('Sent')}catch(e){alert(e.message)}test.disabled=false;route()};
+    return el('div',{class:'card',style:'display:grid;gap:.6rem;padding:1rem 1.2rem'},
+      el('div',{style:'display:flex;gap:.6rem;align-items:center;flex-wrap:wrap'},
+        el('label',{class:'switch',title:c.enabled?tr('On'):tr('Off')},sw,el('span')),
+        el('b',{text:c.name}),el('span',{class:'badge'},ty.name),
+        el('span',{style:'flex:1'}),
+        test,el('button',{class:'ghost',type:'button',onclick:()=>channelForm(info,c)},'Edit'),
+        el('button',{class:'ghost',type:'button',onclick:async()=>{if(!confirm(t('Delete the channel "{0}"?',c.name)))return;try{await api('/notify/channels/'+c.id,{method:'DELETE'});route()}catch(e){alert(e.message)}}},'Delete')),
+      el('div',{class:'small',style:'display:grid;grid-template-columns:max-content 1fr;gap:.25rem .9rem'},
+        ...ty.fields.filter(f=>c.config[f.id]).flatMap(f=>[el('span',{class:'faint',text:tr(f.label)}),el('code',{style:'word-break:break-all',text:c.config[f.id]})]),
+        el('span',{class:'faint',text:tr('Events')}),el('span',{},c.events.length?c.events.map(evLabel).map(tr).join(' · '):tr('All events')),
+        el('span',{class:'faint',text:tr('Last sent')}),el('span',{},c.lastAt?errTime(c.lastAt):'—',c.lastError?el('span',{class:'badge err',style:'margin-left:.5rem',title:c.lastError,text:c.lastError}):null)));
+  })));
+}
+function channelForm(info,c){
+  if(!info)return;
+  c=c||{name:'',type:info.types[0].id,enabled:true,events:[],config:{link:location.origin}};
+  const type=el('select',{},info.types.map(x=>el('option',{value:x.id,selected:x.id===c.type},x.name)));
+  const name=el('input',{value:c.name,placeholder:'Telegram',autocomplete:'off'});
+  const fieldsBox=el('div',{style:'display:grid;gap:.7rem'});
+  const inputs={};
+  const paintFields=()=>{
+    const ty=info.types.find(x=>x.id===type.value);
+    for(const k in inputs)delete inputs[k];
+    fieldsBox.replaceChildren(...ty.fields.map(f=>{
+      const i=el('input',{value:c.type===ty.id?(c.config[f.id]||''):(f.id==='link'?location.origin:''),autocomplete:'off',spellcheck:'false',
+        placeholder:f.secret&&c.id?tr('unchanged'):'',type:f.secret?'password':'text'});
+      if(f.secret&&c.id&&c.type===ty.id)i.value='';
+      inputs[f.id]=i;
+      return el('label',{class:'f'},tr(f.label)+(f.required?' *':''),i,f.help?el('span',{class:'faint small',text:tr(f.help)}):null);
+    }));
+  };
+  type.onchange=paintFields;paintFields();
+  const evs=info.events.map(e=>{const cb=el('input',{type:'checkbox',checked:c.events.includes(e.id),style:'width:auto;flex:none;margin-top:.2rem'});return {id:e.id,cb,node:el('label',{style:'display:flex;gap:.5rem;align-items:flex-start;cursor:pointer'},cb,el('span',{class:'small'},tr(e.label)))}});
+  const err=el('div',{class:'err-msg'});
+  const close=()=>ov.remove();
+  const save=async()=>{
+    const body={name:name.value.trim(),type:type.value,enabled:c.enabled!==false,events:evs.filter(e=>e.cb.checked).map(e=>e.id),config:{}};
+    for(const k in inputs)body.config[k]=inputs[k].value.trim();
+    try{await api(c.id?'/notify/channels/'+c.id:'/notify/channels',{method:c.id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});close();toast('Saved');route()}
+    catch(e){err.textContent=e.message}};
+  const ov=el('div',{class:'overlay',onclick:e=>{if(e.target===ov)close()}},el('div',{class:'modal',role:'dialog','aria-modal':'true'},
+    el('div',{class:'mh'},el('strong',{},c.id?t('Edit channel · {0}',c.name):tr('Add channel')),el('button',{class:'icon',type:'button','aria-label':'Close',onclick:close},'✕')),
+    el('div',{class:'mb',style:'display:grid;gap:.8rem'},
+      el('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:.7rem'},el('label',{class:'f'},'Type',type),el('label',{class:'f'},'Name',name)),
+      fieldsBox,
+      el('div',{},el('b',{style:'font-size:.85rem'},'Events'),el('div',{class:'faint small',text:tr('None ticked: every event.')}),
+        el('div',{style:'display:grid;gap:.35rem;margin-top:.4rem'},evs.map(e=>e.node))),
+      err),
+    el('div',{class:'mf'},el('button',{class:'ghost',type:'button',onclick:close},'Cancel'),el('button',{class:'primary',type:'button',onclick:save},'Save'))));
+  document.body.append(ov);name.focus();
 }
 // One error in full: what was sent, what came back.
 async function errorDetail(id){
@@ -2006,6 +2171,10 @@ const DOCS=[
       dt('h2','API and MCP'),
       codeBlock('curl "'+o+'/api/errors/stats?provider=antigravity" -H "Authorization: Bearer $INTACT_KEY"\ncurl "'+o+'/api/errors?class=fake_rate_limit&limit=50" -H "Authorization: Bearer $INTACT_KEY"\ncurl '+o+'/api/errors/42 -H "Authorization: Bearer $INTACT_KEY"'),
       dt('p','MCP tools: ',dc('error_stats'),', ',dc('list_errors'),', ',dc('get_error'),'. Start from the groups, then open the newest error of one.'),
+      dt('h2','Auto-fix errors'),
+      dt('p','With a model set under ⚙ (any chat model, such as antigravity/gemini-3.8-flash), each group of refused requests, fake 429s or sign-in errors that reaches 3 errors in a day is settled on its own. intact first replays the newest failing request: if it succeeds now, or the blacklist in place already fixes it, the group is closed without the model. Otherwise the model proposes blacklisting up to 3 rules, switching off the model or the account, or leaving it. intact keeps a rule only when the request, replayed without it, is accepted; switches a model off only when the provider speaks of that model on every error; and an account only after sign-in errors over ten minutes. Verdicts show in the Verdict column and the Verdicts tab.'),
+      dt('h2','Alerts'),
+      dt('p','What intact did on its own, and what it could not fix, goes to the channels on the Alerts page: a Telegram chat or forum topic, or a webhook. Each channel picks its events: error review acted or failed, error bursts, drift blacklisted a field, a review paused, a sign-in expired.'),
     ];
   }},
 ];
@@ -2123,6 +2292,10 @@ const DOCS_VI={
       dt('h2','API và MCP'),
       codeBlock('curl "'+o+'/api/errors/stats?provider=antigravity" -H "Authorization: Bearer $INTACT_KEY"\ncurl "'+o+'/api/errors?class=fake_rate_limit&limit=50" -H "Authorization: Bearer $INTACT_KEY"\ncurl '+o+'/api/errors/42 -H "Authorization: Bearer $INTACT_KEY"'),
       dt('p','Tool MCP: ',dc('error_stats'),', ',dc('list_errors'),', ',dc('get_error'),'. Bắt đầu từ các nhóm, rồi mở lỗi mới nhất của một nhóm.'),
+      dt('h2','Tự xử lý lỗi'),
+      dt('p','Khi đã đặt model trong ⚙ (model chat bất kỳ, như antigravity/gemini-3.8-flash), mỗi nhóm request bị từ chối, 429 giả hoặc lỗi đăng nhập đạt 3 lỗi trong một ngày sẽ được tự xử lý. intact gửi lại request lỗi mới nhất trước: nếu giờ nó thành công, hoặc blacklist hiện có đã sửa được, nhóm được khép mà không cần model. Nếu không, model đề xuất blacklist tối đa 3 rule, tắt model hoặc account, hoặc để yên. intact chỉ giữ rule khi request gửi lại không có nó được chấp nhận; chỉ tắt model khi provider nhắc tới model đó ở mọi lỗi; chỉ tắt account sau lỗi đăng nhập kéo dài từ mười phút. Kết luận hiện ở cột Kết luận và tab Kết luận.'),
+      dt('h2','Cảnh báo'),
+      dt('p','Những gì intact tự làm và những gì nó không xử lý được được gửi tới các kênh ở trang Cảnh báo: một chat hoặc topic Telegram, hoặc webhook. Mỗi kênh chọn sự kiện: tự xử lý lỗi đã làm hoặc thất bại, lỗi tăng vọt, drift đã blacklist trường, bộ đánh giá bị dừng, đăng nhập hết hạn.'),
     ];
   },
 };

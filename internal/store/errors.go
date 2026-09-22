@@ -153,3 +153,101 @@ func (s *Store) CountUpstreamErrorsSince(provider, since string) int {
 	s.DB.QueryRow(`SELECT COUNT(*) FROM upstream_errors WHERE provider = ? AND at >= ? AND status != 0`, provider, since).Scan(&n)
 	return n
 }
+
+// ErrorVerdict is what the error review decided for one group of errors (a
+// provider and a signature). The newest verdict of a group is the one that
+// counts; older ones are kept as its history.
+type ErrorVerdict struct {
+	ID        int64  `json:"id"`
+	At        string `json:"at"`
+	Provider  string `json:"provider"`
+	Signature string `json:"signature"`
+	Action    string `json:"action"`  // blacklist, disable_model, disable_account, ignore
+	Applied   bool   `json:"applied"` // the action was carried out
+	Verified  bool   `json:"verified"`
+	Detail    string `json:"detail"` // the rule, model or account acted on
+	Cause     string `json:"cause"`
+	Reason    string `json:"reason"` // the model's reason
+	Note      string `json:"note"`   // what intact checked and did
+	By        string `json:"by"`
+	Errors    int    `json:"errors"` // errors of the group when judged
+	LastError string `json:"lastError"`
+}
+
+const errorVerdictsSchema = `
+CREATE TABLE IF NOT EXISTS error_verdicts (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	at         TEXT NOT NULL,
+	provider   TEXT NOT NULL,
+	signature  TEXT NOT NULL,
+	action     TEXT NOT NULL,
+	applied    INTEGER NOT NULL DEFAULT 0,
+	verified   INTEGER NOT NULL DEFAULT 0,
+	detail     TEXT NOT NULL DEFAULT '',
+	cause      TEXT NOT NULL DEFAULT '',
+	reason     TEXT NOT NULL DEFAULT '',
+	note       TEXT NOT NULL DEFAULT '',
+	by_model   TEXT NOT NULL DEFAULT '',
+	errors     INTEGER NOT NULL DEFAULT 0,
+	last_error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS error_verdicts_group ON error_verdicts (provider, signature, id);`
+
+// AddErrorVerdict records a verdict.
+func (s *Store) AddErrorVerdict(v ErrorVerdict) (ErrorVerdict, error) {
+	if v.At == "" {
+		v.At = time.Now().UTC().Format(time.RFC3339)
+	}
+	res, err := s.DB.Exec(`INSERT INTO error_verdicts (at, provider, signature, action, applied, verified, detail, cause, reason,
+		note, by_model, errors, last_error) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, v.At, v.Provider, v.Signature, v.Action, v.Applied,
+		v.Verified, v.Detail, v.Cause, v.Reason, v.Note, v.By, v.Errors, v.LastError)
+	if err != nil {
+		return v, err
+	}
+	v.ID, _ = res.LastInsertId()
+	return v, nil
+}
+
+// ErrorVerdicts returns the newest verdict of each group, keyed
+// provider + "|" + signature.
+func (s *Store) ErrorVerdicts() (map[string]ErrorVerdict, error) {
+	rows, err := s.DB.Query(`SELECT id, at, provider, signature, action, applied, verified, detail, cause, reason, note, by_model,
+		errors, last_error FROM error_verdicts WHERE id IN (SELECT MAX(id) FROM error_verdicts GROUP BY provider, signature)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]ErrorVerdict{}
+	for rows.Next() {
+		var v ErrorVerdict
+		if err := rows.Scan(&v.ID, &v.At, &v.Provider, &v.Signature, &v.Action, &v.Applied, &v.Verified, &v.Detail, &v.Cause,
+			&v.Reason, &v.Note, &v.By, &v.Errors, &v.LastError); err != nil {
+			return nil, err
+		}
+		out[v.Provider+"|"+v.Signature] = v
+	}
+	return out, rows.Err()
+}
+
+// ListErrorVerdicts returns the verdicts, newest first.
+func (s *Store) ListErrorVerdicts(limit int) ([]ErrorVerdict, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	rows, err := s.DB.Query(`SELECT id, at, provider, signature, action, applied, verified, detail, cause, reason, note, by_model,
+		errors, last_error FROM error_verdicts ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ErrorVerdict{}
+	for rows.Next() {
+		var v ErrorVerdict
+		if err := rows.Scan(&v.ID, &v.At, &v.Provider, &v.Signature, &v.Action, &v.Applied, &v.Verified, &v.Detail, &v.Cause,
+			&v.Reason, &v.Note, &v.By, &v.Errors, &v.LastError); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}

@@ -23,6 +23,8 @@ type modelPolicy struct {
 
 const (
 	autoTestEvery   = 6 * time.Hour
+	fetchEvery      = time.Hour
+	autoLoopTick    = 10 * time.Minute
 	autoTestWorkers = 3
 	autoTestRetry   = 15 * time.Second
 )
@@ -193,18 +195,32 @@ func (a *api) autoTestHeld(prov string, models []string) {
 	}
 }
 
-// autoTestLoop re-tests every provider with AutoTest on once its last run is
-// older than autoTestEvery.
+// autoTestLoop keeps model lists current without a client asking: every
+// autoLoopTick it fetches the list of each provider with an active account
+// whose last fetch is older than fetchEvery (a failed fetch is retried on the
+// next tick), then re-tests every provider with AutoTest on once its last run
+// is older than autoTestEvery. Model lists change over days, so an hourly
+// fetch catches a new or dropped model soon enough for one GET per provider.
 func (a *api) autoTestLoop() {
 	time.Sleep(time.Minute)
 	for {
 		provs := map[string]bool{}
 		if conns, err := a.store.ListConnections(); err == nil {
 			for _, c := range conns {
-				provs[c.Provider] = true
+				if _, ok := a.providerFor(c); ok && c.IsActive {
+					provs[c.Provider] = true
+				}
 			}
 		}
 		for prov := range provs {
+			a.cat.mu.Lock()
+			e, hit := a.cat.m[prov]
+			a.cat.mu.Unlock()
+			if !hit || !e.ok || time.Since(e.at) >= fetchEvery {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+				a.refreshCatalog(ctx, prov)
+				cancel()
+			}
 			p := a.modelPolicy(prov)
 			if !p.AutoTest {
 				continue
@@ -214,7 +230,7 @@ func (a *api) autoTestLoop() {
 			}
 			a.autoTest(prov, nil)
 		}
-		time.Sleep(10 * time.Minute)
+		time.Sleep(autoLoopTick)
 	}
 }
 

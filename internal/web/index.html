@@ -692,7 +692,7 @@ function modelTable(p){
     for(const m of [...st.sel])if(!visible.has(m))st.sel.delete(m);
     const sel=selected();
     paintPolicy();
-    counts.textContent=on+' of '+st.rows.length+' on · '+list.length+' shown'+(st.ok?'':' · last fetch failed');
+    counts.textContent=on+' of '+st.rows.length+' on · '+list.length+' shown'+(st.ok?(st.fetchedAt?' · list fetched '+new Date(st.fetchedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):''):' · last fetch failed');
     seg.replaceChildren(...MODEL_VIEWS.map(([k,n])=>el('button',{type:'button','aria-pressed':String(st.view===k),onclick:()=>{st.view=k;render()}},n)));
     all.checked=list.length>0&&sel.length===list.length;all.indeterminate=sel.length>0&&sel.length<list.length;all.disabled=!list.length;
     bar.hidden=!sel.length;
@@ -750,7 +750,7 @@ function modelTable(p){
     if(!st.rows.length||refresh)body.replaceChildren(el('tr',{},el('td',{colspan:5,class:'empty',text:refresh?'Fetching…':'Loading…'})));
     try{const d=await api('/providers/'+p+'/model-table'+(refresh?'?refresh=1':''));
       const testing=new Set(st.rows.filter(r=>r.testing).map(r=>r.model));
-      st.rows=d.models;st.ok=d.ok;st.policy=d.policy||{};st.running=d.running;
+      st.rows=d.models;st.ok=d.ok;st.fetchedAt=d.fetchedAt;st.policy=d.policy||{};st.running=d.running;
       for(const r of st.rows)if(testing.has(r.model))r.testing=true;
       render();
       clearTimeout(poll);
@@ -1189,7 +1189,7 @@ const DOCS=[
     dt('ul',
       dt('li',dt('b','On'),' — a model switched off leaves ',dc('/v1/models'),', is not picked for a bare model id, and a request naming it is refused.'),
       dt('li',dt('b','Test'),' — sends a short chat request through the same ',dc('/v1'),' path a client uses and shows the answer time or the error. A model that is off can still be tested.'),
-      dt('li',dt('b','Refresh list'),' — fetches the list from the provider now instead of waiting for the ten-minute cache.')),
+      dt('li',dt('b','Refresh list'),' — fetches the list from the provider now. intact also fetches every provider\'s list by itself each hour (a failed fetch is retried within ten minutes), so new models appear and dropped ones go without a click.')),
     dt('h2','Filtering by name'),
     el('table',{},dt('thead',dt('tr',dt('th','Filter'),dt('th','Shows'))),dt('tbody',
       dt('tr',dt('td',dc('free')),dt('td','names containing free')),

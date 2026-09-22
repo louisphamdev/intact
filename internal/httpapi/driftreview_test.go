@@ -168,3 +168,123 @@ func TestDriftLearnsClientsApartAndSkipsArguments(t *testing.T) {
 		}
 	}
 }
+
+func TestDriftResolverSettlesEverything(t *testing.T) {
+	jev, _ := fakeJev(map[string][2]any{
+		"usage.cached":    {CauseOptionalFlap, 0.4},
+		"choices[].x_new": {CauseProviderChange, 0.9},
+		"anti_cheat":      {CauseNewClient, 0.8},
+		"tools":           {CauseNewClient, 0.3},
+		"stream":          {CauseNewClient, 0.95},
+	})
+	defer jev.Close()
+	// The resolver: a chat model that answers per path.
+	actions := map[string]string{
+		"usage.cached":    `{"cause":"optional_field_flap","action":"acknowledge","reason":"optional usage field"}`,
+		"choices[].x_new": `{"cause":"provider_format_change","action":"acknowledge","reason":"a new answer field; passed through"}`,
+		"anti_cheat":      `{"cause":"new_client_usage","action":"blacklist","reason":"the provider rejects it"}`,
+		"tools":           `{"cause":"new_client_usage","action":"blacklist","reason":"try stripping"}`,
+		"stream":          `{"cause":"new_client_usage","action":"acknowledge","reason":"streaming client"}`,
+	}
+	var asked []string
+	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b struct {
+			Messages []struct{ Content string }
+		}
+		json.NewDecoder(r.Body).Decode(&b)
+		var st map[string]any
+		json.Unmarshal([]byte(b.Messages[1].Content), &st)
+		p := st["path"].(string)
+		asked = append(asked, p)
+		ans, _ := json.Marshal("Here you go:\n" + actions[p])
+		w.Write([]byte(`{"choices":[{"message":{"content":` + string(ans) + `}}]}`))
+	}))
+	defer chat.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("typesafe", "jev", "k")
+	s.CreateConnection("groq", "g", "k")
+	a, h := newServer(s, map[string]string{"typesafe": jev.URL, "groq": chat.URL}, nil)
+	post := func(body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("POST", "/drift/review", strings.NewReader(body)))
+		return rec
+	}
+	// Config is checked.
+	for body, want := range map[string]string{
+		`{"decisionModel":"groq/llama"}`:          "decisionModel",
+		`{"resolverModel":"typesafe/jev-latest"}`: "resolverModel",
+		`{"decisionModel":"","enabled":true}`:     "",
+		`{"ackConfidence":0.2}`:                   "ackConfidence",
+	} {
+		rec := post(body)
+		if want != "" && (rec.Code != 400 || !strings.Contains(rec.Body.String(), want)) {
+			t.Errorf("%s -> %d %s", body, rec.Code, rec.Body.String())
+		}
+		if want == "" && strings.Contains(rec.Body.String(), `"enabled":true`) {
+			t.Errorf("on without a decision model: %s", rec.Body.String())
+		}
+	}
+	if rec := post(`{"enabled":true,"decisionModel":"typesafe/jev-latest","resolverModel":"groq/llama-3.3-70b"}`); rec.Code != 200 {
+		t.Fatalf("config: %s", rec.Body.String())
+	}
+	add := func(dir, path, kind string) {
+		s.AddShapeChange(store.ShapeChange{Direction: dir, Provider: "codex", Endpoint: "chat/completions", Path: path, Kind: kind, Client: "hermes"})
+	}
+	add("response", "usage.cached", "returned")
+	add("response", "choices[].x_new", "added")
+	add("request", "anti_cheat", "added")
+	add("request", "tools", "added")
+	add("request", "stream", "added")
+	a.errs.note("codex") // answers fail since: the evidence a blacklist needs
+	a.errs.m["codex"][0] = a.errs.m["codex"][0].Add(10e9)
+	n, err := a.reviewPending(context.Background())
+	if err != nil || n != 5 {
+		t.Fatalf("judged %d, %v", n, err)
+	}
+	list, _ := s.ListShapeChanges(store.ShapeChangeFilter{})
+	for _, c := range list {
+		if !c.Acked {
+			t.Errorf("left open: %+v", c)
+		}
+		// Answers failed since, so even Jev's sure verdict on stream goes to
+		// the resolver.
+		if c.VerdictBy != "groq/llama-3.3-70b" || !c.Resolved {
+			t.Errorf("%s not resolved: %+v", c.Path, c)
+		}
+		if c.Path == "tools" && !strings.Contains(c.VerdictNote, "not blacklisted: the request needs tools") {
+			t.Errorf("tools note = %q", c.VerdictNote)
+		}
+		if c.Path == "anti_cheat" && !strings.Contains(c.VerdictNote, "blacklisted anti_cheat") {
+			t.Errorf("anti_cheat note = %q", c.VerdictNote)
+		}
+	}
+	filters, _ := s.ListFilters()
+	var got []string
+	for _, f := range filters {
+		if strings.HasPrefix(f.Note, "drift review") {
+			got = append(got, f.Provider+":"+f.Pattern)
+		}
+	}
+	if strings.Join(got, ",") != "codex:anti_cheat" {
+		t.Errorf("filters = %v", got)
+	}
+	if len(asked) != 5 {
+		t.Errorf("resolver asked %v", asked)
+	}
+}
+
+func TestDriftReviewWithoutResolverKeepsTheUnsure(t *testing.T) {
+	jev, _ := fakeJev(map[string][2]any{"x": {CauseNewClient, 0.3}})
+	defer jev.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("typesafe", "jev", "k")
+	a, _ := newServer(s, map[string]string{"typesafe": jev.URL}, nil)
+	s.AddShapeChange(store.ShapeChange{Direction: "request", Provider: "codex", Endpoint: "e", Path: "x", Kind: "added"})
+	a.reviewPending(context.Background())
+	list, _ := s.ListShapeChanges(store.ShapeChangeFilter{})
+	if list[0].Acked || !strings.Contains(list[0].VerdictNote, "no resolver is set") {
+		t.Errorf("change = %+v", list[0])
+	}
+}

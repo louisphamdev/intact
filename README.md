@@ -41,11 +41,15 @@ tools) and wants to use them all from any client.
 - **Drift alerts.** For providers reached as a coding tool, intact learns the
   structure of requests (per client) and answers, and records when a field
   appears, disappears or changes type.
-  - Each change is judged by TypeSafe's Jev decision model.
-  - The benign ones it is sure of are acknowledged on their own.
-  - A likely provider change waits for you.
+  - **Auto-resolve drift** settles every change with no person involved:
+    - a configured decision model (such as TypeSafe's Jev) closes the benign
+      ones it is sure of;
+    - a configured resolver chat model (such as Gemini 3.8 Flash) settles
+      the rest, acknowledging or blacklisting a field a provider refuses.
+  - The switch needs a decision model.
 
-  The decision and its trial are in [Drift](docs/drift.md#review-by-jev).
+  The decisions and the trial behind them are in
+  [Drift](docs/drift.md#automatic-review).
 - **Quota and usage.** Quota is read from each provider (rolling windows, weekly
   pools, per-model shares). Token usage is counted per account, model and day.
   [Quota and usage](docs/quota-and-usage.md)

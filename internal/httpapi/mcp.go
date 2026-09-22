@@ -246,17 +246,30 @@ var mcpTools = []mcpTool{
 			n, err := a.store.AckShapeChanges(ids)
 			return map[string]any{"acked": n}, err
 		}},
-	{Name: "drift_review", Description: "The drift review: the decision model (TypeSafe Jev) judges each structure change's cause and acknowledges the benign ones it is sure of. Without arguments, its state; enabled switches it; run judges the pending changes now.",
-		InputSchema: schema(map[string]any{"enabled": pBool, "run": pBool}),
+	{Name: "drift_review", Description: "The drift review: a System One decision model (such as typesafe/jev-latest) judges each structure change's cause and acknowledges the benign ones it is sure of; a resolver chat model (such as antigravity/gemini-3.8-flash), when set, settles every other change on its own: acknowledge, or blacklist a request field a provider refuses. Without arguments, its state. enabled needs a decisionModel. run judges the waiting changes now.",
+		InputSchema: schema(map[string]any{"enabled": pBool, "decisionModel": pString, "resolverModel": pString, "ackConfidence": map[string]any{"type": "number"}, "run": pBool}),
 		run: func(a *api, args map[string]any) (any, error) {
+			var en *bool
 			if v, ok := args["enabled"].(bool); ok {
-				s := "on"
-				if !v {
-					s = "off"
-				}
-				a.store.SetSetting(reviewSettingKey, s)
+				en = &v
 			}
-			out := map[string]any{"enabled": a.reviewEnabled(), "model": reviewModel, "ackConfidence": reviewAckConfidence}
+			var dm, rm *string
+			if v, ok := args["decisionModel"].(string); ok {
+				dm = &v
+			}
+			if v, ok := args["resolverModel"].(string); ok {
+				rm = &v
+			}
+			var ack *float64
+			if v, ok := args["ackConfidence"].(float64); ok {
+				ack = &v
+			}
+			if en != nil || dm != nil || rm != nil || ack != nil {
+				if _, err := a.updateReviewConfig(en, dm, rm, ack); err != nil {
+					return nil, err
+				}
+			}
+			out := a.reviewStatus()
 			if run, _ := args["run"].(bool); run {
 				n, err := a.reviewPending(context.Background())
 				if err != nil {

@@ -61,10 +61,18 @@ Each change keeps the start of the document it was seen in.
 Observation never slows a request. When the queue is full, a document is
 skipped. Counters are written to the database every 30 seconds.
 
-## Review by Jev
+## Automatic review
 
-Each recorded change is judged by a decision model: TypeSafe's **Jev**,
-through intact's own `/v1/systemone` and the TypeSafe account.
+Each recorded change can be settled with no person involved, by two models
+set in **Drift → ⚙ Review settings**, `POST /api/drift/review` or the MCP tool
+`drift_review`:
+
+| Setting | Model | Role |
+| --- | --- | --- |
+| **Decision model** | a System One model, such as `typesafe/jev-latest` | Chooses each change's cause, with a calibrated confidence. **Required**: the *Auto-resolve drift* switch stays off without it. |
+| **Resolver model** | any chat model intact serves, such as `antigravity/gemini-3.8-flash` | Settles every change the decision model does not close. Empty: those wait for a person. |
+| **Confidence to act alone** | | 60% by default. |
+
 1. intact computes what it knows of the change:
    - whether the path lies in tool call arguments or in a tool's schema;
    - whether the same field was reported removed and returned today;
@@ -73,7 +81,7 @@ through intact's own `/v1/systemone` and the TypeSafe account.
    - which client sent it, and whether that client is new;
    - how many other changes the provider had that hour;
    - how many answers of the provider failed since.
-2. Jev chooses the cause:
+2. The decision model chooses the cause:
 
    | Cause | Meaning |
    | --- | --- |
@@ -82,21 +90,39 @@ through intact's own `/v1/systemone` and the TypeSafe account.
    | `optional_field_flap` | an optional field some documents carry and others do not |
    | `provider_format_change` | the provider changed its answer, or began requiring or rejecting something |
 
-3. A benign cause (the first three) with confidence of at least **60%**, and
-   no failed answer since, **acknowledges the change on its own**. It is
-   marked *auto-acknowledged*.
-4. Anything else (a provider change, low confidence, failures) stays in
-   **New**, with the verdict beside it for a person to decide.
+3. A benign cause (the first three) with the confidence to act alone, and no
+   failed answer since, **closes the change**. It is marked
+   *auto-acknowledged*.
+4. Every other change goes to the **resolver**: low confidence, a likely
+   provider change, or failed answers. The resolver receives:
+   - the facts;
+   - the decision model's leaning and probabilities.
+
+   Its action is final:
+   - **acknowledge** closes the change with its reason;
+   - **blacklist** adds a field rule for that provider and closes the change.
+
+   **Guard on blacklisting.** A model may blacklist only when all of these
+   hold, and otherwise the change is only acknowledged, with the reason noted:
+   - it is a request field that appeared or changed type;
+   - answers have failed since the change;
+   - it is not a field the request needs (`model`, `messages`, `tools`,
+     `stream`, `system`, `max_tokens`…).
+5. Without a resolver, the changes the decision model did not close wait in
+   **New**, with the verdict and why.
+
+Each verdict shows which model gave it, its confidence, and the resolver's
+reason.
 
 Operation:
 - **When it runs:** the review runs every minute. It also runs at once from
-  **Review now** on the Drift page, `POST /api/drift/review {"run":true}`, or
-  the MCP tool `drift_review`.
-- **Switch:** the switch on the Drift page turns it on or off.
-- **Errors:** when Jev cannot be reached, the review pauses ten minutes and
-  says so on the page.
+  **Review now**.
+- **Errors:** when a model cannot be reached, it pauses ten minutes and says
+  so on the page.
+- **Back-review:** changes judged before a resolver was set are handed to it
+  once one is.
 
-### Why Jev, and why only the cause (decision, 2026-09-22)
+### Why a decision model, and why only the cause (decision, 2026-09-22)
 
 The first 48 changes recorded in production came from Hermes starting to call
 through intact: streaming, tools, JSON schema keywords. A hand review found
@@ -115,8 +141,8 @@ What the trial showed:
 - **Only the cause is asked.** Yes/no questions ("should this be blacklisted?",
   "does a person need to see it?") came back between 0.15 and 0.75 for every
   change and told nothing apart.
-- **Blacklisting stays a person's decision,** helped by the failed-answer
-  count.
+- **Blacklisting needs evidence.** It is left to the resolver and gated by
+  failed answers, never asked of the decision model.
 - **Cost is small.** A judgement is one call of about 700 tokens and takes a
   few tenths of a second, and changes are rare once a client's structure is
   learned.
@@ -145,3 +171,17 @@ A typical loop for an agent:
 1. List the unacked request changes.
 2. Blacklist the fields a provider will refuse (`add_filter`).
 3. Acknowledge the changes.
+
+### Hands-off (decision, 2026-09-22)
+
+The owner asked for drift to need no person once the review is set up. So the
+roles split:
+- the decision model closes what it is sure of, which is cheap and fast;
+- the resolver, a general chat model, settles the rest with a final action
+  and a written reason.
+
+Both models are configured, not built in, so another deployment picks its
+own, and the review cannot be switched on without a decision model. On
+intact's own deployment:
+- decision model: `typesafe/jev-latest`;
+- resolver: `antigravity/gemini-3.8-flash`.

@@ -41,12 +41,29 @@ type ShapeChange struct {
 	VerdictConf float64 `json:"verdictConf,omitempty"`
 	VerdictAt   string  `json:"verdictAt,omitempty"`
 	AutoAcked   bool    `json:"autoAcked,omitempty"`
+	// VerdictBy is the model that gave the verdict; VerdictNote its reason
+	// (a resolver's) or why the change was kept. Resolved marks a change a
+	// resolver has looked at after the decision model was unsure.
+	VerdictBy   string `json:"verdictBy,omitempty"`
+	VerdictNote string `json:"verdictNote,omitempty"`
+	Resolved    bool   `json:"resolved,omitempty"`
+}
+
+// Verdict is what a reviewer decided about a change.
+type Verdict struct {
+	Cause    string
+	Conf     float64
+	By       string
+	Note     string
+	Ack      bool
+	Resolved bool
 }
 
 // migrateDrift adds the columns newer than the table.
 func (s *Store) migrateDrift() error {
 	for _, col := range []string{"client TEXT NOT NULL DEFAULT ''", "verdict TEXT NOT NULL DEFAULT ''",
-		"verdict_conf REAL NOT NULL DEFAULT 0", "verdict_at TEXT NOT NULL DEFAULT ''", "auto_acked INTEGER NOT NULL DEFAULT 0"} {
+		"verdict_conf REAL NOT NULL DEFAULT 0", "verdict_at TEXT NOT NULL DEFAULT ''", "auto_acked INTEGER NOT NULL DEFAULT 0",
+		"verdict_by TEXT NOT NULL DEFAULT ''", "verdict_note TEXT NOT NULL DEFAULT ''", "resolved INTEGER NOT NULL DEFAULT 0"} {
 		if _, err := s.DB.Exec("ALTER TABLE shape_changes ADD COLUMN " + col); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("migrate shape_changes: %w", err)
 		}
@@ -61,16 +78,29 @@ func (s *Store) UnreviewedShapeChanges(limit int) ([]ShapeChange, error) {
 }
 
 // SetShapeVerdict records a reviewer's verdict, and acknowledges the change
-// when ack is set.
-func (s *Store) SetShapeVerdict(id int64, verdict string, conf float64, ack bool) error {
-	a := 0
-	if ack {
+// when v.Ack is set.
+func (s *Store) SetShapeVerdict(id int64, v Verdict) error {
+	a, r := 0, 0
+	if v.Ack {
 		a = 1
 	}
-	_, err := s.DB.Exec(`UPDATE shape_changes SET verdict = ?, verdict_conf = ?, verdict_at = ?,
-		auto_acked = ?, acked = CASE WHEN ? = 1 THEN 1 ELSE acked END WHERE id = ?`,
-		verdict, conf, time.Now().UTC().Format(time.RFC3339), a, a, id)
+	if v.Resolved {
+		r = 1
+	}
+	if len(v.Note) > 500 {
+		v.Note = v.Note[:500]
+	}
+	_, err := s.DB.Exec(`UPDATE shape_changes SET verdict = ?, verdict_conf = ?, verdict_at = ?, verdict_by = ?, verdict_note = ?,
+		resolved = ?, auto_acked = ?, acked = CASE WHEN ? = 1 THEN 1 ELSE acked END WHERE id = ?`,
+		v.Cause, v.Conf, time.Now().UTC().Format(time.RFC3339), v.By, v.Note, r, a, a, id)
 	return err
+}
+
+// UnresolvedShapeChanges returns the changes a decision model judged but
+// left open, that no resolver has settled yet.
+func (s *Store) UnresolvedShapeChanges(limit int) ([]ShapeChange, error) {
+	return s.queryShapeChanges(`SELECT `+shapeChangeCols+` FROM shape_changes
+		WHERE acked = 0 AND verdict != '' AND resolved = 0 ORDER BY id LIMIT ?`, limit)
 }
 
 // ShapeChangesSince returns the changes recorded after a time, for a
@@ -80,7 +110,7 @@ func (s *Store) ShapeChangesSince(at string) ([]ShapeChange, error) {
 }
 
 const shapeChangeCols = `id, at, direction, provider, endpoint, event, path, kind, old_type, new_type, sample, acked,
-	client, verdict, verdict_conf, verdict_at, auto_acked`
+	client, verdict, verdict_conf, verdict_at, auto_acked, verdict_by, verdict_note, resolved`
 
 func (s *Store) queryShapeChanges(q string, args ...any) ([]ShapeChange, error) {
 	rows, err := s.DB.Query(q, args...)
@@ -91,12 +121,13 @@ func (s *Store) queryShapeChanges(q string, args ...any) ([]ShapeChange, error) 
 	out := []ShapeChange{}
 	for rows.Next() {
 		var c ShapeChange
-		var acked, auto int
+		var acked, auto, resolved int
 		if err := rows.Scan(&c.ID, &c.At, &c.Direction, &c.Provider, &c.Endpoint, &c.Event, &c.Path, &c.Kind,
-			&c.OldType, &c.NewType, &c.Sample, &acked, &c.Client, &c.Verdict, &c.VerdictConf, &c.VerdictAt, &auto); err != nil {
+			&c.OldType, &c.NewType, &c.Sample, &acked, &c.Client, &c.Verdict, &c.VerdictConf, &c.VerdictAt, &auto,
+			&c.VerdictBy, &c.VerdictNote, &resolved); err != nil {
 			return nil, err
 		}
-		c.Acked, c.AutoAcked = acked != 0, auto != 0
+		c.Acked, c.AutoAcked, c.Resolved = acked != 0, auto != 0, resolved != 0
 		out = append(out, c)
 	}
 	return out, rows.Err()

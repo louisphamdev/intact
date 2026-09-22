@@ -106,6 +106,12 @@ func (a *api) testModel(w http.ResponseWriter, r *http.Request) {
 	prov := r.PathValue("id")
 	res := a.runModelTest(r.Context(), prov, b.Model, b.Account)
 	a.store.RecordModelTest(prov, b.Model, res.OK, res.Ms, res.Message, res.Account)
+	// Under auto test, a test decides the switch whoever runs it.
+	if pol := a.modelPolicy(prov); pol.AutoTest {
+		on := res.OK && pol.wanted(b.Model)
+		a.store.SetModelsActive(prov, []string{b.Model}, on)
+		res.Active = &on
+	}
 	writeJSON(w, res)
 }
 
@@ -117,6 +123,8 @@ type modelTest struct {
 	// Account is the connection id that answered.
 	Account string `json:"account,omitempty"`
 	Model   string `json:"model,omitempty"`
+	// Active is the model's switch after the test, when the test set it.
+	Active *bool `json:"active,omitempty"`
 }
 
 // runModelTest tests one model, on the account pin when set, else on any

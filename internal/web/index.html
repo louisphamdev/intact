@@ -676,7 +676,7 @@ function modelTable(p){
   const test=async r=>{
     r.testing=true;render();
     try{const x=await postJSON('/providers/'+p+'/models/test',{model:r.model});
-      Object.assign(r,{testOk:x.ok,testMs:x.ms,testMsg:x.message,testConn:x.account||'',testAt:new Date().toISOString()})}
+      Object.assign(r,{testOk:x.ok,testMs:x.ms,testMsg:x.message,testConn:x.account||'',testAt:new Date().toISOString()});if(x.active!==undefined)r.active=x.active}
     catch(e){Object.assign(r,{testOk:false,testMsg:e.message,testAt:new Date().toISOString()})}
     r.testing=false;render();
   };
@@ -1200,7 +1200,7 @@ const DOCS=[
       dt('tr',dt('td',dc('-preview')),dt('td','names without preview')),
       dt('tr',dt('td',dc('/^meta-llama\\//')),dt('td','a regular expression')))),
     dt('p','Tick rows (the header box ticks every row shown) and act on them from the bar that appears: turn on, turn off, keep only these on, test. A test goes through any account of the provider; the result names the account that answered. The Test button of an account tests that account alone; a TypeSafe test asks System One questions whose answers are known and checks them.'),
-    dt('p',dt('b','Only free'),' switches on only the models whose name contains ',dc('free'),'; turning it off switches every model back on. ',dt('b','Auto test'),' fetches the list, tests each model (only the free ones under Only free) and keeps on only those that answer; it runs again every 6 hours, a new model is tested before it is switched on, and a model refused for rate limit keeps its switch.'),
+    dt('p',dt('b','Only free'),' switches on only the models whose name contains ',dc('free'),'; turning it off switches every model back on. ',dt('b','Auto test'),' fetches the list, tests each model (only the free ones under Only free) and keeps on only those that answer; it runs again every 6 hours, and a new model is tested before it is switched on. A model that fails is switched off; one refused for rate limit is tested again 30 minutes later. Under auto test, pressing Test also sets the switch.'),
     dt('h2','API and MCP'),
     codeBlock('curl '+location.origin+'/api/providers/openrouter/models -H "Authorization: Bearer $INTACT_KEY"\ncurl '+location.origin+'/api/providers/openrouter/models/active -H "Authorization: Bearer $INTACT_KEY" -d \'{"models":["x"],"active":false}\''),
     dt('p','MCP: ',dc('list_provider_models'),', ',dc('set_models_active'),'.'),

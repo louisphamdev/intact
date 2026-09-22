@@ -292,7 +292,7 @@ func (a *api) catalogIDs(ctx context.Context, prov string) []string {
 		if err != nil {
 			log.Printf("models %s: %v", prov, err)
 		} else if pol.AutoTest && len(added) > 0 && a.auto.start(prov) {
-			go a.autoTestHeld(prov, added)
+			go a.autoTestHeld(prov, added, false)
 		}
 	}
 	a.cat.mu.Lock()

@@ -26,8 +26,14 @@ const (
 	fetchEvery      = time.Hour
 	autoLoopTick    = 10 * time.Minute
 	autoTestWorkers = 3
-	autoTestRetry   = 15 * time.Second
+	// A model still rate-limited after the retry is switched off and tested
+	// again this much later, instead of waiting for the next full run.
+	limitedRetestAfter = 30 * time.Minute
 )
+
+// autoTestRetry is how long a rate-limited test waits before its one retry
+// (a variable for tests).
+var autoTestRetry = 15 * time.Second
 
 // autoState tracks the providers being auto-tested, one run at a time each.
 // A run can be cancelled (the policy changed under it); cancel waits until
@@ -112,7 +118,7 @@ func (a *api) applyPolicy(prov string, p modelPolicy) error {
 	if p.AutoTest {
 		// Marked running before the reply, so a caller polling sees the run.
 		if a.auto.start(prov) {
-			go a.autoTestHeld(prov, nil)
+			go a.autoTestHeld(prov, nil, false)
 		}
 		return nil
 	}
@@ -137,16 +143,18 @@ func (a *api) applyPolicy(prov string, p modelPolicy) error {
 
 // autoTest fetches the provider's list again (which drops the models it no
 // longer lists), tests each wanted model and switches it on when it answers,
-// off when it does not. A model refused for rate limit keeps its switch. With
+// off when it does not. A model still rate-limited after a retry is switched
+// off too, and tested again limitedRetestAfter later. With
 // models, only those are tested and the list is not fetched again.
 func (a *api) autoTest(prov string, models []string) {
 	if a.auto.start(prov) {
-		a.autoTestHeld(prov, models)
+		a.autoTestHeld(prov, models, false)
 	}
 }
 
-// autoTestHeld is autoTest once the provider is marked running.
-func (a *api) autoTestHeld(prov string, models []string) {
+// autoTestHeld is autoTest once the provider is marked running. A retest (of
+// models that were rate-limited) does not schedule another.
+func (a *api) autoTestHeld(prov string, models []string, retest bool) {
 	defer a.auto.done(prov)
 	ctx := a.auto.run(prov).ctx
 	p := a.modelPolicy(prov)
@@ -173,6 +181,7 @@ func (a *api) autoTestHeld(prov string, models []string) {
 	a.store.SetModelsActive(prov, off, false)
 	var mu sync.Mutex
 	works, next := 0, 0
+	var limited []string
 	var wg sync.WaitGroup
 	for w := 0; w < autoTestWorkers; w++ {
 		wg.Add(1)
@@ -198,10 +207,13 @@ func (a *api) autoTestHeld(prov string, models []string) {
 				if ctx.Err() != nil {
 					return
 				}
-				a.store.RecordModelTest(prov, m, res.OK, res.Ms, res.Message, res.Account)
 				if res.Status == http.StatusTooManyRequests {
-					continue
+					res.Message = "rate limited, tested again later: " + res.Message
+					mu.Lock()
+					limited = append(limited, m)
+					mu.Unlock()
 				}
+				a.store.RecordModelTest(prov, m, res.OK, res.Ms, res.Message, res.Account)
 				a.store.SetModelsActive(prov, []string{m}, res.OK)
 				if res.OK {
 					mu.Lock()
@@ -212,6 +224,13 @@ func (a *api) autoTestHeld(prov string, models []string) {
 		}()
 	}
 	wg.Wait()
+	if len(limited) > 0 && !retest && ctx.Err() == nil {
+		time.AfterFunc(limitedRetestAfter, func() {
+			if a.modelPolicy(prov).AutoTest && a.auto.start(prov) {
+				a.autoTestHeld(prov, limited, true)
+			}
+		})
+	}
 	if full && ctx.Err() == nil {
 		p = a.modelPolicy(prov)
 		p.LastRun = time.Now().UTC().Format(time.RFC3339)

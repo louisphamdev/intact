@@ -29,6 +29,11 @@ func fakeModels(list *atomic.Value, works map[string]bool, auth *atomic.Value) *
 		}
 		var b struct{ Model string }
 		json.NewDecoder(r.Body).Decode(&b)
+		if strings.HasPrefix(b.Model, "busy") {
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"error":{"message":"Provider returned error"}}`))
+			return
+		}
 		if !works[b.Model] {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(`{"error":{"message":"no such model"}}`))
@@ -264,5 +269,33 @@ func TestPolicyChangeStopsTheRunningTest(t *testing.T) {
 	m := tableOf(t, h, "openrouter")
 	if !m["x:free"].Active || m["paid-aa"].Active {
 		t.Errorf("after the change: free=%+v paid=%+v", m["x:free"], m["paid-aa"])
+	}
+}
+
+func TestAutoTestRateLimitedGoesOffAndManualTestSetsSwitch(t *testing.T) {
+	old := autoTestRetry
+	autoTestRetry = time.Millisecond
+	defer func() { autoTestRetry = old }()
+	var list atomic.Value
+	list.Store(`{"data":[{"id":"good"},{"id":"busy"}]}`)
+	works := map[string]bool{"good": true}
+	up := fakeModels(&list, works, nil)
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("groq", "g", "k")
+	h := New(s, map[string]string{"groq": up.URL})
+	tableOf(t, h, "groq")
+	post(h, "/providers/groq/model-policy", `{"autoTest":true}`)
+	waitIdle(t, h, "groq")
+	m := tableOf(t, h, "groq")
+	if !m["good"].Active || m["busy"].Active || !strings.HasPrefix(m["busy"].TestMsg, "rate limited") {
+		t.Errorf("rate limited: %+v", m["busy"])
+	}
+	// A manual test under auto test sets the switch.
+	works["good"] = false
+	post(h, "/providers/groq/models/test", `{"model":"good"}`)
+	if tableOf(t, h, "groq")["good"].Active {
+		t.Error("a failed manual test left the model on")
 	}
 }

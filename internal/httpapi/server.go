@@ -59,6 +59,7 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	mux.HandleFunc("GET /api/drift/changes", a.requireToken(a.driftChanges))
 	mux.HandleFunc("POST /api/drift/ack", a.requireToken(a.driftAck))
 	mux.HandleFunc("GET /api/drift/fields", a.requireToken(a.driftFields))
+	mux.HandleFunc("POST /api/drift/seed", a.requireToken(a.driftSeed))
 	mux.HandleFunc("GET /drift/changes", a.requireSession(a.driftChanges))
 	mux.HandleFunc("POST /drift/ack", a.requireSession(a.driftAck))
 	mux.HandleFunc("GET /drift/fields", a.requireSession(a.driftFields))

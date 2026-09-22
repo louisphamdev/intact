@@ -60,7 +60,11 @@ type Observer struct {
 }
 
 // New starts an observer that loads what was learned before.
-func New(s *store.Store) *Observer {
+func New(s *store.Store) *Observer { return newObserver(s, true) }
+
+// newObserver builds an observer; without background work, only Drain
+// processes the queue, in order (for tests).
+func newObserver(s *store.Store, background bool) *Observer {
 	o := &Observer{store: s, q: make(chan job, queueSize), keys: map[string]*key{}}
 	if counts, fields, err := s.LoadShapes(); err == nil {
 		for k, n := range counts {
@@ -77,7 +81,9 @@ func New(s *store.Store) *Observer {
 	} else {
 		log.Printf("drift: load: %v", err)
 	}
-	go o.run()
+	if background {
+		go o.run()
+	}
 	return o
 }
 
@@ -122,11 +128,30 @@ func (o *Observer) process(j job) {
 		if paths == nil {
 			continue
 		}
-		o.observe(j.dir, j.provider, j.endpoint, ev.Name, paths, ev.Body)
+		o.observe(j.dir, j.provider, j.endpoint, ev.Name, paths, ev.Body, false)
 	}
 }
 
-func (o *Observer) observe(dir, provider, endpoint, event string, paths map[string]string, body []byte) {
+// Seed learns documents as the reference structure, recording no change:
+// captures of the real tool, taken before intact serves it.
+func (o *Observer) Seed(dir, provider, endpoint string, body []byte, sse bool) int {
+	var events []Event
+	if sse {
+		events = SplitSSE(body)
+	} else {
+		events = []Event{{Body: body}}
+	}
+	n := 0
+	for _, ev := range events {
+		if paths := Paths(ev.Body); paths != nil {
+			o.observe(dir, provider, endpoint, ev.Name, paths, ev.Body, true)
+			n++
+		}
+	}
+	return n
+}
+
+func (o *Observer) observe(dir, provider, endpoint, event string, paths map[string]string, body []byte, quiet bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	k := keyOf(dir, provider, endpoint, event)
@@ -138,7 +163,7 @@ func (o *Observer) observe(dir, provider, endpoint, event string, paths map[stri
 	kk.obs++
 	kk.dirty = true
 	now := time.Now().UTC().Format(time.RFC3339)
-	learning := kk.obs <= learnObservations
+	learning := quiet || kk.obs <= learnObservations
 	var changes []store.ShapeChange
 	change := func(path, kind, oldT, newT string) {
 		if learning {
@@ -178,7 +203,7 @@ func (o *Observer) observe(dir, provider, endpoint, event string, paths map[stri
 			change(p, "removed", f.typ, "")
 		}
 	}
-	for _, c := range changes {
+	for _, c := range topmost(changes) {
 		if err := o.store.AddShapeChange(c); err != nil {
 			log.Printf("drift: %v", err)
 		}
@@ -252,4 +277,40 @@ func (o *Observer) Drain() {
 			return
 		}
 	}
+}
+
+// topmost drops an added or removed field whose parent is added or removed in
+// the same document: a new object is one change, not one per field inside it.
+func topmost(cs []store.ShapeChange) []store.ShapeChange {
+	whole := map[string]bool{}
+	for _, c := range cs {
+		if c.Kind == "added" || c.Kind == "removed" {
+			whole[c.Kind+" "+c.Path] = true
+		}
+	}
+	var out []store.ShapeChange
+	for _, c := range cs {
+		skip := false
+		for p := parent(c.Path); p != ""; p = parent(p) {
+			if whole[c.Kind+" "+p] {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// parent returns the path one level up: "a[].b.c" → "a[].b" → "a[]" → "a".
+func parent(p string) string {
+	if strings.HasSuffix(p, "[]") {
+		return strings.TrimSuffix(p, "[]")
+	}
+	if i := strings.LastIndexByte(p, '.'); i > 0 {
+		return p[:i]
+	}
+	return ""
 }

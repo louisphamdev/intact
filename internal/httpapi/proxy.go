@@ -132,7 +132,7 @@ func (a *api) relayObserved(w http.ResponseWriter, resp *http.Response, connID, 
 	w.WriteHeader(resp.StatusCode)
 	tapped := streamBody(w, resp)
 	a.recordUsage(connID, tapped, resp.Header.Get("Content-Encoding"))
-	if resp.StatusCode < 300 && resp.Header.Get("Content-Encoding") == "" {
+	if resp.StatusCode < 300 && resp.Header.Get("Content-Encoding") == "" && watched(provider) {
 		a.drift.Observe(drift.Response, provider, path, tapped, isEventStream(resp, tapped))
 	}
 }

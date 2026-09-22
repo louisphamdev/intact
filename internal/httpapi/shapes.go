@@ -138,7 +138,9 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 		w.WriteHeader(resp.StatusCode)
 		w.Write(out)
 		a.recordUsage(connID, body, "")
-		a.drift.Observe(drift.Response, provider, path, body, false)
+		if watched(provider) {
+			a.drift.Observe(drift.Response, provider, path, body, false)
+		}
 		return
 	}
 
@@ -177,7 +179,7 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 	}
 	io.Copy(io.Discard, pr)
 	a.recordUsage(connID, tap.bytes(), "")
-	if resp.StatusCode < 300 {
+	if resp.StatusCode < 300 && watched(provider) {
 		a.drift.Observe(drift.Response, provider, path, raw.bytes(), true)
 	}
 }

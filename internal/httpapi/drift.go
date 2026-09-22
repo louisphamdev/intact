@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"encoding/json"
+	"github.com/louisphamdev/intact/internal/drift"
+	"github.com/louisphamdev/intact/internal/provider"
 	"net/http"
 	"sort"
 	"strconv"
@@ -49,4 +51,37 @@ func (a *api) driftFields(w http.ResponseWriter, r *http.Request) {
 		return list[i].Path < list[j].Path
 	})
 	writeJSON(w, map[string]any{"fields": list})
+}
+
+// watched reports whether a provider's traffic is watched for drift.
+func watched(prov string) bool {
+	p, ok := provider.Lookup(prov)
+	return ok && p.Watch
+}
+
+// driftSeed learns reference documents without recording changes, e.g. the
+// capture of a real tool: {"direction","provider","endpoint","sse",
+// "documents":["…"]}. A stream document holds its whole event stream.
+func (a *api) driftSeed(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Direction string   `json:"direction"`
+		Provider  string   `json:"provider"`
+		Endpoint  string   `json:"endpoint"`
+		SSE       bool     `json:"sse"`
+		Documents []string `json:"documents"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<20)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	if (body.Direction != drift.Request && body.Direction != drift.Response) || body.Provider == "" || body.Endpoint == "" {
+		writeError(w, http.StatusBadRequest, "direction (request|response), provider and endpoint are required")
+		return
+	}
+	n := 0
+	for _, d := range body.Documents {
+		n += a.drift.Seed(body.Direction, body.Provider, body.Endpoint, []byte(d), body.SSE)
+	}
+	a.drift.Flush()
+	writeJSON(w, map[string]any{"learned": n})
 }

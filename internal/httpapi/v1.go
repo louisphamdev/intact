@@ -87,7 +87,9 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 	}
 	// The client's own request, before intact changes anything, is what shows
 	// a tool adding or dropping a field.
-	a.drift.Observe(drift.Request, targets[0].Provider, r.PathValue("path"), original, false)
+	if watched(targets[0].Provider) {
+		a.drift.Observe(drift.Request, targets[0].Provider, r.PathValue("path"), original, false)
+	}
 	if r.PathValue("path") == "messages/count_tokens" && !a.anyAnthropic(targets) {
 		countTokensEstimate(w, body)
 		return

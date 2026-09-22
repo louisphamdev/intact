@@ -47,6 +47,10 @@ type Provider struct {
 	SessionHeader string
 	// ModelsQuery is appended to the model list URL.
 	ModelsQuery string
+	// Watch turns on structure drift monitoring. It is set on the providers
+	// reached as a real tool (OAuth, impersonated clients), whose formats move
+	// with each tool release; a documented API does not need it.
+	Watch bool
 }
 
 // Generic is an OpenAI-compatible upstream that a connection defines itself
@@ -81,6 +85,7 @@ var registry = map[string]Provider{
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
 		Exchange:   "copilot",
+		Watch:      true,
 		Identity: map[string]string{
 			"Copilot-Integration-Id":              "vscode-chat",
 			"Editor-Version":                      "vscode/" + CopilotVSCodeVersion,
@@ -99,6 +104,7 @@ var registry = map[string]Provider{
 		ID:         "codex",
 		BaseURL:    "https://chatgpt.com/backend-api/codex",
 		API:        "responses",
+		Watch:      true,
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
 		Identity: map[string]string{
@@ -120,6 +126,7 @@ var registry = map[string]Provider{
 		ID:         "antigravity",
 		BaseURL:    "https://daily-cloudcode-pa.googleapis.com",
 		API:        "antigravity",
+		Watch:      true,
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
 		Identity:   map[string]string{"User-Agent": AntigravityUserAgent},
@@ -185,6 +192,7 @@ var registry = map[string]Provider{
 		ID:         "claude",
 		BaseURL:    "https://api.anthropic.com/v1",
 		API:        "anthropic",
+		Watch:      true,
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
 		Identity: map[string]string{

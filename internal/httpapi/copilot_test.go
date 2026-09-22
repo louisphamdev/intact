@@ -67,6 +67,7 @@ func itoa(n int64) string {
 }
 
 func TestCopilotRoutesClaudeToMessagesAndLearnsResponses(t *testing.T) {
+	copilotResponsesModels.Delete("gpt-5-mini")
 	ex := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"token":"cop","expires_at":` + itoa(time.Now().Add(time.Hour).Unix()) + `}`))
 	}))

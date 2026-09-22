@@ -37,7 +37,7 @@ func TestSplitSSEByType(t *testing.T) {
 func TestObserverRecordsAddedTypeAndRemoved(t *testing.T) {
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
-	o := New(s)
+	o := newObserver(s, false)
 	send := func(body string) { o.Observe(Request, "groq", "chat/completions", []byte(body), false); o.Drain() }
 	for i := 0; i < learnObservations; i++ {
 		send(`{"model":"m","messages":[],"temperature":1}`)
@@ -67,7 +67,7 @@ func TestObserverRecordsAddedTypeAndRemoved(t *testing.T) {
 		t.Errorf("removed too early: %v", kinds)
 	}
 	o.Flush()
-	o2 := New(s)
+	o2 := newObserver(s, false)
 	if f := o2.Fields(Request, "groq", ""); len(f) < 3 {
 		t.Errorf("fields not persisted: %+v", f)
 	}
@@ -76,22 +76,32 @@ func TestObserverRecordsAddedTypeAndRemoved(t *testing.T) {
 func TestObserverRecordsRemovedAfterARun(t *testing.T) {
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
-	o := New(s)
+	o := newObserver(s, false)
 	for i := 0; i < goneMinSeen+2; i++ {
 		o.Observe(Response, "codex", "responses", []byte(`{"id":"r","usage":{"input_tokens":1}}`), false)
+		o.Drain()
 	}
 	for i := 0; i < goneAfter+1; i++ {
 		o.Observe(Response, "codex", "responses", []byte(`{"id":"r"}`), false)
+		o.Drain()
 	}
 	o.Drain()
 	c, _ := s.ListShapeChanges(store.ShapeChangeFilter{Direction: Response})
 	found := false
 	for _, x := range c {
-		if x.Path == "usage.input_tokens" && x.Kind == "removed" {
+		// The whole usage object went, so the change is reported once, on it.
+		if x.Path == "usage" && x.Kind == "removed" {
 			found = true
 		}
 	}
 	if !found {
 		t.Errorf("removal not recorded: %+v", c)
+	}
+}
+
+func TestTopmostReportsANewObjectOnce(t *testing.T) {
+	cs := []store.ShapeChange{{Path: "messages[].cache_control", Kind: "added"}, {Path: "messages[].cache_control.type", Kind: "added"}, {Path: "x", Kind: "added"}}
+	if got := topmost(cs); len(got) != 2 {
+		t.Errorf("topmost = %+v", got)
 	}
 }

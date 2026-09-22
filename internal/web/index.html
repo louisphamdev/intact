@@ -207,6 +207,28 @@
   .qwin .top{display:flex;justify-content:space-between;gap:.5rem;font-size:.82rem}
   .qwin .top b{font-weight:550}
   [hidden]{display:none!important}
+  /* Data tables: a sortable header and a filter row under it. */
+  .dt th.sortable{padding:0}
+  .th-sort{all:unset;box-sizing:border-box;display:flex;gap:.25rem;align-items:center;width:100%;padding:.6rem 1rem;cursor:pointer;
+    color:inherit;font:inherit;text-transform:inherit;letter-spacing:inherit}
+  .th-sort:hover{color:var(--fg)}
+  .th-sort:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+  .dt th.num .th-sort{justify-content:flex-end}
+  .sort-ar{color:var(--accent);font-size:.7rem}
+  .dt tr.filters th{padding:.3rem .5rem .55rem;text-transform:none;letter-spacing:0;font-weight:400;vertical-align:top}
+  .ftext{min-height:28px;padding:.2rem .5rem;font-size:.78rem;width:100%;min-width:5rem}
+  .fpick{min-height:28px;padding:.2rem .55rem;font-size:.78rem;width:100%;min-width:5rem;text-align:left;background:var(--bg);
+    border:1px solid var(--line);color:var(--muted);border-radius:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .fpick::after{content:" ▾";color:var(--faint)}
+  .fpick.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+  .pop{position:fixed;z-index:60;min-width:12rem;max-width:22rem;max-height:60vh;overflow:auto;background:var(--card);
+    border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:.35rem}
+  .pop-row{display:flex;gap:.5rem;align-items:center;padding:.3rem .45rem;border-radius:6px;cursor:pointer;font-size:.82rem}
+  .pop-row:hover{background:var(--card2)}
+  .pop-row input{width:auto;min-height:0}
+  .pop-row .grow{flex:1}
+  .pop-foot{border-top:1px solid var(--line);margin-top:.3rem;padding-top:.35rem;display:flex;justify-content:flex-end}
+  .pop-foot button{min-height:26px;font-size:.75rem;padding:.1rem .6rem}
   .prefs{display:flex;gap:.4rem;flex-wrap:wrap;padding:.25rem .5rem .6rem}
   .seg.sm button{min-height:24px;padding:.1rem .55rem;font-size:.75rem}
   @media (max-width:820px){
@@ -398,6 +420,11 @@ const VI={
 'last answer':'response gần nhất','Main only':'Chỉ mục chính','applies to every {0} account':'áp dụng cho mọi tài khoản {0}','Per model':'Theo model',
 // usage
 'No usage recorded yet':'Chưa ghi nhận lượt dùng nào','Requests through /v1 show up here.':'Các request qua /v1 sẽ hiện ở đây.','(deleted)':'(đã xoá)',
+// data tables
+'Sort':'Sắp xếp','Filter…':'Lọc…','Filter {0}':'Lọc {0}','{0} values':'{0} giá trị','No values':'Không có giá trị','Show all':'Hiện tất cả',
+'Clear filters':'Xoá bộ lọc','No row matches the filters.':'Không có dòng nào khớp bộ lọc.','Nothing yet.':'Chưa có gì.','Quick filter':'Lọc nhanh',
+'Show only models whose name contains free':'Chỉ hiện model có chữ free trong tên','Tags':'Nhãn','passed':'đạt','untested':'chưa test','testing':'đang test',
+'State':'Trạng thái','gone':'đã mất','present':'còn',
 // docs tabs
 'Introduction':'Giới thiệu',
 };
@@ -793,6 +820,118 @@ function labelEditor(a){
   };
   show();return box;
 }
+
+// ---- Data tables
+// dataTable draws rows under a header that sorts and a row of filters.
+// Clicking a column name sorts it ascending, then descending, then not at all.
+// Under each column, a filter:
+//   text  typed words, as in nameFilter: "a b", "a|b", "-x", "/re/"
+//   num   a comparison: ">100", "<=5", "10-20", "=3"
+//   chip  a pick list of the values present, each with its count
+// A column is {id, label, type, get, chips, td, th, cls, style, sort}:
+//   get(r)    the text or number sorted and filtered;
+//   chips(r)  the chip values of a row (default [get(r)]); none shows as "—";
+//   td(r)     the cell content;
+//   th        a node that replaces the label (such as a select-all box).
+// The filter row is built once, so typing keeps its focus; the body is
+// redrawn by render(). visible() is the filtered, sorted rows.
+// One pick list is open at a time, page-wide; a click outside it, Escape or a
+// scroll outside it closes it.
+let dtPop=null,dtUid=0;
+function dtClosePop(){if(dtPop){dtPop.remove();dtPop=null}}
+document.addEventListener('click',e=>{if(dtPop&&!dtPop.contains(e.target)&&!e.target.closest('.fpick'))dtClosePop()},true);
+addEventListener('keydown',e=>{if(e.key==='Escape')dtClosePop()});
+addEventListener('scroll',e=>{if(dtPop&&!dtPop.contains(e.target))dtClosePop()},true);
+function dataTable({cols,rows,rowAttrs,empty,onRender,initial}){
+  const st={sort:null,dir:1,f:{}};
+  if(initial)Object.assign(st.f,initial);
+  const body=el('tbody');
+  const chipVals=(c,r)=>{const v=c.chips?c.chips(r):[c.get(r)];const out=(v||[]).filter(x=>x!==''&&x!=null).map(String);return out.length?out:['—']};
+  const numTest=q=>{
+    const s=q.replace(/[\s,]/g,'');let m;
+    if((m=/^(>=|<=|>|<|=)?(-?\d+(?:\.\d+)?)$/.exec(s))){const n=+m[2];return({'>':v=>v>n,'<':v=>v<n,'>=':v=>v>=n,'<=':v=>v<=n})[m[1]]||(v=>v===n)}
+    if((m=/^(-?\d+(?:\.\d+)?)-(-?\d+(?:\.\d+)?)$/.exec(s))){const a=+m[1],b=+m[2];return v=>v>=a&&v<=b}
+    return null;
+  };
+  const passes=r=>cols.every(c=>{
+    const f=st.f[c.id];if(f==null||f===''||(f instanceof Set&&!f.size))return true;
+    if(c.type==='chip')return chipVals(c,r).some(v=>f.has(v));
+    if(c.type==='num'){const test=numTest(f);return test?test(Number(c.get(r))):String(c.get(r)).includes(f)}
+    return nameFilter(f)(String(c.get(r)??''));
+  });
+  const visible=()=>{
+    const list=rows().filter(passes);
+    const c=cols.find(c=>c.id===st.sort);
+    if(c){const g=c.sort||(c.type==='chip'?(r=>chipVals(c,r).join(' ')):c.get);
+      list.sort((a,b)=>{const x=g(a),y=g(b);
+        const d=(typeof x==='number'&&typeof y==='number')?x-y:String(x??'').localeCompare(String(y??''),undefined,{numeric:true,sensitivity:'base'});
+        return d*st.dir})}
+    return list;
+  };
+  const active=()=>cols.some(c=>{const f=st.f[c.id];return f instanceof Set?f.size>0:!!f});
+  // Header: names that sort, then filters.
+  const arrows={};
+  const head=el('tr',{},...cols.map(c=>{
+    if(c.th)return el('th',{class:c.cls||'',style:c.style||''},c.th);
+    if(c.sort===false||!c.type)return el('th',{class:c.cls||'',style:c.style||''},c.label||'');
+    const arrow=el('span',{class:'sort-ar','aria-hidden':'true'});arrows[c.id]=arrow;
+    return el('th',{class:(c.cls||'')+' sortable',style:c.style||'','aria-sort':'none'},
+      el('button',{class:'th-sort',type:'button',title:'Sort',onclick:()=>{
+        if(st.sort!==c.id){st.sort=c.id;st.dir=1}else if(st.dir===1)st.dir=-1;else st.sort=null;
+        render()}},c.label,arrow));
+  }));
+  const inputs={},pickers={};
+  const filt=el('tr',{class:'filters'},...cols.map(c=>{
+    if(!c.type||c.filter===false)return el('th',{});
+    if(c.type==='chip'){
+      const b=el('button',{class:'fpick',type:'button','aria-haspopup':'true','data-uid':String(++dtUid),onclick:()=>openPick(c,b)});pickers[c.id]=b;
+      return el('th',{},b);
+    }
+    const i=el('input',{class:'ftext',placeholder:c.type==='num'?'>0, 10-20':'Filter…',autocomplete:'off',spellcheck:'false',
+      'aria-label':t('Filter {0}',tr(c.label||c.id))});
+    i.value=st.f[c.id]||'';
+    let timer=null;i.oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>{st.f[c.id]=i.value.trim();render()},120)};
+    inputs[c.id]=i;return el('th',{},i);
+  }));
+  // The pick list of a chip column: the values of every row, counted, ticked
+  // when shown. It floats over the page so a scrolling table cannot clip it.
+  const openPick=(c,btn)=>{
+    if(dtPop){const same=dtPop.dataset.for===btn.dataset.uid;dtClosePop();if(same)return}
+    const count=new Map();for(const r of rows())for(const v of chipVals(c,r))count.set(v,(count.get(v)||0)+1);
+    const vals=[...count.keys()].sort((a,b)=>c.order?c.order(a)-c.order(b):a.localeCompare(b,undefined,{numeric:true}));
+    const sel=st.f[c.id] instanceof Set?st.f[c.id]:new Set();
+    const pop=el('div',{class:'pop','data-for':btn.dataset.uid,role:'dialog'},
+      vals.length?vals.map(v=>{const cb=el('input',{type:'checkbox',checked:sel.has(v)});
+        cb.onchange=()=>{cb.checked?sel.add(v):sel.delete(v);st.f[c.id]=sel;render()};
+        return el('label',{class:'pop-row'},cb,el('span',{class:'grow'},c.chipLabel?c.chipLabel(v):v),el('span',{class:'faint small',text:String(count.get(v))}))}):
+        el('div',{class:'faint small',text:'No values'}),
+      el('div',{class:'pop-foot'},el('button',{class:'ghost',type:'button',onclick:()=>{sel.clear();st.f[c.id]=sel;dtClosePop();render()}},'Show all')));
+    document.body.append(pop);dtPop=pop;
+    const r=btn.getBoundingClientRect();
+    pop.style.left=Math.max(8,Math.min(r.left,innerWidth-pop.offsetWidth-8))+'px';
+    pop.style.top=Math.min(r.bottom+4,innerHeight-pop.offsetHeight-8)+'px';
+  };
+  const clearBtn=el('button',{class:'chip',type:'button',hidden:true,onclick:()=>{for(const k in st.f)delete st.f[k];for(const i of Object.values(inputs))i.value='';render()}},'Clear filters');
+  const table=el('table',{class:'dt'},el('thead',{},head,filt),body);
+  const render=()=>{
+    for(const c of cols){
+      if(arrows[c.id]){arrows[c.id].textContent=st.sort===c.id?(st.dir===1?' ▲':' ▼'):'';
+        arrows[c.id].parentElement.parentElement.setAttribute('aria-sort',st.sort===c.id?(st.dir===1?'ascending':'descending'):'none')}
+      if(pickers[c.id]){const f=st.f[c.id],n=f instanceof Set?f.size:0;
+        pickers[c.id].textContent=n===0?t('All'):n===1?[...f][0]:t('{0} values',n);pickers[c.id].classList.toggle('on',n>0)}
+    }
+    clearBtn.hidden=!active();
+    const list=visible();
+    if(!list.length){const all=rows().length;
+      body.replaceChildren(el('tr',{},el('td',{colspan:cols.length,class:'empty',text:all?'No row matches the filters.':(empty||'Nothing yet.')})))}
+    else body.replaceChildren(...list.map(r=>el('tr',rowAttrs?rowAttrs(r):{},...cols.map(c=>{
+      const v=c.td?c.td(r):c.get(r);return el('td',{class:c.cls||'',style:c.tdStyle||''},v==null||v===''?'—':v)}))));
+    if(onRender)onRender(list);
+  };
+  return {table,render,visible,clearBtn,
+    setFilter:(id,v)=>{st.f[id]=v;if(inputs[id])inputs[id].value=typeof v==='string'?v:'';render()}};
+}
+
 // ---- Model table
 // A name filter: words must all match; "a|b" matches either, "-x" excludes,
 // "/re/" is a regular expression. Case does not matter.
@@ -804,7 +943,6 @@ function nameFilter(q){
   });
   return name=>{const m=name.toLowerCase();return terms.every(f=>f(m))};
 }
-const MODEL_VIEWS=[['all','All'],['active','Active'],['inactive','Off'],['thinking','Thinking'],['failed','Failed'],['untested','Untested']];
 // thinkChips shows what the provider's list says of a model's thinking: a
 // chip when it thinks, and the effort levels a request may ask for (the
 // default in bold). For folded variants the levels are the variants.
@@ -828,17 +966,11 @@ function effortChips(info,variants){
   }));
 }
 function modelTable(p){
-  const st={q:'',view:'all',rows:[],ok:true,sel:new Set(),policy:{},running:false,variants:{},info:{}};
+  const st={rows:[],ok:true,sel:new Set(),policy:{},running:false,variants:{},info:{}};
   const acctName=id=>{const a=accountsOf(p).find(a=>a.id===id);return a?(a.label||short(a.id)):''};
   const card=el('div',{class:'card'});
-  const q=el('input',{placeholder:'Filter by name — free, free|mini, -preview, /regex/',autocomplete:'off',spellcheck:'false',style:'max-width:26rem'});
   const counts=el('span',{class:'faint small'});
-  const seg=el('span',{class:'seg'});
   const bar=el('div',{style:'display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;padding:.55rem 1.25rem;background:var(--accent-soft);border-bottom:1px solid var(--line)'});
-  const body=el('tbody');
-  const shown=()=>{const f=nameFilter(st.q);return st.rows.filter(r=>f(r.model)&&(
-    st.view==='all'||(st.view==='active'&&r.active)||(st.view==='inactive'&&!r.active)||(st.view==='thinking'&&st.info[r.model]&&st.info[r.model].thinking)||
-    (st.view==='failed'&&r.testAt&&!r.testOk)||(st.view==='untested'&&!r.testAt)))};
   const selected=()=>st.rows.filter(r=>st.sel.has(r.model));
   const setActive=async(models,active)=>{
     if(!models.length)return;
@@ -857,48 +989,59 @@ function modelTable(p){
     style:'min-height:30px;font-size:.8rem',onclick:async()=>{try{await fn()}catch(e){alert(e.message)}}},label);
   // The header box selects every row shown; half-ticked when some are.
   const all=el('input',{type:'checkbox','aria-label':'Select every model shown',style:'width:auto;min-height:0'});
-  all.onchange=()=>{for(const r of shown())all.checked?st.sel.add(r.model):st.sel.delete(r.model);render()};
-  const render=()=>{
-    const list=shown(), on=st.rows.filter(r=>r.active).length;
-    // Never act on a row the filter hides.
-    const visible=new Set(list.map(r=>r.model));
-    for(const m of [...st.sel])if(!visible.has(m))st.sel.delete(m);
-    const sel=selected();
-    paintPolicy();
-    counts.textContent=t('{0} of {1} on · {2} shown',on,st.rows.length,list.length)+(st.ok?(st.fetchedAt?' · '+t('list fetched {0}',new Date(st.fetchedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})):''):' · '+t('last fetch failed'));
-    seg.replaceChildren(...MODEL_VIEWS.map(([k,n])=>el('button',{type:'button','aria-pressed':String(st.view===k),onclick:()=>{st.view=k;render()}},n)));
-    all.checked=list.length>0&&sel.length===list.length;all.indeterminate=sel.length>0&&sel.length<list.length;all.disabled=!list.length;
-    bar.hidden=!sel.length;
-    bar.replaceChildren(el('b',{style:'font-size:.85rem;margin-right:.4rem',text:t('{0} selected',sel.length)}),
-      act('Turn on',()=>setActive(sel.filter(r=>!r.active).map(r=>r.model),true),{disabled:sel.every(r=>r.active)}),
-      act('Turn off',()=>setActive(sel.filter(r=>r.active).map(r=>r.model),false),{disabled:sel.every(r=>!r.active)}),
-      act('Keep only these on',async()=>{
-        const keep=new Set(sel.map(r=>r.model)),off=st.rows.filter(r=>!keep.has(r.model)&&r.active);
-        if(off.length&&!confirm(t('Turn on the {0} selected and turn off {1} other model(s)?',keep.size,off.length)))return;
-        await setActive(sel.filter(r=>!r.active).map(r=>r.model),true);await setActive(off.map(r=>r.model),false);
-      },{title:'Turn the selected models on and every other model of this provider off'}),
-      act('Test',async()=>{let i=0;const list=sel;const next=async()=>{while(i<list.length)await test(list[i++])};await Promise.all([next(),next(),next()])}),
-      el('span',{style:'flex:1'}),
-      act('Clear',()=>{st.sel.clear();render()}));
-    if(!list.length){body.replaceChildren(el('tr',{},el('td',{colspan:6,class:'empty',text:st.rows.length?'No model matches.':'No models yet.'})));return}
-    body.replaceChildren(...list.map(r=>{
-      const pick=el('input',{type:'checkbox',checked:st.sel.has(r.model),'aria-label':t('Select {0}',r.model),style:'width:auto;min-height:0'});
-      pick.onchange=()=>{pick.checked?st.sel.add(r.model):st.sel.delete(r.model);render()};
-      const sw=el('input',{type:'checkbox',checked:r.active,'aria-label':t('On: {0}',r.model)});
-      sw.onchange=()=>setActive([r.model],sw.checked).catch(e=>{alert(e.message);sw.checked=!sw.checked});
-      const res=r.testing?el('span',{class:'faint small',text:'testing…'}):r.testAt?el('span',{class:'small',title:r.testMsg||'',style:'color:'+(r.testOk?'var(--ok)':'var(--err)')},
-        (r.testOk?'✓ ':'✗ ')+(r.testOk?(r.testMs+' ms'):(r.testMsg||'failed')).slice(0,60)+(r.testConn?' · '+acctName(r.testConn):'')):el('span',{class:'faint small',text:'—'});
-      return el('tr',{class:(r.active?'':'off')+(st.sel.has(r.model)?' selrow':'')},
-        el('td',{style:'width:2.5rem'},pick),
-        el('td',{style:'width:3.5rem'},el('label',{class:'switch',title:r.active?'On':'Off'},sw,el('span'))),
-        el('td',{},el('button',{class:'plain mono',type:'button',title:t('Copy {0}',p+'/'+r.model),style:'min-height:0;padding:.1rem .2rem;text-align:left',onclick:()=>copy(p+'/'+r.model)},r.model),
-          thinkChips(st.info[r.model],!!st.variants[r.model])),
-        el('td',{style:'white-space:nowrap'},effortChips(st.info[r.model],!!st.variants[r.model])),
-        el('td',{style:'max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'},res),
-        el('td',{class:'num',style:'white-space:nowrap'},
-          el('button',{class:'ghost',type:'button',style:'min-height:28px;padding:.15rem .6rem;font-size:.78rem',disabled:!!r.testing,onclick:()=>test(r)},'Test')));
-    }));
-  };
+  all.onchange=()=>{for(const r of tbl.visible())all.checked?st.sel.add(r.model):st.sel.delete(r.model);render()};
+  const info=r=>st.info[r.model]||{};
+  const testState=r=>r.testing?'testing':!r.testAt?'untested':r.testOk?'passed':'failed';
+  const tbl=dataTable({
+    rows:()=>st.rows,
+    empty:'No models yet.',
+    rowAttrs:r=>({class:(r.active?'':'off')+(st.sel.has(r.model)?' selrow':'')}),
+    cols:[
+      {id:'sel',th:all,style:'width:2.5rem',td:r=>{
+        const pick=el('input',{type:'checkbox',checked:st.sel.has(r.model),'aria-label':t('Select {0}',r.model),style:'width:auto;min-height:0'});
+        pick.onchange=()=>{pick.checked?st.sel.add(r.model):st.sel.delete(r.model);render()};return pick}},
+      {id:'on',label:'On',type:'chip',style:'width:4.5rem',get:r=>r.active?'On':'Off',chipLabel:tr,td:r=>{
+        const sw=el('input',{type:'checkbox',checked:r.active,'aria-label':t('On: {0}',r.model)});
+        sw.onchange=()=>setActive([r.model],sw.checked).catch(e=>{alert(e.message);sw.checked=!sw.checked});
+        return el('label',{class:'switch',title:r.active?'On':'Off'},sw,el('span'))}},
+      {id:'model',label:'Model',type:'text',get:r=>r.model,td:r=>
+        el('button',{class:'plain mono',type:'button',title:t('Copy {0}',p+'/'+r.model),style:'min-height:0;padding:.1rem .2rem;text-align:left',onclick:()=>copy(p+'/'+r.model)},r.model)},
+      {id:'tags',label:'Tags',type:'chip',chipLabel:tr,chips:r=>{const i=info(r),o=[];if(i.thinking)o.push(i.always?'thinking · always':'thinking');if(i.paid)o.push('paid plan');return o},
+        td:r=>thinkChips(info(r),!!st.variants[r.model])||''},
+      {id:'effort',label:'Effort',type:'chip',tdStyle:'white-space:nowrap',chips:r=>(info(r).efforts||[]).map(e=>e||'none'),
+        order:v=>{const i=['none','minimal','extra-low','low','medium','high','xhigh','max','ultra','tiered'].indexOf(v);return i<0?99:i},
+        sort:r=>(info(r).efforts||[]).length,td:r=>effortChips(info(r),!!st.variants[r.model])},
+      {id:'last',label:'Last test',type:'chip',chipLabel:tr,chips:r=>[testState(r)],
+        order:v=>['passed','failed','testing','untested','—'].indexOf(v),
+        sort:r=>r.testAt?(r.testOk?r.testMs:1e9):1e12,tdStyle:'max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap',
+        td:r=>r.testing?el('span',{class:'faint small',text:'testing…'}):r.testAt?el('span',{class:'small',title:r.testMsg||'',style:'color:'+(r.testOk?'var(--ok)':'var(--err)')},
+          (r.testOk?'✓ ':'✗ ')+(r.testOk?(r.testMs+' ms'):(r.testMsg||t('failed'))).slice(0,60)+(r.testConn?' · '+acctName(r.testConn):'')):el('span',{class:'faint small',text:'—'})},
+      {id:'act',cls:'num',td:r=>el('button',{class:'ghost',type:'button',style:'min-height:28px;padding:.15rem .6rem;font-size:.78rem',disabled:!!r.testing,onclick:()=>test(r)},'Test')},
+    ],
+    onRender:list=>{
+      const on=st.rows.filter(r=>r.active).length;
+      // Never act on a row the filters hide.
+      const visible=new Set(list.map(r=>r.model));
+      for(const m of [...st.sel])if(!visible.has(m))st.sel.delete(m);
+      const sel=selected();
+      paintPolicy();
+      counts.textContent=t('{0} of {1} on · {2} shown',on,st.rows.length,list.length)+(st.ok?(st.fetchedAt?' · '+t('list fetched {0}',new Date(st.fetchedAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})):''):' · '+t('last fetch failed'));
+      all.checked=list.length>0&&sel.length===list.length;all.indeterminate=sel.length>0&&sel.length<list.length;all.disabled=!list.length;
+      bar.hidden=!sel.length;
+      bar.replaceChildren(el('b',{style:'font-size:.85rem;margin-right:.4rem',text:t('{0} selected',sel.length)}),
+        act('Turn on',()=>setActive(sel.filter(r=>!r.active).map(r=>r.model),true),{disabled:sel.every(r=>r.active)}),
+        act('Turn off',()=>setActive(sel.filter(r=>r.active).map(r=>r.model),false),{disabled:sel.every(r=>!r.active)}),
+        act('Keep only these on',async()=>{
+          const keep=new Set(sel.map(r=>r.model)),off=st.rows.filter(r=>!keep.has(r.model)&&r.active);
+          if(off.length&&!confirm(t('Turn on the {0} selected and turn off {1} other model(s)?',keep.size,off.length)))return;
+          await setActive(sel.filter(r=>!r.active).map(r=>r.model),true);await setActive(off.map(r=>r.model),false);
+        },{title:'Turn the selected models on and every other model of this provider off'}),
+        act('Test',async()=>{let i=0;const list=sel;const next=async()=>{while(i<list.length)await test(list[i++])};await Promise.all([next(),next(),next()])}),
+        el('span',{style:'flex:1'}),
+        act('Clear',()=>{st.sel.clear();render()}));
+    },
+  });
+  const render=()=>tbl.render();
   // Policy: auto test and only free, stored per provider.
   const polBox=el('div',{style:'padding:.6rem 1.25rem;display:flex;gap:1.2rem;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)'});
   const polSw=(key,label,title)=>{
@@ -934,7 +1077,6 @@ function modelTable(p){
     }finally{fetchBtn.disabled=false;fetchBtn.lastChild.textContent=t('Fetch now')}
   }},svg(ICON.fetch),el('span',{},'Fetch now'));
   const load=async refresh=>{
-    if(!st.rows.length)body.replaceChildren(el('tr',{},el('td',{colspan:6,class:'empty',text:refresh?'Fetching…':'Loading…'})));
     try{const d=await api('/providers/'+p+'/model-table'+(refresh?'?refresh=1':''));
       const testing=new Set(st.rows.filter(r=>r.testing).map(r=>r.model));
       st.rows=d.models;st.ok=d.ok;st.fetchedAt=d.fetchedAt;st.variants=d.variants||{};st.info=d.info||{};st.policy=d.policy||{};st.running=d.running;
@@ -943,18 +1085,20 @@ function modelTable(p){
       clearTimeout(poll);
       if(st.running)poll=setTimeout(()=>{if(card.isConnected&&!document.hidden)load(false)},10000);
     }
-    catch(e){body.replaceChildren(el('tr',{},el('td',{colspan:6,class:'empty',text:e.message})))}
+    catch(e){toast(e.message)}
   };
-  let timer=null;q.oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>{st.q=q.value;render()},120)};
-  const chip=(label,val)=>el('button',{class:'chip',type:'button',onclick:()=>{q.value=val;st.q=val;render()}},label);
   card.append(
     el('div',{class:'cardh'},el('h2',{class:'grow'},'Models'),counts,
       fetchBtn),
     polBox,
-    el('div',{style:'padding:.8rem 1.25rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)'},q,chip('free','free'),chip('clear',''),seg),
+    el('div',{style:'padding:.6rem 1.25rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)'},
+      el('span',{class:'faint small'},'Quick filter'),
+      el('button',{class:'chip',type:'button',title:'Show only models whose name contains free',onclick:()=>tbl.setFilter('model','free')},'free'),
+      el('button',{class:'chip',type:'button',onclick:()=>tbl.setFilter('tags',new Set(['thinking','thinking · always']))},'thinking'),
+      tbl.clearBtn),
     bar,
-    el('div',{class:'scroll'},el('table',{},
-      el('thead',{},el('tr',{},el('th',{},all),el('th',{},'On'),el('th',{},'Model'),el('th',{},'Effort'),el('th',{},'Last test'),el('th',{}))),body)));
+    el('div',{class:'scroll'},tbl.table));
+  tbl.render();
   load(false);
   return card;
 }
@@ -1210,15 +1354,18 @@ function driftFields(){
   const render=async()=>{
     try{
       const r=await api('/drift/fields?provider='+encodeURIComponent(psel.value)+'&direction='+dsel.value);
-      const byKey={};
-      for(const f of r.fields||[]){const k=f.key.split('|').slice(2).join(' · ').replace(/ · $/,'');(byKey[k]=byKey[k]||[]).push(f)}
-      const keys=Object.keys(byKey).sort();
-      if(!keys.length){box.replaceChildren(el('div',{class:'empty'},el('b',{},'Nothing learned yet')));return}
-      box.replaceChildren(el('div',{class:'scroll'},el('table',{},
-        el('thead',{},el('tr',{},el('th',{},'Endpoint · event'),el('th',{},'Field'),el('th',{},'Type'),el('th',{class:'num'},'Seen'))),
-        el('tbody',{},keys.flatMap(k=>byKey[k].map((f,i)=>el('tr',{class:f.gone?'off':''},
-          el('td',{class:'faint small',text:i===0?k:''}),el('td',{class:'mono',text:f.path}),el('td',{class:'faint',text:f.type+(f.gone?' '+t('(gone)'):'')}),
-          el('td',{class:'num',text:fmt(f.seen)}))))))));
+      const fields=r.fields||[];
+      if(!fields.length){box.replaceChildren(el('div',{class:'empty'},el('b',{},'Nothing learned yet')));return}
+      const where=f=>f.key.split('|').slice(2).join(' · ').replace(/ · $/,'');
+      const tbl=dataTable({rows:()=>fields,rowAttrs:f=>({class:f.gone?'off':''}),cols:[
+        {id:'where',label:'Endpoint · event',type:'chip',get:where,cls:'faint small'},
+        {id:'path',label:'Field',type:'text',get:f=>f.path,cls:'mono'},
+        {id:'type',label:'Type',type:'chip',chips:f=>f.type.split('|'),get:f=>f.type,cls:'faint'},
+        {id:'state',label:'State',type:'chip',chipLabel:tr,get:f=>f.gone?'gone':'present'},
+        {id:'seen',label:'Seen',type:'num',cls:'num',get:f=>f.seen,td:f=>fmt(f.seen)},
+      ]});
+      tbl.render();
+      box.replaceChildren(el('div',{style:'display:flex;justify-content:flex-end;padding:.5rem .75rem 0'},tbl.clearBtn),el('div',{class:'scroll'},tbl.table));
     }catch(e){box.replaceChildren(el('div',{class:'empty',text:e.message}))}
   };
   psel.onchange=render;dsel.onchange=render;render();
@@ -1377,7 +1524,8 @@ const DOCS=[
       dt('li',dt('b','On'),' — a model switched off leaves ',dc('/v1/models'),', is not picked for a bare model id, and a request naming it is refused.'),
       dt('li',dt('b','Test'),' — sends a short chat request through the same ',dc('/v1'),' path a client uses and shows the answer time or the error. A model that is off can still be tested.'),
       dt('li',dt('b','Fetch now'),' — fetches the list from the provider now. intact also fetches every provider\'s list by itself each hour (a failed fetch is retried within ten minutes), so new models appear and dropped ones go without a click.')),
-    dt('h2','Filtering by name'),
+    dt('h2','Sorting and filtering'),
+    dt('p','Every table sorts by a click on a column name (ascending, descending, off). Under the names is a row of filters: a text column takes words, a number column a comparison (',dc('>1000'),', ',dc('10-20'),'), and a chip column opens the list of its values, with their counts, to tick the ones to show. Clear filters resets them. Text filters read words like this:'),
     el('table',{},dt('thead',dt('tr',dt('th','Filter'),dt('th','Shows'))),dt('tbody',
       dt('tr',dt('td',dc('free')),dt('td','names containing free')),
       dt('tr',dt('td',dc('free mini')),dt('td','names containing both')),
@@ -1475,7 +1623,8 @@ const DOCS_VI={
       dt('li',dt('b','Bật'),' — model bị tắt sẽ biến mất khỏi ',dc('/v1/models'),', không được chọn khi gọi bằng model id trần, và request gọi đích danh nó bị từ chối.'),
       dt('li',dt('b','Test'),' — gửi một chat request ngắn qua đúng đường ',dc('/v1'),' mà client dùng, rồi hiện thời gian phản hồi hoặc lỗi. Model đang tắt vẫn test được.'),
       dt('li',dt('b','Fetch ngay'),' — fetch danh sách từ nhà cung cấp ngay lúc này. intact cũng tự fetch danh sách của mọi nhà cung cấp mỗi giờ (fetch lỗi được thử lại trong vòng mười phút), nên model mới tự xuất hiện và model bị bỏ tự biến mất mà không cần bấm gì.')),
-    dt('h2','Lọc theo tên'),
+    dt('h2','Sắp xếp và lọc'),
+    dt('p','Mọi bảng đều sắp xếp được: bấm tên cột để sắp tăng, giảm, rồi bỏ sắp. Dưới tên cột là hàng bộ lọc: cột chữ cho nhập chữ, cột số cho nhập điều kiện (',dc('>1000'),', ',dc('10-20'),'), cột chip mở danh sách giá trị kèm số dòng để tick những giá trị muốn hiện. Xoá bộ lọc để bỏ hết. Bộ lọc chữ hiểu như sau:'),
     el('table',{},dt('thead',dt('tr',dt('th','Bộ lọc'),dt('th','Hiển thị'))),dt('tbody',
       dt('tr',dt('td',dc('free')),dt('td','tên có chứa free')),
       dt('tr',dt('td',dc('free mini')),dt('td','tên chứa cả hai')),
@@ -1523,28 +1672,35 @@ function viewDocs(v,id){
 
 // ---- Usage
 function viewUsage(v){
-  const days=[...new Set(S.usage.map(u=>u.day))];
-  const sel=el('select',{style:'width:auto','aria-label':'Day'},el('option',{value:'',text:'All days'}),days.map(d=>el('option',{value:d,text:d})));
-  header('Usage',null,S.usage.length?sel:null);
+  header('Usage');
+  const stats=el('div',{class:'stats'});
   const today=new Date().toISOString().slice(0,10);
-  if(days.includes(today))sel.value=today;
-  const stats=el('div',{class:'stats'}),tb=el('tbody');
-  v.append(stats,el('div',{class:'card scroll'},el('table',{},
-    el('thead',{},el('tr',{},el('th',{},'Day'),el('th',{},'Account'),el('th',{},'Model'),el('th',{class:'num'},'Input'),el('th',{class:'num'},'Output'),el('th',{class:'num'},'Requests'))),tb)));
-  const render=()=>{
-    const rows=S.usage.filter(u=>!sel.value||u.day===sel.value);
-    const sum=k=>rows.reduce((s,u)=>s+u[k],0);
-    stats.replaceChildren(...[['Requests',sum('requests')],['Input tokens',sum('inputTokens')],['Output tokens',sum('outputTokens')]]
-      .map(([k,n])=>el('div',{class:'stat'},el('div',{class:'k',text:k}),el('div',{class:'v',text:fmt(n)}))));
-    if(!rows.length){tb.replaceChildren(el('tr',{},el('td',{colspan:6},el('div',{class:'empty'},el('b',{},'No usage recorded yet'),'Requests through /v1 show up here.'))));return}
-    tb.replaceChildren(...rows.map(u=>{const a=accById(u.connectionId);
-      return el('tr',{},el('td',{class:'faint',text:u.day}),
-        el('td',{},a?el('span',{style:'display:inline-flex;align-items:center;gap:.45rem'},avatar(a.provider,true),a.label||short(a.id))
-                    :el('span',{class:'mono faint',text:short(u.connectionId)+' '+t('(deleted)')})),
-        el('td',{class:'mono',text:u.model||'—'}),
-        el('td',{class:'num',text:fmt(u.inputTokens)}),el('td',{class:'num',text:fmt(u.outputTokens)}),el('td',{class:'num',text:fmt(u.requests)}))}));
-  };
-  sel.onchange=render;render();
+  const acctLabel=u=>{const a=accById(u.connectionId);return a?(a.label||short(a.id)):short(u.connectionId)+' '+t('(deleted)')};
+  const provOf=u=>{const a=accById(u.connectionId);return a?pname(a.provider):'—'};
+  const tbl=dataTable({
+    rows:()=>S.usage,
+    empty:'No usage recorded yet',
+    // Today first, when there is usage today.
+    initial:S.usage.some(u=>u.day===today)?{day:new Set([today])}:{},
+    cols:[
+      {id:'day',label:'Day',type:'chip',get:u=>u.day,order:v=>-Date.parse(v)||0,cls:'faint',tdStyle:'white-space:nowrap'},
+      {id:'prov',label:'Provider',type:'chip',get:provOf},
+      {id:'acct',label:'Account',type:'chip',get:acctLabel,td:u=>{const a=accById(u.connectionId);
+        return a?el('span',{style:'display:inline-flex;align-items:center;gap:.45rem'},avatar(a.provider,true),a.label||short(a.id))
+                :el('span',{class:'mono faint',text:acctLabel(u)})}},
+      {id:'model',label:'Model',type:'text',get:u=>u.model||'',cls:'mono'},
+      {id:'in',label:'Input',type:'num',cls:'num',get:u=>u.inputTokens,td:u=>fmt(u.inputTokens)},
+      {id:'out',label:'Output',type:'num',cls:'num',get:u=>u.outputTokens,td:u=>fmt(u.outputTokens)},
+      {id:'req',label:'Requests',type:'num',cls:'num',get:u=>u.requests,td:u=>fmt(u.requests)},
+    ],
+    // The totals are those of the rows the filters show.
+    onRender:rows=>{const sum=k=>rows.reduce((s,u)=>s+u[k],0);
+      stats.replaceChildren(...[['Requests',sum('requests')],['Input tokens',sum('inputTokens')],['Output tokens',sum('outputTokens')]]
+        .map(([k,n])=>el('div',{class:'stat'},el('div',{class:'k',text:k}),el('div',{class:'v',text:fmt(n)}))))},
+  });
+  if(!S.usage.length){v.append(el('div',{class:'card'},el('div',{class:'empty'},el('b',{},'No usage recorded yet'),'Requests through /v1 show up here.')));return}
+  v.append(stats,el('div',{style:'display:flex;justify-content:flex-end;margin-bottom:-1rem'},tbl.clearBtn),el('div',{class:'card scroll'},tbl.table));
+  tbl.render();
 }
 
 translateStatic(document.body);paintPrefs();

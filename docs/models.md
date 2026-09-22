@@ -3,7 +3,8 @@
 A provider's page ends with its model table, with these columns:
 - a selection box;
 - the model's on/off switch;
-- the model's name (click it to copy `<provider>/<model>`), with its chips;
+- the model's name (click it to copy `<provider>/<model>`);
+- its tags (`thinking`, `paid plan`);
 - its effort levels;
 - its last test result;
 - a Test button.
@@ -47,7 +48,24 @@ To act on many models:
 Changing the filter drops hidden rows from the selection, so an action never
 reaches a row you cannot see.
 
-The filter box matches names:
+## Sorting and filtering
+
+Every table in the dashboard sorts and filters the same way: the model table,
+Usage, and Drift → Fields.
+
+- **Sort:** click a column name. It cycles ascending, descending, then off.
+- **Filter:** each column has a filter under its name.
+
+  | Column | Filter |
+  | --- | --- |
+  | text | typed words (the syntax below) |
+  | number | a comparison: `>1000`, `<=5`, `10-20`, `=3` |
+  | chip | a list of the values present, each with its row count; tick the ones to show (a row with none shows as `—`) |
+
+  **Clear filters** resets them all. On the model table, **Quick filter**
+  offers `free` and `thinking`.
+
+Text filters read words like this:
 
 | Filter | Matches |
 | --- | --- |
@@ -56,7 +74,9 @@ The filter box matches names:
 | `-preview` | excludes names containing it |
 | `/regex/` | a regular expression |
 
-The views are All, Active, Off, Thinking, Failed and Untested.
+On the Usage page:
+- The Day filter starts on today when there is usage today.
+- The totals above the table count only the rows shown.
 
 ## Policy: Auto test and Only free
 

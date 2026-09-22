@@ -141,7 +141,7 @@ func (a *api) providerFor(c store.Connection) (provider.Provider, bool) {
 	case ok && c.BaseURL != "":
 		p.BaseURL = c.BaseURL
 	case !ok && c.BaseURL != "":
-		p, ok = provider.Generic(c.Provider, c.BaseURL), true
+		p, ok = provider.GenericAPI(c.Provider, c.BaseURL, c.Meta["api"]), true
 	}
 	if !ok || p.BaseURL == "" || strings.Contains(p.BaseURL, "{accountId}") {
 		return provider.Provider{}, false

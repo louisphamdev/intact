@@ -229,6 +229,10 @@
         <label class="f" id="aIdRow">Provider id
           <input id="aId" placeholder="e.g. tokenharbor" autocomplete="off" spellcheck="false"></label>
         <label class="f" id="aBaseRow">Base URL<input name="base_url" id="aBase" placeholder="https://example.com/v1" autocomplete="off" spellcheck="false"></label>
+        <label class="f" id="aApiRow">API standard<select name="api" id="aApi">
+          <option value="openai">OpenAI Chat Completions</option>
+          <option value="anthropic">Anthropic Messages</option>
+          <option value="responses">OpenAI Responses</option></select></label>
         <label class="f">Name<input name="label" placeholder="e.g. Work key" autocomplete="off"></label>
         <label class="f" id="aAcctRow">Account ID<input name="account_id" id="aAcct" autocomplete="off" spellcheck="false"></label>
         <label class="f" id="aKeyRow">API key<input name="secret" id="aKey" type="password" autocomplete="off"></label>
@@ -237,6 +241,14 @@
       </div>
       <div class="mf"><button class="ghost" type="button" data-close>Cancel</button><button class="primary" type="submit">Save</button></div>
     </form>
+  </div>
+</div>
+
+<!-- provider chooser -->
+<div id="chModal" class="overlay" hidden>
+  <div class="modal sm" role="dialog" aria-modal="true" aria-labelledby="chTitle">
+    <div class="mh"><strong id="chTitle">Choose a provider</strong><button class="icon" type="button" data-close aria-label="Close">✕</button></div>
+    <div class="mb" id="chBody"></div>
   </div>
 </div>
 
@@ -495,33 +507,53 @@ function mcpCard(){
 }
 
 // ---- Providers
+// Providers come in three groups: accounts that sign in (OAuth), documented
+// APIs intact knows the endpoint of, and endpoints the operator enters. A
+// known provider is listed only once it has an account; each group adds its
+// own way.
+const isCustom=p=>!infoOf(p).id&&accountsOf(p).some(a=>a.baseUrl);
+function chooseProvider(title,ids,onPick){
+  $('chTitle').textContent=title;
+  $('chBody').replaceChildren(el('div',{style:'display:grid;gap:.5rem'},ids.map(p=>
+    el('button',{class:'pcard',type:'button',style:'width:100%;text-align:left;cursor:pointer',onclick:()=>{closeModal('chModal');onPick(p)}},
+      avatar(p),el('div',{style:'min-width:0'},el('div',{class:'nm',text:pname(p)}),
+        el('span',{class:'status',text:accountsOf(p).length?accountsOf(p).length+' connected':'No connections yet'}))))));
+  openModal('chModal');
+}
 function viewProviders(v){
   const q=el('input',{placeholder:'Search providers…',autocomplete:'off','aria-label':'Search providers'});
-  header('Providers',null,el('div',{class:'search'},svg(ICON.search),q),
-    el('button',{class:'ghost',type:'button',onclick:()=>addAccount(null)},svg(ICON.plus),'Custom provider'));
+  header('Providers',null,el('div',{class:'search'},svg(ICON.search),q));
   const ids=[...new Set([...S.providers.map(x=>x.id),...S.accounts.map(a=>a.provider)])];
+  const byName=(a,b)=>pname(a).localeCompare(pname(b));
+  const oauthAll=S.providers.filter(x=>x.auth==='oauth').map(x=>x.id).sort(byName);
+  const keyAll=S.providers.filter(x=>x.auth!=='oauth').map(x=>x.id).sort(byName);
   const card=p=>{
     const n=accountsOf(p).length,act=activeOf(p).length;
+    const api=isCustom(p)?(accountsOf(p).find(a=>a.meta&&a.meta.api)||{meta:{}}).meta.api||'openai':'';
     return el('a',{class:'pcard'+(wired(p)?'':' dim'),href:'#/providers/'+encodeURIComponent(p),'data-q':(p+' '+pname(p)).toLowerCase()},
       avatar(p),
       el('div',{style:'min-width:0'},
         el('div',{class:'nm',text:pname(p)}),
         el('div',{style:'display:flex;gap:.45rem;align-items:center;flex-wrap:wrap'},
-          n?el('span',{class:'status'+(act?' on':''),text:act+' connected'+(act<n?' · '+(n-act)+' off':'')})
-           :el('span',{class:'status',text:'No connections'}),authTag(p))));
+          el('span',{class:'status'+(act?' on':''),text:n?act+' connected'+(act<n?' · '+(n-act)+' off':''):'No connections'}),
+          api?el('span',{class:'badge',text:{openai:'OpenAI',anthropic:'Anthropic',responses:'Responses'}[api]||api}):null)));
   };
-  const sec=(title,list,note)=>list.length?el('div',{class:'sec'},
-    el('div',{class:'sech'},el('h2',{},title),note?el('span',{class:'faint small',text:note}):null),
-    el('div',{class:'pgrid'},list.map(card))):null;
-  const byName=(a,b)=>pname(a).localeCompare(pname(b));
+  const group=(title,list,addLabel,onAdd,empty)=>el('div',{class:'sec'},
+    el('div',{class:'sech'},el('h2',{class:'grow'},title),
+      el('button',{class:'primary',type:'button',onclick:onAdd},svg(ICON.plus),addLabel)),
+    list.length?el('div',{class:'pgrid'},list.map(card)):el('div',{class:'card empty',style:'padding:1.25rem'},empty));
   const body=el('div',{style:'display:grid;gap:1.75rem'},
-    sec('Connected',ids.filter(p=>wired(p)&&accountsOf(p).length).sort(byName)),
-    sec('Available',ids.filter(p=>wired(p)&&!accountsOf(p).length).sort(byName)),
-    sec('Not supported yet',ids.filter(p=>!wired(p)).sort(byName)));
+    group('OAuth',oauthAll.filter(p=>accountsOf(p).length),'Sign in',
+      ()=>chooseProvider('Sign in with',oauthAll,p=>startLogin(p)),'No account signed in yet.'),
+    group('API providers',keyAll.filter(p=>accountsOf(p).length),'Add API key',
+      ()=>chooseProvider('Add an API key for',keyAll,p=>addAccount(p)),'No API provider connected yet.'),
+    group('Custom endpoints',ids.filter(isCustom).sort(byName),'Add endpoint',
+      ()=>addAccount(null),'No custom endpoint yet.'),
+    (()=>{const nw=ids.filter(p=>!wired(p)&&!isCustom(p)).sort(byName);
+      return nw.length?el('div',{class:'sec'},el('div',{class:'sech'},el('h2',{},'Not supported yet')),el('div',{class:'pgrid'},nw.map(card))):null})());
   v.append(body);
   q.oninput=()=>{const s=q.value.trim().toLowerCase();
-    for(const c of body.querySelectorAll('.pcard'))c.hidden=!!s&&!c.dataset.q.includes(s);
-    for(const g of body.querySelectorAll('.sec'))g.hidden=![...g.querySelectorAll('.pcard')].some(c=>!c.hidden)};
+    for(const c of body.querySelectorAll('.pcard'))c.hidden=!!s&&!c.dataset.q.includes(s)};
 }
 
 function viewProvider(v,p){
@@ -674,11 +706,11 @@ function modelTable(p){
 function addAccount(p){
   // p is null for a new custom OpenAI-compatible provider.
   const setup=p?(setupOf(p)||(custom(p)?'custom':'key')):'custom';
-  $('aTitle').textContent=p?'Add '+pname(p)+' connection':'Add a custom provider';
+  $('aTitle').textContent=p?'Add '+pname(p)+' connection':'Add a custom endpoint';
   $('aForm').reset();$('aErr').textContent='';
   $('aProv').value=p||'';$('aId').value='';
   const show=(id,on)=>$(id).hidden=!on;
-  show('aIdRow',!p);show('aBaseRow',setup==='custom');show('aAcctRow',setup==='account');
+  show('aIdRow',!p);show('aBaseRow',setup==='custom');show('aApiRow',!p);show('aAcctRow',setup==='account');
   show('aKeyRow',setup!=='none');show('aNoKey',setup==='none');
   $('aBase').value=p&&custom(p)?accountsOf(p).find(a=>a.baseUrl).baseUrl:'';
   openModal('aModal');

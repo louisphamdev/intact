@@ -56,8 +56,27 @@ type Provider struct {
 // Generic is an OpenAI-compatible upstream that a connection defines itself
 // with its own id and base URL, such as a self-hosted or niche gateway.
 func Generic(id, baseURL string) Provider {
-	return Provider{ID: id, BaseURL: baseURL, AuthHeader: "Authorization", AuthPrefix: "Bearer "}
+	return GenericAPI(id, baseURL, "")
 }
+
+// GenericAPI is a custom upstream of a given request shape: "" or "openai"
+// (Chat Completions), "responses" (OpenAI Responses), or "anthropic"
+// (Messages, keyed with x-api-key as Anthropic's API is).
+func GenericAPI(id, baseURL, api string) Provider {
+	p := Provider{ID: id, BaseURL: baseURL, AuthHeader: "Authorization", AuthPrefix: "Bearer "}
+	switch api {
+	case "anthropic":
+		p.API = "anthropic"
+		p.AuthHeader, p.AuthPrefix = "X-Api-Key", ""
+		p.Defaults = map[string]string{"Anthropic-Version": "2023-06-01"}
+	case "responses":
+		p.API = "responses"
+	}
+	return p
+}
+
+// CustomAPIs are the request shapes a custom provider can speak.
+var CustomAPIs = []string{"openai", "anthropic", "responses"}
 
 // WithAccount completes a BaseURL that holds {accountId}.
 func (p Provider) WithAccount(accountID string) string {

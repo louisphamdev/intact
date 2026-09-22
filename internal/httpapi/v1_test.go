@@ -190,3 +190,29 @@ func TestSystemOnePassesThroughToTypeSafe(t *testing.T) {
 		t.Errorf("usage = %+v", rows)
 	}
 }
+
+func TestCustomAnthropicProviderUsesXAPIKeyAndMessages(t *testing.T) {
+	var gotPath, gotKey, gotAuth, gotVer string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotKey, gotAuth, gotVer = r.URL.Path, r.Header.Get("X-Api-Key"), r.Header.Get("Authorization"), r.Header.Get("Anthropic-Version")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"m","type":"message","content":[{"type":"text","text":"hi"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	h := New(s, nil)
+	form := "provider=mygw&label=gw&secret=sk-1&api=anthropic&base_url=" + up.URL + "/v1"
+	req := httptest.NewRequest("POST", "/accounts", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	// An OpenAI caller reaches it, translated to Messages.
+	rec := postV1(h, `{"model":"mygw/claude-x","messages":[{"role":"user","content":"hi"}]}`)
+	if gotPath != "/v1/messages" || gotKey != "sk-1" || gotAuth != "" || gotVer == "" {
+		t.Errorf("upstream path=%s key=%q auth=%q version=%q", gotPath, gotKey, gotAuth, gotVer)
+	}
+	if !strings.Contains(rec.Body.String(), `"content":"hi"`) {
+		t.Errorf("caller got %s", rec.Body.String())
+	}
+}

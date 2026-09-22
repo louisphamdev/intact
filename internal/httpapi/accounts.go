@@ -73,10 +73,19 @@ func (a *api) createAccount(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "a custom provider needs an http(s) base URL")
 			return
 		}
+		switch r.PostFormValue("api") {
+		case "", "openai", "anthropic", "responses":
+		default:
+			writeError(w, http.StatusBadRequest, "api must be openai, anthropic or responses")
+			return
+		}
 	}
 	c, err := a.store.CreateConnection(prov, r.PostFormValue("label"), secret)
 	if err == nil && baseURL != "" {
 		err = a.store.SetBaseURL(c.ID, baseURL)
+	}
+	if api := r.PostFormValue("api"); err == nil && !registered && api != "" && api != "openai" {
+		err = a.store.SetMeta(c.ID, map[string]string{"api": api})
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "cannot create connection")

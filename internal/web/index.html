@@ -655,8 +655,6 @@ function modelTable(p){
   const bulk=(label,title,fn)=>el('button',{class:'ghost',type:'button',title,style:'min-height:32px;font-size:.8rem',onclick:async()=>{
     try{await fn()}catch(e){alert(e.message)}}},label);
   const actions=el('div',{style:'display:flex;gap:.4rem;flex-wrap:wrap'},
-    bulk('Activate shown','Switch on every model shown',()=>setActive(shown().filter(r=>!r.active).map(r=>r.model),true)),
-    bulk('Deactivate shown','Switch off every model shown',()=>setActive(shown().filter(r=>r.active).map(r=>r.model),false)),
     bulk('Only shown active','Switch on the models shown and off every other model',async()=>{
       const keep=new Set(shown().map(r=>r.model));
       if(!confirm('Keep '+keep.size+' model(s) on and switch off the other '+(st.rows.length-keep.size)+'?'))return;
@@ -674,8 +672,14 @@ function modelTable(p){
       await postJSON('/providers/'+p+'/models/delete',{models:gone});st.rows=st.rows.filter(r=>!gone.includes(r.model));render();
     }),
     bulk('Refresh list','Fetch the model list from the provider now',()=>load(true)));
+  // The header box switches every model shown: ticked when all are on,
+  // half-ticked when some are.
+  const all=el('input',{type:'checkbox','aria-label':'Switch every model shown',title:'Switch every model shown on or off',style:'width:auto;min-height:0'});
+  all.onchange=()=>{const list=shown();setActive(list.filter(r=>r.active!==all.checked).map(r=>r.model),all.checked).catch(e=>alert(e.message))};
   const render=()=>{
     const list=shown(), act=st.rows.filter(r=>r.active).length;
+    const on=list.filter(r=>r.active).length;
+    all.checked=list.length>0&&on===list.length;all.indeterminate=on>0&&on<list.length;all.disabled=!list.length;
     counts.textContent=act+' of '+st.rows.length+' on · '+list.length+' shown'+(st.ok?'':' · last fetch failed');
     seg.replaceChildren(...MODEL_VIEWS.map(([k,n])=>el('button',{type:'button','aria-pressed':String(st.view===k),onclick:()=>{st.view=k;render()}},n)));
     if(!list.length){body.replaceChildren(el('tr',{},el('td',{colspan:5,class:'empty',text:st.rows.length?'No model matches.':'No models yet.'})));return}
@@ -707,7 +711,7 @@ function modelTable(p){
     el('div',{style:'padding:.8rem 1.25rem;display:grid;gap:.6rem;border-bottom:1px solid var(--line)'},
       el('div',{style:'display:flex;gap:.5rem;align-items:center;flex-wrap:wrap'},q,chip('free','free'),chip('clear',''),seg),actions),
     el('div',{class:'scroll'},el('table',{},
-      el('thead',{},el('tr',{},el('th',{},'On'),el('th',{},'Model'),el('th',{}),el('th',{},'Last test'),el('th',{}))),body)));
+      el('thead',{},el('tr',{},el('th',{style:'width:2.5rem'},all),el('th',{},'Model'),el('th',{}),el('th',{},'Last test'),el('th',{}))),body)));
   load(false);
   return card;
 }

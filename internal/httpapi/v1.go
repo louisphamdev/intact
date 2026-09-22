@@ -82,6 +82,10 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no active account serves this model")
 		return
 	}
+	if r.PathValue("path") == "messages/count_tokens" && !a.anyAnthropic(targets) {
+		countTokensEstimate(w, body)
+		return
+	}
 	a.failover(w, r, body, targets, a.nextIndex("m:"+model, len(targets)))
 }
 
@@ -162,10 +166,14 @@ func (a *api) providersServing(ctx context.Context, model string) []string {
 // models answers GET /v1/models with every provider's models, each named
 // "<provider>/<model>" so the id a client picks routes back to one provider.
 func (a *api) models(w http.ResponseWriter, r *http.Request) {
+	// One entry serves both vocabularies: OpenAI reads object and owned_by,
+	// Anthropic reads type and display_name.
 	type entry struct {
-		ID      string `json:"id"`
-		Object  string `json:"object"`
-		OwnedBy string `json:"owned_by"`
+		ID          string `json:"id"`
+		Object      string `json:"object"`
+		OwnedBy     string `json:"owned_by"`
+		Type        string `json:"type"`
+		DisplayName string `json:"display_name"`
 	}
 	provs := a.activeProviders()
 	lists := make([][]string, len(provs))
@@ -181,10 +189,14 @@ func (a *api) models(w http.ResponseWriter, r *http.Request) {
 	data := []entry{}
 	for i, p := range provs {
 		for _, id := range lists[i] {
-			data = append(data, entry{ID: p + "/" + id, Object: "model", OwnedBy: p})
+			data = append(data, entry{ID: p + "/" + id, Object: "model", OwnedBy: p, Type: "model", DisplayName: p + "/" + id})
 		}
 	}
-	writeJSON(w, map[string]any{"object": "list", "data": data})
+	first, last := "", ""
+	if len(data) > 0 {
+		first, last = data[0].ID, data[len(data)-1].ID
+	}
+	writeJSON(w, map[string]any{"object": "list", "data": data, "has_more": false, "first_id": first, "last_id": last})
 }
 
 // activeProviders returns the registered providers that have an active account.

@@ -145,6 +145,12 @@
   .err-msg{color:var(--err);font-size:.82rem;min-height:1.2em}
   .toast{position:fixed;bottom:1.25rem;left:50%;transform:translateX(-50%);background:var(--card2);border:1px solid var(--line);
          box-shadow:var(--shadow);padding:.55rem 1rem;border-radius:10px;font-size:.85rem;z-index:30;max-width:90vw}
+  .tabs{display:flex;gap:.25rem;border-bottom:1px solid var(--line);overflow-x:auto;margin-top:-.5rem}
+  .tabs a{padding:.6rem .95rem;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px;
+          white-space:nowrap;font-weight:500;display:inline-flex;gap:.4rem;align-items:center}
+  .tabs a:hover{color:var(--fg)}
+  .tabs a.on{color:var(--fg);border-bottom-color:var(--accent)}
+  .tabs .ct{font-size:.72rem;color:var(--faint)}
   [hidden]{display:none!important}
   @media (max-width:820px){
     body{grid-template-columns:1fr}
@@ -362,7 +368,7 @@ function route(){
     if(a.dataset.nav===page)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');
   }
   const v=$('view');v.replaceChildren();
-  if(page==='endpoint')return viewEndpoint(v);
+  if(page==='endpoint')return viewEndpoint(v,parts[1]);
   if(page==='usage')return viewUsage(v);
   if(page==='filters')return viewFilters(v);
   if(page==='providers'&&parts[1])return viewProvider(v,decodeURIComponent(parts[1]));
@@ -372,39 +378,55 @@ function route(){
 window.addEventListener('hashchange',route);
 
 // ---- Endpoint
-function viewEndpoint(v){
-  header('Endpoint & keys','One base URL for every provider. The model you ask for decides where the request goes.');
-  const base=location.origin+'/v1';
+// The two API shapes have different base URLs: an OpenAI client appends
+// /chat/completions to …/v1, an Anthropic client appends /v1/messages to the root.
+const ENDPOINT_TABS=[['openai','OpenAI'],['anthropic','Anthropic'],['keys','API keys'],['mcp','MCP']];
+function viewEndpoint(v,tab){
+  if(!ENDPOINT_TABS.some(t=>t[0]===tab))tab='openai';
+  header('Endpoint & keys','One gateway for every provider, in the API shape your client speaks.');
+  v.append(el('div',{class:'tabs',role:'tablist'},ENDPOINT_TABS.map(([k,n])=>
+    el('a',{role:'tab',href:'#/endpoint/'+k,'aria-selected':String(k===tab),class:k===tab?'on':''},n,
+      k==='keys'&&S.keys.length?el('span',{class:'ct',text:String(S.keys.length)}):null))));
+  if(tab==='keys'){v.append(keysCard());return}
+  if(tab==='mcp'){v.append(mcpCard());return}
+  const anth=tab==='anthropic', o=location.origin;
+  const base=anth?o:o+'/v1', path=anth?'/v1/messages':'/v1/chat/completions';
   const provs=[...new Set(S.accounts.filter(a=>a.isActive).map(a=>a.provider))].filter(wired).sort((a,b)=>pname(a).localeCompare(pname(b)));
-  const sel=el('select',{style:'width:auto','aria-label':'Provider'},provs.map(p=>el('option',{value:p,text:pname(p)})));
-  const ex=el('pre');
+  const sel=el('select',{style:'width:auto','aria-label':'Provider for the example'},provs.map(p=>el('option',{value:p,text:pname(p)})));
+  const pre=el('pre');
   const render=async()=>{
-    const p=sel.value||'groq';
-    const r=provs.length?await modelsFor(p):{ids:[]};
-    const m=p+'/'+((r.ids&&r.ids[0])||'<model>');
-    // Anthropic speaks the Messages API; every other provider here is OpenAI-shaped.
-    const anth=p==='claude';
-    ex.textContent='# '+(anth?'Anthropic':'OpenAI-compatible')+' client\nbase_url = "'+base+'"\napi_key  = "<API key>"\nmodel    = "'+m+'"\n\n# curl\ncurl '+base+(anth?'/messages':'/chat/completions')+' \\\n  -H "Authorization: Bearer $INTACT_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"'+m+'",'+(anth?'"max_tokens":256,':'')+'"messages":[{"role":"user","content":"hi"}]}\''};
+    const p=sel.value, r=p?await modelsFor(p):{ids:[]};
+    const m=(p||'groq')+'/'+((r.ids&&r.ids[0])||'<model>');
+    pre.textContent=anth
+      ?'# Claude Code\nexport ANTHROPIC_BASE_URL="'+base+'"\nexport ANTHROPIC_AUTH_TOKEN="<API key>"\nexport ANTHROPIC_MODEL="'+m+'"\n\n'+
+       '# Anthropic SDK (Python)\nclient = anthropic.Anthropic(base_url="'+base+'", api_key="<API key>")\n\n'+
+       '# curl\ncurl '+o+path+' \\\n  -H "x-api-key: $INTACT_KEY" -H "Content-Type: application/json" \\\n  -d \'{"model":"'+m+'","max_tokens":256,"messages":[{"role":"user","content":"hi"}]}\''
+      :'# OpenAI SDK (Python)\nclient = OpenAI(base_url="'+base+'", api_key="<API key>")\nclient.chat.completions.create(model="'+m+'", messages=[...])\n\n'+
+       '# curl\ncurl '+o+path+' \\\n  -H "Authorization: Bearer $INTACT_KEY" -H "Content-Type: application/json" \\\n  -d \'{"model":"'+m+'","messages":[{"role":"user","content":"hi"}]}\'';
+  };
   sel.onchange=render;render();
   v.append(
     el('div',{class:'card pad sec'},
-      el('h2',{},'Base URL'),copyLine(base),
-      el('p',{class:'muted',style:'margin:0'},'Use it as the OpenAI (or Anthropic) base URL in any client. ',
-        el('code',{},'GET /v1/models'),' lists every model you can call.')),
-    el('div',{class:'card pad sec'},
-      el('h2',{},'Choosing a model'),
+      el('h2',{},anth?'Anthropic Messages API':'OpenAI Chat Completions API'),
       el('div',{class:'kv'},
-        el('code',{},'groq/llama-3.3-70b-versatile'),el('span',{class:'muted'},'Provider and model. intact removes the ',el('code',{},'groq/'),' prefix before it sends the request.'),
-        el('code',{},'llama-3.3-70b-versatile'),el('span',{class:'muted'},'Model only. intact uses every provider that lists this model.')),
-      el('p',{class:'muted small',style:'margin:0'},'Requests rotate across the active accounts that serve the model, and move to the next account on 429/500/503/409.')),
-    keysCard(),
+        el('span',{class:'k'},'Base URL'),copyLine(base),
+        el('span',{class:'k'},'Endpoint'),el('code',{text:'POST '+path}),
+        el('span',{class:'k'},'Models'),el('code',{text:anth?'GET /v1/models':'GET /v1/models'}),
+        el('span',{class:'k'},'Auth'),el('code',{text:anth?'x-api-key: <API key>  (or Authorization: Bearer)':'Authorization: Bearer <API key>'})),
+      el('p',{class:'muted small',style:'margin:0'},
+        'Any provider answers in this shape; intact translates when the provider speaks the other one. '+
+        'Name the model as ',el('code',{},'<provider>/<model>'),' (copy it from a provider page), or give the bare id to use every provider that has it.')),
     el('div',{class:'card pad sec'},
-      el('div',{class:'sech'},el('h2',{class:'grow'},'Example'),provs.length?sel:null),ex),
-    el('div',{class:'card pad sec'},
-      el('h2',{},'MCP server'),
-      el('p',{class:'muted',style:'margin:0'},'Agents can list accounts, models and usage, and edit the filters, with the same API key.'),
-      copyLine(location.origin+'/mcp'),
-      el('pre',{text:'claude mcp add --transport http intact '+location.origin+'/mcp \\\n  --header "Authorization: Bearer <API key>"'})));
+      el('div',{class:'sech'},el('h2',{class:'grow'},'Client setup'),provs.length?sel:null),pre));
+}
+function mcpCard(){
+  return el('div',{class:'card pad sec'},
+    el('h2',{},'MCP server'),
+    el('p',{class:'muted',style:'margin:0'},'Agents can list providers, accounts, models and usage, switch accounts, and edit the filters, with an API key.'),
+    el('div',{class:'kv'},el('span',{class:'k'},'URL'),copyLine(location.origin+'/mcp'),
+      el('span',{class:'k'},'Transport'),el('code',{},'Streamable HTTP'),
+      el('span',{class:'k'},'Auth'),el('code',{},'Authorization: Bearer <API key>')),
+    el('pre',{text:'claude mcp add --transport http intact '+location.origin+'/mcp \\\n  --header "Authorization: Bearer <API key>"'}));
 }
 
 // ---- Providers

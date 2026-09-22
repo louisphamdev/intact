@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/louisphamdev/intact/internal/provider"
+	"github.com/louisphamdev/intact/internal/store"
 	"github.com/louisphamdev/intact/internal/translate"
 )
 
@@ -116,3 +117,20 @@ func (f flushWriter) Write(p []byte) (int, error) { return f.w.Write(p) }
 
 // Flush ignores a writer that cannot flush; the bytes still arrive at the end.
 func (f flushWriter) Flush() error { f.rc.Flush(); return nil }
+
+// anyAnthropic reports whether one of the accounts speaks the Anthropic shape.
+func (a *api) anyAnthropic(targets []store.Connection) bool {
+	for _, c := range targets {
+		if p, ok := a.providerFor(c); ok && shapeOf(p) == translate.Anthropic {
+			return true
+		}
+	}
+	return false
+}
+
+// countTokensEstimate answers Anthropic's count_tokens for a provider that has
+// no such endpoint, with the usual four characters per token. Clients use it to
+// size a context, so an estimate serves them better than an error.
+func countTokensEstimate(w http.ResponseWriter, body []byte) {
+	writeJSON(w, map[string]any{"input_tokens": len(body)/4 + 1})
+}

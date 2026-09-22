@@ -104,3 +104,19 @@ func TestTranslatedErrorKeepsStatusAndShape(t *testing.T) {
 		t.Errorf("code=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestCountTokensIsEstimatedForAnOpenAIProvider(t *testing.T) {
+	called := false
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("groq", "g", "k")
+	h := New(s, map[string]string{"groq": up.URL})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/messages/count_tokens",
+		strings.NewReader(`{"model":"groq/m","messages":[{"role":"user","content":"hello there"}]}`)))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"input_tokens":`) || called {
+		t.Errorf("code=%d body=%s upstream called=%v", rec.Code, rec.Body.String(), called)
+	}
+}

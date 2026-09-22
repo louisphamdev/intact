@@ -60,6 +60,19 @@ Fields of the model table:
 | `variants` | Folded variants, base → levels, default first. |
 | `info` | Per model: `thinking`, `always`, `efforts`, `default`, `paid`. |
 
+### Declared providers
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/provider-defs` | Every declared provider's definition. |
+| `GET /api/provider-defs/{id}` | One definition. |
+| `POST /api/provider-defs` | Declare a provider, or replace its definition (the JSON of [Declared providers](providers.md#declared-providers)). |
+| `DELETE /api/provider-defs/{id}` | Delete a declared provider with no account left. |
+
+Declared OAuth providers sign in through `POST /oauth/{id}/start` and then:
+- `POST /oauth/{id}/finish` for the browser flow;
+- `POST /oauth/{id}/poll` for the device flow, as `{"deviceCode":"…"}`.
+
 ### Rankings
 
 | Method and path | Purpose |
@@ -115,6 +128,7 @@ claude mcp add --transport http intact https://intact.example/mcp \
 | `list_provider_models` | A provider's model table. |
 | `set_models_active` | Switch models on or off. |
 | `set_model_policy` | Auto test and Only free for a provider. |
+| `list_provider_defs`, `put_provider_def`, `delete_provider_def` | Declared providers. |
 | `get_model_rankings` | LMArena rating, rank and tier of a provider's models on each board. |
 | `list_filters`, `add_filter`, `update_filter`, `delete_filter` | The blacklist. |
 | `list_drift_changes`, `ack_drift_changes`, `list_drift_fields` | Drift. |
@@ -143,6 +157,8 @@ The dashboard calls these routes. They mirror the management API.
 | `GET /drift/changes`, `POST /drift/ack`, `GET /drift/fields` | Drift. |
 | `GET /quota`, `GET /usage` | Quota and usage. |
 | `GET /rankings`, `POST /rankings/refresh`, `POST /rankings/alias` | Rankings, as the API. |
+| `GET/POST /provider-defs`, `GET /provider-defs/{id}`, `POST /provider-defs/{id}/delete` | Declared providers, as the API. |
+| `POST /oauth/{provider}/poll` | Poll a declared provider's device sign-in. |
 | `GET/POST /ui-settings/{key}` | Dashboard preferences stored on the server (`quota-view`). |
 
 ## Open routes

@@ -143,6 +143,24 @@ var mcpTools = []mcpTool{
 			of, _ := args["onlyFree"].(bool)
 			return a.updatePolicy(argStr(args, "provider"), at, of)
 		}},
+	{Name: "list_provider_defs", Description: "List the declared providers (added from the dashboard, the API or MCP rather than built in), with their full definition.",
+		InputSchema: schema(map[string]any{}),
+		run:         func(a *api, args map[string]any) (any, error) { return a.store.ProviderDefs() }},
+	{Name: "put_provider_def", Description: "Declare a provider, or replace a declared provider's definition. def: {id, name, kind: apikey|oauth-code|oauth-device, api: openai|anthropic|responses, baseUrl, authHeader?, authPrefix?, headers?, modelsUrl? (or \"none\" with models), models?, color?, icon?, oauth?: {authorizeUrl|deviceCodeUrl, tokenUrl, clientId, clientSecret?, scope?, redirectUri?, verifyUrl?, noPkce?, jsonToken?, extra?}}.",
+		InputSchema: schema(map[string]any{"def": map[string]any{"type": "object"}}, "def"),
+		run: func(a *api, args map[string]any) (any, error) {
+			raw, _ := json.Marshal(args["def"])
+			var d provider.Def
+			if err := json.Unmarshal(raw, &d); err != nil {
+				return nil, err
+			}
+			return a.saveDef(d)
+		}},
+	{Name: "delete_provider_def", Description: "Delete a declared provider that has no account left.",
+		InputSchema: schema(map[string]any{"id": pString}, "id"),
+		run: func(a *api, args map[string]any) (any, error) {
+			return map[string]any{"deleted": true}, a.removeDef(argStr(args, "id"))
+		}},
 	{Name: "list_filters", Description: "List the request filters (the blacklist), optionally for one provider scope.",
 		InputSchema: schema(map[string]any{"provider": pProvider}),
 		run: func(a *api, args map[string]any) (any, error) {

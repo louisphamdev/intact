@@ -138,7 +138,7 @@ Where each provider states thinking support:
 | Cloudflare | `properties` (`reasoning`, `reasoning_effort`, `require_workers_paid`) |
 | Antigravity | `supportsThinking`; the levels are its folded variants |
 
-NVIDIA, TokenHarbor-style custom endpoints and TypeSafe say nothing, so their
+NVIDIA, declared providers and TypeSafe say nothing, so their
 models carry no chip.
 
 ## Rankings

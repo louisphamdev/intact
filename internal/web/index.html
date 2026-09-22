@@ -146,9 +146,9 @@
   button.icon{min-height:30px;min-width:30px;padding:.2rem;background:transparent;color:var(--muted)}
   button.icon:hover{color:var(--fg);background:var(--card2)}
   button:disabled{opacity:.35;cursor:default;pointer-events:none}
-  input,select{font:inherit;padding:.5rem .7rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);
+  input,select,textarea{font:inherit;padding:.5rem .7rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);
                min-height:38px;width:100%}
-  input:focus,select:focus,button:focus-visible,a:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  input:focus,select:focus,textarea:focus,button:focus-visible,a:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
   label.f,div.f{display:grid;gap:.35rem;font-size:.82rem;font-weight:500}
   .hint{font-size:.75rem;color:var(--faint);font-weight:400}
   .search{position:relative;max-width:18rem;width:100%}
@@ -448,6 +448,26 @@ const VI={
 'Fallback: the first account serves; the next only when it fails or is busy.':'Fallback: tài khoản đầu tiên phục vụ; chỉ chuyển sang tài khoản sau khi nó lỗi hoặc bận.',
 'Move up':'Lên','Move down':'Xuống','Move {0} up':'Chuyển {0} lên','Move {0} down':'Chuyển {0} xuống',
 'The next request goes to this account':'Request tiếp theo sẽ vào tài khoản này','next':'kế tiếp','next · {0}/{1}':'kế tiếp · {0}/{1}',
+// declared providers
+'Declared providers':'Provider khai báo','Declare a provider':'Khai báo provider','Declare':'Khai báo','Provider declared':'Đã khai báo provider',
+'No declared provider yet. Declare one with its URL and sign-in, and it works like a built-in one.':'Chưa có provider khai báo. Khai báo URL và cách đăng nhập là dùng được như provider có sẵn.',
+'API key':'API key','OAuth · browser sign-in':'OAuth · đăng nhập trình duyệt','OAuth · device code':'OAuth · device code','Kind':'Loại','Id':'Id',
+'The model prefix: <id>/<model>. Lowercase letters, digits, -.':'Tiền tố model: <id>/<model>. Chữ thường, số, -.',
+'Calls go to <base>/chat/completions, /messages or /responses. Put {accountId} where an account id belongs; accounts then ask for it.':'Lệnh gọi tới <base>/chat/completions, /messages hoặc /responses. Đặt {accountId} ở chỗ cần account id; khi thêm tài khoản sẽ hỏi.',
+'Auth header':'Header xác thực','Auth prefix':'Tiền tố xác thực','Empty: Authorization (x-api-key for an Anthropic key)':'Để trống: Authorization (x-api-key với key Anthropic)',
+'Empty: "Bearer " (none for x-api-key)':'Để trống: "Bearer " (không có với x-api-key)','Extra headers':'Header bổ sung','One per line, Name: value.':'Mỗi dòng một header, Tên: giá trị.',
+'Model list URL':'URL danh sách model','Empty: <base>/models. "none": the provider has no list; the models below are the list.':'Để trống: <base>/models. "none": provider không có danh sách; các model bên dưới là danh sách.',
+'One per line. Used when the list cannot be read, or as the list with "none".':'Mỗi dòng một model. Dùng khi không đọc được danh sách, hoặc làm danh sách khi đặt "none".',
+'Sign-in':'Đăng nhập','Authorize URL':'Authorize URL','Redirect URI':'Redirect URI',
+"The one the provider's app registered. The browser ends there; the person pastes that address back.":'Địa chỉ mà app của provider đã đăng ký. Trình duyệt sẽ dừng ở đó; người dùng dán địa chỉ ấy lại.',
+'Device code URL':'Device code URL','Verification page':'Trang xác nhận','Only when the device answer names none.':'Chỉ cần khi provider không trả trang xác nhận.',
+'Token URL':'Token URL','Client ID':'Client ID','Client secret':'Client secret','Scope':'Scope','Extra authorize parameters':'Tham số authorize thêm',
+'One per line, name=value.':'Mỗi dòng một tham số, tên=giá trị.','No PKCE (the provider refuses it)':'Không dùng PKCE (provider không nhận)',
+'Token requests as JSON (not a form)':'Gửi token request dạng JSON (không phải form)','Color':'Màu','Icon URL':'URL icon',
+'Paste a definition, or copy this one to declare the provider elsewhere.':'Dán một định nghĩa, hoặc sao chép định nghĩa này để khai báo ở nơi khác.',
+'JSON: {0}':'JSON: {0}','Form':'Form','Edit provider · {0}':'Sửa provider · {0}','Definition':'Định nghĩa','Copy the definition as JSON':'Sao chép định nghĩa dạng JSON',
+'Delete the provider "{0}"?':'Xoá provider "{0}"?','2. Enter it at {0}':'2. Nhập mã tại {0}','Waiting for {0}…':'Đang chờ {0}…',
+'After signing in, copy the address the browser ends on (it may fail to load), or the code the page shows, and paste it here.':'Sau khi đăng nhập, sao chép địa chỉ trình duyệt dừng lại (có thể không tải được), hoặc mã trang hiện ra, rồi dán vào đây.',
 // docs tabs
 'Introduction':'Giới thiệu',
 };
@@ -529,6 +549,8 @@ const CATALOG={
 };
 function pinfo(id){
   if(CATALOG[id])return CATALOG[id];
+  const x=infoOf(id);
+  if(x.declared)return {name:x.name||id,color:x.color||'#52525b',api:x.api};
   if(id.startsWith('openai-compatible'))return {name:'OpenAI compatible',color:'#52525b'};
   return {name:id,color:'#52525b'};
 }
@@ -541,6 +563,7 @@ function authTag(p){
 }
 function avatar(id,sm){
   if(infoOf(id).icon)return el('span',{class:'av logo'+(sm?' sm':''),'aria-hidden':'true'},el('img',{src:'/icons/'+id+'.png',alt:''}));
+  if(infoOf(id).iconUrl)return el('span',{class:'av logo'+(sm?' sm':''),'aria-hidden':'true'},el('img',{src:infoOf(id).iconUrl,alt:'',referrerpolicy:'no-referrer'}));
   const n=pname(id).replace(/[^A-Za-z0-9 ]/g,'').split(' ').filter(Boolean);
   const t=(n.length>1?n[0][0]+n[1][0]:(n[0]||'?').slice(0,2)).toUpperCase();
   return el('span',{class:'av'+(sm?' sm':''),style:'background:'+pinfo(id).color,'aria-hidden':'true',text:t});
@@ -713,7 +736,6 @@ function mcpCard(){
 // APIs intact knows the endpoint of, and endpoints the operator enters. A
 // known provider is listed only once it has an account; each group adds its
 // own way.
-const isCustom=p=>!infoOf(p).id&&accountsOf(p).some(a=>a.baseUrl);
 // chooseProvider asks for one provider from a list, in a combobox so the list
 // can grow without filling the screen.
 function chooseProvider(title,ids,onPick){
@@ -738,9 +760,10 @@ function viewProviders(v){
   const byName=(a,b)=>pname(a).localeCompare(pname(b));
   const oauthAll=S.providers.filter(x=>x.auth==='oauth').map(x=>x.id).sort(byName);
   const keyAll=S.providers.filter(x=>x.auth!=='oauth').map(x=>x.id).sort(byName);
+  const declared=S.providers.filter(x=>x.declared).map(x=>x.id).sort(byName);
   const card=p=>{
     const n=accountsOf(p).length,act=activeOf(p).length;
-    const api=isCustom(p)?(accountsOf(p).find(a=>a.meta&&a.meta.api)||{meta:{}}).meta.api||'openai':'';
+    const api=isDeclared(p)?infoOf(p).api||'openai':'';
     return el('a',{class:'pcard'+(wired(p)?'':' dim'),href:'#/providers/'+encodeURIComponent(p),'data-q':(p+' '+pname(p)).toLowerCase()},
       avatar(p),
       el('div',{style:'min-width:0'},
@@ -754,13 +777,13 @@ function viewProviders(v){
       el('button',{class:'primary',type:'button',onclick:onAdd},svg(ICON.plus),addLabel)),
     list.length?el('div',{class:'pgrid'},list.map(card)):el('div',{class:'card empty',style:'padding:1.25rem'},empty));
   const body=el('div',{style:'display:grid;gap:1.75rem'},
-    group('OAuth',oauthAll.filter(p=>accountsOf(p).length),'Sign in',
+    group('OAuth',oauthAll.filter(p=>accountsOf(p).length&&!isDeclared(p)),'Sign in',
       ()=>chooseProvider('Sign in with',oauthAll,p=>startLogin(p)),'No account signed in yet.'),
-    group('API providers',keyAll.filter(p=>accountsOf(p).length),'Add API key',
+    group('API providers',keyAll.filter(p=>accountsOf(p).length&&!isDeclared(p)),'Add API key',
       ()=>chooseProvider('Add an API key for',keyAll,p=>addAccount(p)),'No API provider connected yet.'),
-    group('Custom endpoints',ids.filter(isCustom).sort(byName),'Add endpoint',
-      ()=>addAccount(null),'No custom endpoint yet.'),
-    (()=>{const nw=ids.filter(p=>!wired(p)&&!isCustom(p)).sort(byName);
+    group('Declared providers',declared,'Declare a provider',
+      ()=>declareProvider(null),'No declared provider yet. Declare one with its URL and sign-in, and it works like a built-in one.'),
+    (()=>{const nw=ids.filter(p=>!wired(p)).sort(byName);
       return nw.length?el('div',{class:'sec'},el('div',{class:'sech'},el('h2',{},'Not supported yet')),el('div',{class:'pgrid'},nw.map(card))):null})());
   v.append(body);
   q.oninput=()=>{const s=q.value.trim().toLowerCase();
@@ -774,8 +797,8 @@ function viewProvider(v,p){
     t(list.length===1?'{0} connection':'{0} connections',list.length));
   if(!ok)v.append(el('div',{class:'notice'},t('intact cannot call "{0}" yet, so these accounts are stored but not used.',pname(p))));
   if(setupOf(p)==='account'&&list.some(a=>!a.baseUrl))v.append(el('div',{class:'notice'},'A connection without an account ID cannot be used. Delete it and add it again with the account ID.'));
-  if(custom(p))v.append(el('div',{class:'muted small'},'Custom OpenAI-compatible provider · ',el('code',{text:list.find(a=>a.baseUrl).baseUrl})));
-  const loginBtn=LOGIN[p]?el('button',{class:'primary',type:'button',onclick:()=>startLogin(p)},svg(ICON.plus),'Login'):null;
+  if(isDeclared(p))v.append(defCard(p));
+  const loginBtn=LOGIN[p]||infoOf(p).flow?el('button',{class:'primary',type:'button',onclick:()=>startLogin(p)},svg(ICON.plus),'Login'):null;
   const keyBtn=ok&&setupOf(p)!=='oauth'?el('button',{class:loginBtn?'ghost':'primary',type:'button',onclick:()=>addAccount(p)},svg(ICON.plus),loginBtn?'Add token':'Add'):null;
   const addBtn=loginBtn||keyBtn?el('span',{style:'display:inline-flex;gap:.5rem'},loginBtn,keyBtn):null;
   // Rotation: whose turn it is, round-robin (N requests a turn) or fallback,
@@ -1300,6 +1323,131 @@ function createKey(){
   openModal('kModal');
 }
 
+// ---- Declared providers
+// A provider declared here needs no code: the form asks for what its kind
+// needs, and the JSON view takes or gives the whole definition at once.
+const DECL_KINDS=[['apikey','API key'],['oauth-code','OAuth · browser sign-in'],['oauth-device','OAuth · device code']];
+const isDeclared=p=>!!infoOf(p).declared;
+function kvText(o){return Object.entries(o||{}).map(([k,v])=>k+': '+v).join('\n')}
+function kvParse(s,sep){const o={};for(const line of (s||'').split('\n')){const i=line.indexOf(sep);if(i<1)continue;
+  const k=line.slice(0,i).trim(),v=line.slice(i+1).trim();if(k)o[k]=v}return o}
+async function declareProvider(id){
+  let d={kind:'apikey',api:'openai',oauth:{}};
+  if(id){try{d=await api('/provider-defs/'+encodeURIComponent(id))}catch(e){alert(e.message);return}}
+  d.oauth=d.oauth||{};
+  const f={};
+  const inp=(k,props={})=>(f[k]=el('input',{autocomplete:'off',spellcheck:'false',...props}));
+  const area=(k,props={})=>(f[k]=el('textarea',{rows:3,spellcheck:'false',style:'font:12px/1.5 ui-monospace,monospace',...props}));
+  const row=(label,node,hint,key)=>el('label',{class:'f','data-row':key||''},label,node,hint?el('span',{class:'faint small',text:tr(hint)}):null);
+  const kind=el('select',{},DECL_KINDS.map(([k,n])=>el('option',{value:k,text:tr(n)})));
+  const apiSel=el('select',{},[['openai','OpenAI Chat Completions'],['anthropic','Anthropic Messages'],['responses','OpenAI Responses']].map(([k,n])=>el('option',{value:k,text:n})));
+  const noPkce=el('input',{type:'checkbox',style:'width:auto;min-height:0'}),jsonTok=el('input',{type:'checkbox',style:'width:auto;min-height:0'});
+  const form=el('div',{style:'display:grid;gap:.85rem'},
+    el('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:.75rem;align-items:start'},
+      row('Kind',kind),row('API standard',apiSel)),
+    el('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:.75rem;align-items:start'},
+      row('Id',inp('id',{placeholder:'e.g. deepseek'}),'The model prefix: <id>/<model>. Lowercase letters, digits, -.'),
+      row('Name',inp('name',{placeholder:'e.g. DeepSeek'}))),
+    row('Base URL',inp('baseUrl',{placeholder:'https://api.example.com/v1'}),'Calls go to <base>/chat/completions, /messages or /responses. Put {accountId} where an account id belongs; accounts then ask for it.'),
+    el('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:.75rem;align-items:start'},
+      row('Auth header',inp('authHeader',{placeholder:'Authorization'}),'Empty: Authorization (x-api-key for an Anthropic key)'),
+      row('Auth prefix',inp('authPrefix',{placeholder:'Bearer '}),'Empty: "Bearer " (none for x-api-key)')),
+    row('Extra headers',area('headers',{placeholder:'anthropic-beta: …\nX-Title: intact'}),'One per line, Name: value.'),
+    row('Model list URL',inp('modelsUrl',{placeholder:'<base>/models'}),'Empty: <base>/models. "none": the provider has no list; the models below are the list.'),
+    row('Models',area('models',{placeholder:'model-a\nmodel-b'}),'One per line. Used when the list cannot be read, or as the list with "none".'),
+    el('div',{'data-oauth':'1',style:'display:grid;gap:.85rem;padding:.85rem;border:1px dashed var(--line);border-radius:10px'},
+      el('b',{style:'font-size:.85rem'},'Sign-in'),
+      row('Authorize URL',inp('authorizeUrl',{placeholder:'https://auth.example.com/oauth/authorize'}),null,'code'),
+      row('Redirect URI',inp('redirectUri',{placeholder:'http://localhost:1455/auth/callback'}),'The one the provider\'s app registered. The browser ends there; the person pastes that address back.','code'),
+      row('Device code URL',inp('deviceCodeUrl',{placeholder:'https://auth.example.com/oauth/device/code'}),null,'device'),
+      row('Verification page',inp('verifyUrl',{placeholder:'https://example.com/activate'}),'Only when the device answer names none.','device'),
+      row('Token URL',inp('tokenUrl',{placeholder:'https://auth.example.com/oauth/token'})),
+      el('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:.75rem;align-items:start'},
+        row('Client ID',inp('clientId')),row('Client secret',inp('clientSecret',{type:'password',placeholder:'(none)'}))),
+      row('Scope',inp('scope',{placeholder:'openid profile offline_access'})),
+      row('Extra authorize parameters',area('extra',{placeholder:'access_type=offline\nprompt=consent'}),'One per line, name=value.','code'),
+      el('label',{style:'display:flex;gap:.5rem;align-items:center','data-row':'code'},noPkce,tr('No PKCE (the provider refuses it)')),
+      el('label',{style:'display:flex;gap:.5rem;align-items:center'},jsonTok,tr('Token requests as JSON (not a form)'))),
+    el('div',{style:'display:grid;grid-template-columns:1fr 3fr;gap:.75rem;align-items:start'},
+      row('Color',inp('color',{type:'color',style:'min-height:36px;padding:2px'})),
+      row('Icon URL',inp('icon',{placeholder:'https://…/logo.png'}))));
+  const fill=d=>{
+    kind.value=d.kind||'apikey';apiSel.value=d.api||'openai';
+    for(const k of ['id','name','baseUrl','authHeader','authPrefix','modelsUrl','icon'])f[k].value=d[k]||'';
+    f.color.value=d.color||'#52525b';f.headers.value=kvText(d.headers);f.models.value=(d.models||[]).join('\n');
+    const o=d.oauth||{};for(const k of ['authorizeUrl','redirectUri','deviceCodeUrl','verifyUrl','tokenUrl','clientId','clientSecret','scope'])f[k].value=o[k]||'';
+    f.extra.value=Object.entries(o.extra||{}).map(([k,v])=>k+'='+v).join('\n');noPkce.checked=!!o.noPkce;jsonTok.checked=!!o.jsonToken;
+    f.id.readOnly=!!id;show();
+  };
+  const read=()=>{
+    const d={id:f.id.value.trim(),name:f.name.value.trim(),kind:kind.value,api:apiSel.value,baseUrl:f.baseUrl.value.trim(),
+      authHeader:f.authHeader.value.trim(),authPrefix:f.authPrefix.value,headers:kvParse(f.headers.value,':'),
+      modelsUrl:f.modelsUrl.value.trim(),models:f.models.value.split('\n').map(s=>s.trim()).filter(Boolean),
+      color:f.color.value==='#52525b'?'':f.color.value,icon:f.icon.value.trim()};
+    if(kind.value!=='apikey')d.oauth={authorizeUrl:f.authorizeUrl.value.trim(),redirectUri:f.redirectUri.value.trim(),
+      deviceCodeUrl:f.deviceCodeUrl.value.trim(),verifyUrl:f.verifyUrl.value.trim(),tokenUrl:f.tokenUrl.value.trim(),
+      clientId:f.clientId.value.trim(),clientSecret:f.clientSecret.value,scope:f.scope.value.trim(),
+      extra:kvParse(f.extra.value,'='),noPkce:noPkce.checked,jsonToken:jsonTok.checked};
+    for(const k of Object.keys(d))if(d[k]===''||(typeof d[k]==='object'&&!Array.isArray(d[k])&&!Object.keys(d[k]).length)||(Array.isArray(d[k])&&!d[k].length))delete d[k];
+    if(d.oauth){for(const k of Object.keys(d.oauth))if(d.oauth[k]===''||d.oauth[k]===false||(typeof d.oauth[k]==='object'&&!Object.keys(d.oauth[k]).length))delete d.oauth[k]}
+    return d;
+  };
+  // Show only the fields the kind uses.
+  const show=()=>{const k=kind.value;
+    form.querySelector('[data-oauth]').hidden=k==='apikey';
+    for(const r of form.querySelectorAll('[data-row=code]'))r.hidden=k!=='oauth-code';
+    for(const r of form.querySelectorAll('[data-row=device]'))r.hidden=k!=='oauth-device';
+  };
+  kind.onchange=show;
+  // JSON view: the same definition as text.
+  const json=el('textarea',{rows:18,spellcheck:'false',style:'font:12px/1.5 ui-monospace,monospace'});
+  const jsonBox=el('div',{hidden:true,style:'display:grid;gap:.5rem'},
+    el('span',{class:'faint small',text:tr('Paste a definition, or copy this one to declare the provider elsewhere.')}),json);
+  let mode='form';
+  const seg=el('span',{class:'seg sm'});
+  const setMode=m=>{
+    if(m==='json'&&mode==='form')json.value=JSON.stringify(read(),null,2);
+    if(m==='form'&&mode==='json'){try{fill(JSON.parse(json.value))}catch(e){err.textContent=t('JSON: {0}',e.message);return}}
+    mode=m;form.hidden=m!=='form';jsonBox.hidden=m!=='json';err.textContent='';
+    seg.replaceChildren(...[['form','Form'],['json','JSON']].map(([k,n])=>el('button',{type:'button','aria-pressed':String(mode===k),onclick:()=>setMode(k)},n)));
+  };
+  const err=el('div',{class:'err-msg'});
+  const close=()=>ov.remove();
+  const save=async()=>{
+    err.textContent='';let def;
+    if(mode==='json'){try{def=JSON.parse(json.value)}catch(e){err.textContent=t('JSON: {0}',e.message);return}}else def=read();
+    if(id)def.id=id;
+    try{const saved=await postJSON('/provider-defs',def);close();toast(id?'Saved':'Provider declared');await load();
+      location.hash='#/providers/'+encodeURIComponent(saved.id)}
+    catch(e){err.textContent=e.message}
+  };
+  const ov=el('div',{class:'overlay',onclick:e=>{if(e.target===ov)close()}},el('div',{class:'modal',role:'dialog','aria-modal':'true',style:'width:min(44rem,100%)'},
+    el('div',{class:'mh'},el('strong',{},id?t('Edit provider · {0}',pname(id)):tr('Declare a provider')),seg,
+      el('button',{class:'icon',type:'button','aria-label':'Close',onclick:close},'✕')),
+    el('div',{class:'mb',style:'max-height:70vh'},form,jsonBox,err),
+    el('div',{class:'mf'},el('button',{class:'ghost',type:'button',onclick:close},'Cancel'),el('button',{class:'primary',type:'button',onclick:save},id?'Save':'Declare'))));
+  fill(d);setMode('form');
+  document.body.append(ov);(id?f.name:f.id).focus();
+}
+// The definition card of a declared provider's page.
+function defCard(p){
+  const box=el('div',{class:'card pad'},el('span',{class:'faint small',text:'Loading…'}));
+  api('/provider-defs/'+encodeURIComponent(p)).then(d=>{
+    const kv=(k,v)=>v?[el('span',{class:'k'},k),el('code',{text:v})]:[];
+    box.replaceChildren(
+      el('div',{class:'sech'},el('h2',{class:'grow'},'Definition'),
+        el('button',{class:'ghost',type:'button',onclick:()=>declareProvider(p)},svg(ICON.edit),'Edit'),
+        el('button',{class:'ghost',type:'button',title:'Copy the definition as JSON',onclick:()=>copy(JSON.stringify(d,null,2),'JSON')},svg(ICON.copy),'JSON'),
+        el('button',{class:'danger',type:'button',onclick:async()=>{if(!confirm(t('Delete the provider "{0}"?',pname(p))))return;
+          try{await postJSON('/provider-defs/'+encodeURIComponent(p)+'/delete',{});toast('Deleted');await load();location.hash='#/providers'}catch(e){alert(e.message)}}},svg(ICON.trash),'Delete')),
+      el('div',{class:'kv'},...kv(tr('Kind'),tr((DECL_KINDS.find(x=>x[0]===d.kind)||[,d.kind])[1])),...kv(tr('API standard'),d.api),...kv('Base URL',d.baseUrl),
+        ...kv(tr('Model list URL'),d.modelsUrl||(d.baseUrl+'/models')),...kv(tr('Models'),(d.models||[]).join(', ')),
+        ...kv('Auth',(d.authHeader||'')+(d.authPrefix?' '+d.authPrefix.trim()+' …':'')),
+        ...(d.oauth?kv('OAuth',[d.oauth.authorizeUrl||d.oauth.deviceCodeUrl,d.oauth.tokenUrl].filter(Boolean).join(' → ')):[])));
+  }).catch(e=>box.replaceChildren(el('span',{class:'err-msg',text:e.message})));
+  return box;
+}
+
 // ---- OAuth login
 // Providers whose accounts sign in. "paste": the browser ends on a page the
 // server cannot see, so the person pastes its URL or code; "device": GitHub.
@@ -1330,11 +1478,11 @@ async function runLogin(p,label){
   if(r.device){
     const code=el('div',{style:'font:700 1.6rem/1.2 ui-monospace,monospace;letter-spacing:.15em;text-align:center;padding:.6rem;background:var(--bg);border:1px solid var(--line);border-radius:10px',text:r.userCode});
     $('lBody').replaceChildren(el('div',{class:'f'},'1. Copy this code',el('div',{style:'display:flex;gap:.5rem;align-items:center'},el('div',{style:'flex:1'},code),copyBtn(r.userCode,'code'))),
-      el('div',{class:'f'},'2. Enter it at GitHub',el('a',{href:r.verificationUri,target:'_blank',rel:'noopener',class:'copyline',style:'text-decoration:none'},el('code',{text:r.verificationUri}))),
-      el('p',{class:'muted small',style:'margin:0'},'Waiting for GitHub…'),err);
+      el('div',{class:'f'},t('2. Enter it at {0}',pname(p)),el('a',{href:r.verificationUri,target:'_blank',rel:'noopener',class:'copyline',style:'text-decoration:none'},el('code',{text:r.verificationUri}))),
+      el('p',{class:'muted small',style:'margin:0'},t('Waiting for {0}…',pname(p))),err);
     const poll=async()=>{
       if($('lModal').hidden)return;
-      try{const x=await postJSON('/oauth/github/poll',{deviceCode:r.deviceCode,label});
+      try{const x=await postJSON('/oauth/'+p+'/poll',{deviceCode:r.deviceCode,label});
         if(x.status==='done'){done(x.connection);return}}
       catch(e){err.textContent=e.message;return}
       loginPoll=setTimeout(poll,Math.max(5,r.interval||5)*1000);
@@ -1346,7 +1494,7 @@ async function runLogin(p,label){
   const go=el('button',{class:'primary',type:'button'},'Sign in');
   $('lBody').replaceChildren(
     el('div',{class:'f'},'1. Open the sign-in page',el('a',{href:r.url,target:'_blank',rel:'noopener',class:'primary',style:'display:inline-flex;justify-content:center;padding:.55rem;border-radius:8px;background:var(--accent-strong);color:#fff;text-decoration:none;font-weight:600'},t('Open {0} sign-in',pname(p)))),
-    el('label',{class:'f'},'2. '+LOGIN[p].hint,input),err);
+    el('label',{class:'f'},'2. '+tr((LOGIN[p]||{}).hint||'After signing in, copy the address the browser ends on (it may fail to load), or the code the page shows, and paste it here.'),input),err);
   $('lFoot').replaceChildren(el('button',{class:'ghost',type:'button','data-close':true},'Cancel'),go);
   let busy=false;
   const submit=async()=>{

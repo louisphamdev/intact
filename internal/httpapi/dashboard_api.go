@@ -37,6 +37,13 @@ func (a *api) providers(w http.ResponseWriter, r *http.Request) {
 		// "apikey" for a documented API reached with a key.
 		Auth string `json:"auth"`
 		Icon bool   `json:"icon"`
+		// A declared provider: its name, colour, icon URL, sign-in flow.
+		Declared bool   `json:"declared,omitempty"`
+		Name     string `json:"name,omitempty"`
+		Color    string `json:"color,omitempty"`
+		IconURL  string `json:"iconUrl,omitempty"`
+		Flow     string `json:"flow,omitempty"`
+		API      string `json:"api,omitempty"`
 	}
 	out := []info{}
 	for _, id := range provider.IDs() {
@@ -50,7 +57,17 @@ func (a *api) providers(w http.ResponseWriter, r *http.Request) {
 			auth = "oauth"
 		}
 		_, err := web.Files.Open("icons/" + id + ".png")
-		out = append(out, info{ID: id, Setup: setup, Auth: auth, Icon: err == nil})
+		in := info{ID: id, Setup: setup, Auth: auth, Icon: err == nil}
+		if d, ok := provider.Declared(id); ok {
+			in.Declared, in.Name, in.Color, in.IconURL, in.API = true, d.Name, d.Color, d.Icon, d.API
+			switch d.Kind {
+			case provider.KindOAuthCode:
+				in.Flow = "code"
+			case provider.KindOAuthDevice:
+				in.Flow = "device"
+			}
+		}
+		out = append(out, in)
 	}
 	writeJSON(w, map[string]any{"providers": out})
 }

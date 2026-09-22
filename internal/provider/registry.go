@@ -50,6 +50,11 @@ type Provider struct {
 	// ModelsPath, when set, replaces "/models": the list lives at the base
 	// without its "/v1", plus this path (Cloudflare's model search).
 	ModelsPath string
+	// ModelsURL, when set, is the model list's full URL ({accountId} is
+	// filled like the base URL's).
+	ModelsURL string
+	// NoModelList: the provider has no list; Models is the list.
+	NoModelList bool
 	// Watch turns on structure drift monitoring. It is set on the providers
 	// reached as a real tool (OAuth, impersonated clients), whose formats move
 	// with each tool release; a documented API does not need it.
@@ -247,8 +252,19 @@ const CodexCLIVersion = "0.155.1"
 
 // Lookup returns the provider with this id.
 func Lookup(id string) (Provider, bool) {
-	p, ok := registry[id]
-	return p, ok
+	if p, ok := registry[id]; ok {
+		return p, ok
+	}
+	if d, ok := Declared(id); ok {
+		return d.Provider(), true
+	}
+	return Provider{}, false
+}
+
+// Builtin reports whether id is a provider written in code.
+func Builtin(id string) bool {
+	_, ok := registry[id]
+	return ok
 }
 
 // IDs returns the registered provider ids in sorted order.
@@ -257,6 +273,7 @@ func IDs() []string {
 	for id := range registry {
 		out = append(out, id)
 	}
+	out = append(out, DeclaredIDs()...)
 	sort.Strings(out)
 	return out
 }

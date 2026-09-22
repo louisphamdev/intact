@@ -43,6 +43,7 @@ func (a *api) createAccount(w http.ResponseWriter, r *http.Request) {
 	secret := strings.TrimSpace(r.PostFormValue("secret"))
 	baseURL := strings.TrimRight(strings.TrimSpace(r.PostFormValue("base_url")), "/")
 	p, registered := provider.Lookup(prov)
+	accountID := ""
 	switch {
 	case prov == "":
 		writeError(w, http.StatusBadRequest, "provider is required")
@@ -54,6 +55,7 @@ func (a *api) createAccount(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		baseURL = p.WithAccount(acct)
+		accountID = acct
 	case registered && p.Setup == "oauth":
 		writeError(w, http.StatusBadRequest, "this provider's accounts sign in with OAuth; they cannot be added with a key")
 		return
@@ -73,19 +75,26 @@ func (a *api) createAccount(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "a custom provider needs an http(s) base URL")
 			return
 		}
-		switch r.PostFormValue("api") {
-		case "", "openai", "anthropic", "responses":
-		default:
-			writeError(w, http.StatusBadRequest, "api must be openai, anthropic or responses")
+		// A new custom endpoint becomes a declared provider, so its settings
+		// live in one place and every account of it follows them.
+		d := provider.Def{ID: prov, Kind: provider.KindAPIKey, API: r.PostFormValue("api"), BaseURL: baseURL}
+		if err := d.Normalize(); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if err := a.store.PutProviderDef(d); err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot store the provider")
+			return
+		}
+		a.loadDefs()
+		baseURL = ""
 	}
 	c, err := a.store.CreateConnection(prov, r.PostFormValue("label"), secret)
 	if err == nil && baseURL != "" {
 		err = a.store.SetBaseURL(c.ID, baseURL)
 	}
-	if api := r.PostFormValue("api"); err == nil && !registered && api != "" && api != "openai" {
-		err = a.store.SetMeta(c.ID, map[string]string{"api": api})
+	if err == nil && accountID != "" {
+		err = a.store.SetMeta(c.ID, map[string]string{"accountId": accountID})
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "cannot create connection")

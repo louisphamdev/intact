@@ -290,6 +290,9 @@ func (a *api) catalogIDs(ctx context.Context, prov string) []string {
 			if ids, raw, ok = a.antigravityModels(ctx, conns[0]); ok {
 				ids, groups = groupVariants(ids)
 			}
+		} else if p.NoModelList {
+			// Declared without a list: the declared models are the list.
+			ids, ok = append([]string(nil), p.Models...), true
 		} else {
 			ids, raw, ok = a.fetchModelIDs(ctx, conns[0])
 		}
@@ -352,7 +355,14 @@ func (a *api) fetchModelIDs(ctx context.Context, conn store.Connection) ([]strin
 			Name string `json:"name"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(raw, &d); err != nil {
+	// Some lists are a bare array of models (Together).
+	if t := bytes.TrimSpace(raw); len(t) > 0 && t[0] == '[' {
+		var arr []json.RawMessage
+		if json.Unmarshal(t, &arr) != nil {
+			return nil, nil, false
+		}
+		d.Models = arr
+	} else if err := json.Unmarshal(raw, &d); err != nil {
 		return nil, nil, false
 	}
 	ids := []string{}
@@ -381,6 +391,10 @@ func (a *api) fetchModelIDs(ctx context.Context, conn store.Connection) ([]strin
 			ids = append(ids, firstNonEmpty(o.Slug, o.ID, o.Name))
 		}
 	}
+	// Google's OpenAI-shaped list names models "models/<id>"; calls take <id>.
+	for i, id := range ids {
+		ids[i] = strings.TrimPrefix(id, "models/")
+	}
 	sort.Strings(ids)
 	return ids, raw, true
 }
@@ -405,6 +419,9 @@ func (a *api) getModels(ctx context.Context, conn store.Connection) (*http.Respo
 	url := base + "/models"
 	if p.ModelsPath != "" {
 		url = strings.TrimSuffix(base, "/v1") + p.ModelsPath
+	}
+	if p.ModelsURL != "" {
+		url = strings.ReplaceAll(p.ModelsURL, "{accountId}", conn.Meta["accountId"])
 	}
 	if p.ModelsQuery != "" {
 		url += "?" + p.ModelsQuery

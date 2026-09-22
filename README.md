@@ -22,8 +22,9 @@ tools) and wants to use them all from any client.
   is refreshed and the request retried.
 - **Providers.** API-key providers (Groq, NVIDIA, OpenRouter, Cloudflare Workers
   AI, TypeSafe), the sign-ins of coding tools (Claude Code, Codex, Antigravity,
-  GitHub Copilot), and any custom OpenAI, Anthropic or Responses endpoint.
-  [Providers](docs/providers.md)
+  GitHub Copilot). Any other provider is declared from the dashboard without
+  code: API key, browser OAuth or device-code OAuth, with the fields each kind
+  needs, or pasted as JSON. [Providers](docs/providers.md)
 - **Model management.** A table per provider shows each model with an on/off
   switch, its thinking support and effort levels, and its last test.
   - Lists are fetched every hour.
@@ -78,7 +79,7 @@ and Cloudflare Tunnel deployment.
 | --- | --- |
 | [Getting started](docs/getting-started.md) | Build, flags, environment, first account, deployment |
 | [Routing](docs/routing.md) | Model resolution, translation, rotation, failover, variants |
-| [Providers](docs/providers.md) | Every built-in provider, sign-in flows, custom endpoints |
+| [Providers](docs/providers.md) | Every built-in provider, sign-in flows, declaring a provider |
 | [Models](docs/models.md) | The model table, fetching, switches, tests, auto test, only free, thinking |
 | [Blacklist](docs/blacklist.md) | Request filters: kinds, scope, seeded rules |
 | [Drift](docs/drift.md) | Structure learning and change alerts |

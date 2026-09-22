@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/louisphamdev/intact/internal/provider"
 	"github.com/louisphamdev/intact/internal/store"
 )
 
@@ -34,6 +35,8 @@ type loginSpec struct {
 	pkce         bool
 	jsonExchange bool
 	extra        map[string]string
+	// secret is a declared provider's client secret.
+	secret string
 }
 
 var loginSpecs = map[string]loginSpec{
@@ -91,7 +94,11 @@ func (a *api) loginStart(w http.ResponseWriter, r *http.Request) {
 		a.githubDeviceStart(w, r)
 		return
 	}
-	spec, ok := loginSpecs[prov]
+	if d, ok := provider.Declared(prov); ok && d.Kind == provider.KindOAuthDevice {
+		a.deviceStart(w, r, d)
+		return
+	}
+	spec, ok := specFor(prov)
 	if !ok {
 		writeError(w, http.StatusNotFound, "this provider has no sign-in")
 		return
@@ -180,9 +187,23 @@ type tokenAnswer struct {
 	ErrorDesc string `json:"error_description"`
 }
 
+// specFor returns a provider's browser sign-in: built in, or declared.
+func specFor(prov string) (loginSpec, bool) {
+	if s, ok := loginSpecs[prov]; ok {
+		return s, true
+	}
+	d, ok := provider.Declared(prov)
+	if !ok || d.Kind != provider.KindOAuthCode || d.OAuth == nil {
+		return loginSpec{}, false
+	}
+	o := d.OAuth
+	return loginSpec{authorizeURL: o.AuthorizeURL, tokenURL: o.TokenURL, clientID: o.ClientID, redirectURI: o.RedirectURI,
+		scope: o.Scope, pkce: !o.NoPKCE, jsonExchange: o.JSONToken, extra: o.Extra, secret: o.ClientSecret}, true
+}
+
 func (a *api) exchangeLogin(ctx context.Context, p store.PendingLogin, code string) (store.Connection, error) {
-	spec := loginSpecs[p.Provider]
-	secret := ""
+	spec, _ := specFor(p.Provider)
+	secret := spec.secret
 	if p.Provider == "antigravity" {
 		secret = a.antigravityClientSecret()
 		if secret == "" {
@@ -240,6 +261,10 @@ func (a *api) exchangeLogin(ctx context.Context, p store.PendingLogin, code stri
 		}
 	case "antigravity":
 		if email := googleEmail(ctx, t.AccessToken); email != "" {
+			label = email
+		}
+	default:
+		if email, _ := idTokenClaims(t.IDToken); email != "" {
 			label = email
 		}
 	}
@@ -419,4 +444,126 @@ func (a *api) githubDevicePoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"status": "done", "connection": c})
+}
+
+// deviceStart begins a declared provider's device sign-in (RFC 8628).
+func (a *api) deviceStart(w http.ResponseWriter, r *http.Request, d provider.Def) {
+	o := d.OAuth
+	fields := map[string]string{"client_id": o.ClientID}
+	if o.Scope != "" {
+		fields["scope"] = o.Scope
+	}
+	req, err := oauthRequest(r.Context(), o.DeviceCodeURL, fields, o.JSONToken)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "the provider is unreachable")
+		return
+	}
+	defer resp.Body.Close()
+	var dc struct {
+		DeviceCode              string `json:"device_code"`
+		UserCode                string `json:"user_code"`
+		VerificationURI         string `json:"verification_uri"`
+		VerificationURL         string `json:"verification_url"`
+		VerificationURIComplete string `json:"verification_uri_complete"`
+		Interval                int    `json:"interval"`
+		ExpiresIn               int    `json:"expires_in"`
+	}
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if json.Unmarshal(raw, &dc) != nil || dc.DeviceCode == "" {
+		writeError(w, http.StatusBadGateway, "the provider gave no device code: "+strings.TrimSpace(string(raw[:min(len(raw), 200)])))
+		return
+	}
+	verify := firstNonEmpty(dc.VerificationURIComplete, dc.VerificationURI, dc.VerificationURL, o.VerifyURL)
+	writeJSON(w, map[string]any{"device": true, "deviceCode": dc.DeviceCode, "userCode": dc.UserCode,
+		"verificationUri": verify, "interval": dc.Interval, "expiresIn": dc.ExpiresIn})
+}
+
+// devicePoll asks a declared provider whether the device code was approved,
+// and stores the account when it was.
+func (a *api) devicePoll(w http.ResponseWriter, r *http.Request) {
+	d, ok := provider.Declared(r.PathValue("provider"))
+	if !ok || d.Kind != provider.KindOAuthDevice {
+		writeError(w, http.StatusNotFound, "this provider has no device sign-in")
+		return
+	}
+	var body struct {
+		DeviceCode string `json:"deviceCode"`
+		Label      string `json:"label"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil || body.DeviceCode == "" {
+		writeError(w, http.StatusBadRequest, "deviceCode is required")
+		return
+	}
+	o := d.OAuth
+	fields := map[string]string{"client_id": o.ClientID, "device_code": body.DeviceCode,
+		"grant_type": "urn:ietf:params:oauth:grant-type:device_code"}
+	if o.ClientSecret != "" {
+		fields["client_secret"] = o.ClientSecret
+	}
+	req, err := oauthRequest(r.Context(), o.TokenURL, fields, o.JSONToken)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "the provider is unreachable")
+		return
+	}
+	defer resp.Body.Close()
+	var t tokenAnswer
+	json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&t)
+	switch {
+	case t.AccessToken != "":
+	case t.Error == "authorization_pending" || t.Error == "slow_down":
+		writeJSON(w, map[string]any{"status": "pending"})
+		return
+	default:
+		writeError(w, http.StatusBadRequest, d.Name+": "+firstNonEmpty(t.ErrorDesc, t.Error, "sign-in failed"))
+		return
+	}
+	label := d.Name
+	if email, _ := idTokenClaims(t.IDToken); email != "" {
+		label = email
+	}
+	if l := strings.TrimSpace(body.Label); l != "" {
+		label = l
+	}
+	c, err := a.saveOAuthAccount(d.ID, label, t, o.TokenURL, o.ClientID, o.ClientSecret, nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot store the account")
+		return
+	}
+	writeJSON(w, map[string]any{"status": "done", "connection": c})
+}
+
+// oauthRequest builds a token-endpoint POST, as a form or as JSON.
+func oauthRequest(ctx context.Context, u string, fields map[string]string, asJSON bool) (*http.Request, error) {
+	var req *http.Request
+	var err error
+	if asJSON {
+		b, _ := json.Marshal(fields)
+		req, err = http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(b))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+	} else {
+		form := url.Values{}
+		for k, v := range fields {
+			form.Set(k, v)
+		}
+		req, err = http.NewRequestWithContext(ctx, http.MethodPost, u, strings.NewReader(form.Encode()))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
+	}
+	if err == nil {
+		req.Header.Set("Accept", "application/json")
+	}
+	return req, err
 }

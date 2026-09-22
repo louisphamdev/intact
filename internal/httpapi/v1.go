@@ -597,7 +597,6 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 // runs last on the exact bytes the provider will receive.
 func filterFor(a *api, p provider.Provider, prov string, body []byte) []byte {
 	body = adjustForProvider(p, body)
-	body = withSystemPrefix(p, body)
 	body, _ = filter.Apply(body, a.rulesFor(prov))
 	return body
 }

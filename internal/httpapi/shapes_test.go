@@ -37,7 +37,7 @@ func TestOpenAICallerReachesAnthropicProvider(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if gotPath != "/messages" || !strings.Contains(gotBody, `"system":[{"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."},{"text":"sys","type":"text"}]`) || !strings.Contains(gotBody, `"max_tokens":8192`) {
+	if gotPath != "/messages" || !strings.Contains(gotBody, `"system":[{"text":"sys","type":"text"}]`) || !strings.Contains(gotBody, `"max_tokens":8192`) {
 		t.Errorf("upstream got %s %s", gotPath, gotBody)
 	}
 	if b := rec.Body.String(); !strings.Contains(b, `"object":"chat.completion"`) || !strings.Contains(b, `"content":"Hi"`) {

@@ -50,10 +50,6 @@ type Provider struct {
 	// ModelsPath, when set, replaces "/models": the list lives at the base
 	// without its "/v1", plus this path (Cloudflare's model search).
 	ModelsPath string
-	// SystemPrefix is the first system block every request must carry: the
-	// genuine tool's identity line. Anthropic refuses a Claude subscription
-	// token (429 rate_limit_error "Error") on a request without it.
-	SystemPrefix string
 	// Watch turns on structure drift monitoring. It is set on the providers
 	// reached as a real tool (OAuth, impersonated clients), whose formats move
 	// with each tool release; a documented API does not need it.
@@ -211,12 +207,11 @@ var registry = map[string]Provider{
 		AuthPrefix: "Bearer ",
 	},
 	"claude": {
-		ID:           "claude",
-		BaseURL:      "https://api.anthropic.com/v1",
-		API:          "anthropic",
-		Watch:        true,
-		Setup:        "oauth",
-		SystemPrefix: ClaudeCodeIdentity,
+		ID:      "claude",
+		BaseURL: "https://api.anthropic.com/v1",
+		API:     "anthropic",
+		Watch:   true,
+		Setup:   "oauth",
 		// Anthropic's /models needs a live token; this list stands in without one.
 		Models:     []string{"claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-fable-5", "claude-haiku-4-5-20251001"},
 		AuthHeader: "Authorization",
@@ -265,6 +260,3 @@ func IDs() []string {
 	sort.Strings(out)
 	return out
 }
-
-// ClaudeCodeIdentity is the first system block Claude Code sends.
-const ClaudeCodeIdentity = "You are Claude Code, Anthropic's official CLI for Claude."

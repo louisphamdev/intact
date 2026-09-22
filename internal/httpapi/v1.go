@@ -221,6 +221,9 @@ func (a *api) providerModels(ctx context.Context, prov string) []string {
 	if conns := a.activeConnections(prov); len(conns) > 0 {
 		ids, ok = a.fetchModelIDs(ctx, conns[0])
 	}
+	if p, known := provider.Lookup(prov); known && len(p.Models) > 0 && len(ids) == 0 {
+		ids, ok = p.Models, true
+	}
 	a.cat.mu.Lock()
 	a.cat.m[prov] = catalogEntry{ids: ids, ok: ok, at: time.Now()}
 	a.cat.mu.Unlock()

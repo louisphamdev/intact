@@ -28,6 +28,11 @@ type Provider struct {
 	// Setup tells the dashboard what a new connection needs besides a label:
 	// "key" (the default), "account" (a key and an account id) or "none".
 	Setup string
+	// FreshIDs are headers set on each request, when the caller sent none, to
+	// the prefix followed by a random hex id.
+	FreshIDs map[string]string
+	// Models is the list to use when the upstream has no model endpoint.
+	Models []string
 }
 
 // Generic is an OpenAI-compatible upstream that a connection defines itself
@@ -73,13 +78,28 @@ var registry = map[string]Provider{
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
 		Setup:      "account",
+		// Workers AI has no OpenAI-style /models; these are its chat models.
+		Models: []string{
+			"@cf/deepseek-ai/deepseek-r1-distill-qwen-32b", "@cf/meta/llama-3.1-70b-instruct-fp8-fast",
+			"@cf/meta/llama-3.1-8b-instruct-awq", "@cf/meta/llama-3.1-8b-instruct-fp8-fast",
+			"@cf/meta/llama-3.2-1b-instruct", "@cf/meta/llama-3.2-3b-instruct",
+			"@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/mistralai/mistral-small-3.1-24b-instruct",
+			"@cf/moonshotai/kimi-k2.5", "@cf/moonshotai/kimi-k2.6", "@cf/qwen/qwen2.5-coder-32b-instruct",
+			"@cf/qwen/qwq-32b", "@cf/zai-org/glm-4.7-flash",
+		},
 	},
-	// OpenCode Zen's free models take no key; the client header is what the
-	// desktop app sends.
+	// OpenCode Zen's free tier answers only the OpenCode app, which sends the
+	// public token, its user agent, and a session and request id.
 	"opencode": {
-		ID:       "opencode",
-		BaseURL:  "https://opencode.ai/zen/v1",
-		Identity: map[string]string{"X-Opencode-Client": "desktop"},
+		ID:      "opencode",
+		BaseURL: "https://opencode.ai/zen/v1",
+		Identity: map[string]string{
+			"Authorization":      "Bearer public",
+			"User-Agent":         "opencode",
+			"X-Opencode-Client":  "desktop",
+			"X-Opencode-Project": "global",
+		},
+		FreshIDs: map[string]string{"X-Opencode-Session": "ses_", "X-Opencode-Request": "msg_"},
 		Setup:    "none",
 	},
 	"openrouter": {

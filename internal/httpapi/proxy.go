@@ -3,6 +3,8 @@ package httpapi
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"io"
 	"log"
@@ -70,6 +72,11 @@ func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, secr
 	}
 	for k, v := range p.Identity {
 		out.Header.Set(k, v)
+	}
+	for k, prefix := range p.FreshIDs {
+		if out.Header.Get(k) == "" {
+			out.Header.Set(k, prefix+randomHex())
+		}
 	}
 	if p.AuthHeader != "" {
 		out.Header.Set(p.AuthHeader, p.AuthPrefix+secret)
@@ -218,4 +225,11 @@ func (a *api) connection(id string) (store.Connection, error) {
 		}
 	}
 	return store.Connection{}, errors.New("not found")
+}
+
+// randomHex returns 16 random bytes as hex, for a per-request id header.
+func randomHex() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }

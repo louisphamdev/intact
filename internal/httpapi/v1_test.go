@@ -137,10 +137,10 @@ func TestV1CustomProviderUsesItsBaseURL(t *testing.T) {
 	}
 }
 
-func TestNoAuthProviderSendsNoCredential(t *testing.T) {
-	var gotAuth, gotClient string
+func TestOpenCodeSendsTheAppIdentity(t *testing.T) {
+	var gotAuth, gotClient, gotSession string
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth, gotClient = r.Header.Get("Authorization"), r.Header.Get("X-Opencode-Client")
+		gotAuth, gotClient, gotSession = r.Header.Get("Authorization"), r.Header.Get("X-Opencode-Client"), r.Header.Get("X-Opencode-Session")
 		w.Write([]byte(`{}`))
 	}))
 	defer up.Close()
@@ -156,8 +156,9 @@ func TestNoAuthProviderSendsNoCredential(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code=%d", rec.Code)
 	}
-	if gotAuth != "" || gotClient != "desktop" {
-		t.Errorf("auth=%q client=%q, want no auth and the desktop client header", gotAuth, gotClient)
+	// The caller's intact token is replaced by the app's public token.
+	if gotAuth != "Bearer public" || gotClient != "desktop" || !strings.HasPrefix(gotSession, "ses_") {
+		t.Errorf("auth=%q client=%q session=%q", gotAuth, gotClient, gotSession)
 	}
 }
 

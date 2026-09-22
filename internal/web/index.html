@@ -1020,8 +1020,8 @@ async function viewQuota(v,prov){
     if(!list.length){grid.replaceChildren(el('div',{class:'card empty',text:editing?'No quota data to choose from.':'Nothing to show. Use Edit to choose what to show.'}));return}
     grid.replaceChildren(...list.map(q=>{
       const head=el('div',{class:'cardh'},avatar(q.provider,true),
-        el('div',{class:'grow',style:'min-width:0'},el('div',{style:'font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap',text:q.label||q.provider}),
-          el('div',{class:'faint small',text:pname(q.provider)+(q.plan?' · '+q.plan:'')})),
+        el('div',{class:'grow',style:'min-width:0'},el('div',{style:'font-weight:600',text:pname(q.provider)}),
+          el('div',{class:'faint small',style:'overflow:hidden;text-overflow:ellipsis;white-space:nowrap',text:(q.label||'')+(q.plan?' · '+q.plan:'')})),
         q.source==='headers'?el('span',{class:'badge',title:'From the rate-limit headers of the last answer, '+q.fetchedAt},'last answer'):null);
       if(!editing)return el('div',{class:'card'},head,el('div',{style:'padding:1rem 1.25rem;display:grid;gap:.9rem'},shownWindows(q,view).map(w=>quotaWindow({...w,name:w.name.replace(/^model /,'')}))));
       // Edit: tick the windows to show for this provider.

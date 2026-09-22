@@ -284,11 +284,11 @@ func (a *api) fetchModelIDs(ctx context.Context, conn store.Connection) ([]strin
 	}
 	for _, raw := range d.Models {
 		var s string
-		var o struct{ ID, Name string }
+		var o struct{ ID, Slug, Name string }
 		if json.Unmarshal(raw, &s) == nil && s != "" {
 			ids = append(ids, s)
-		} else if json.Unmarshal(raw, &o) == nil && (o.ID != "" || o.Name != "") {
-			ids = append(ids, o.ID+o.Name)
+		} else if json.Unmarshal(raw, &o) == nil && (o.ID != "" || o.Slug != "" || o.Name != "") {
+			ids = append(ids, firstNonEmpty(o.Slug, o.ID, o.Name))
 		}
 	}
 	sort.Strings(ids)
@@ -312,7 +312,11 @@ func (a *api) getModels(ctx context.Context, conn store.Connection) (*http.Respo
 	if over, ok := a.baseOverride[conn.Provider]; ok {
 		base = over
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/models", nil)
+	url := base + "/models"
+	if p.ModelsQuery != "" {
+		url += "?" + p.ModelsQuery
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -512,4 +516,13 @@ func retryableStatus(code int) bool {
 		code == http.StatusInternalServerError ||
 		code == http.StatusServiceUnavailable ||
 		code == http.StatusConflict
+}
+
+func firstNonEmpty(ss ...string) string {
+	for _, s := range ss {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
 }

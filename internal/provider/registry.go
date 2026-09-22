@@ -39,6 +39,13 @@ type Provider struct {
 	Exchange string
 	// RequestIDHeader, when set, carries a fresh random id on each request.
 	RequestIDHeader string
+	// AccountHeader, when set, carries the ChatGPT account id read from the
+	// access token's claims.
+	AccountHeader string
+	// SessionHeader, when set, carries a stable id per connection.
+	SessionHeader string
+	// ModelsQuery is appended to the model list URL.
+	ModelsQuery string
 }
 
 // Generic is an OpenAI-compatible upstream that a connection defines itself
@@ -84,6 +91,24 @@ var registry = map[string]Provider{
 			"X-Initiator":                         "user",
 		},
 		RequestIDHeader: "X-Request-Id",
+	},
+	// Codex, the ChatGPT backend the Codex CLI uses: the Responses API over
+	// HTTP with server-sent events, with the ChatGPT OAuth access token.
+	"codex": {
+		ID:         "codex",
+		BaseURL:    "https://chatgpt.com/backend-api/codex",
+		API:        "responses",
+		AuthHeader: "Authorization",
+		AuthPrefix: "Bearer ",
+		Identity: map[string]string{
+			"Originator": "codex_cli_rs",
+			"User-Agent": "codex_cli_rs/" + CodexCLIVersion,
+		},
+		AccountHeader: "ChatGPT-Account-ID",
+		SessionHeader: "Session_id",
+		ModelsQuery:   "client_version=" + CodexCLIVersion,
+		Models: []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5",
+			"gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"},
 	},
 	"groq": {
 		ID:         "groq",
@@ -164,6 +189,10 @@ const (
 	CopilotChatVersion   = "0.38.0"
 	CopilotAPIVersion    = "2025-04-01"
 )
+
+// CodexCLIVersion is the Codex CLI version intact presents; the backend hides
+// models that need a newer client.
+const CodexCLIVersion = "0.154.0"
 
 // Lookup returns the provider with this id.
 func Lookup(id string) (Provider, bool) {

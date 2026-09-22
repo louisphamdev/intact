@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/louisphamdev/intact/internal/filter"
@@ -76,6 +80,14 @@ func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, path
 	}
 	if p.RequestIDHeader != "" {
 		out.Header.Set(p.RequestIDHeader, newRequestID())
+	}
+	if p.AccountHeader != "" {
+		if id := chatgptAccountID(secret); id != "" {
+			out.Header.Set(p.AccountHeader, id)
+		}
+	}
+	if p.SessionHeader != "" && out.Header.Get(p.SessionHeader) == "" {
+		out.Header.Set(p.SessionHeader, sessionFor(providerID, secret))
 	}
 	// Header filters run after the defaults and the identity, so they can drop
 	// one of those too; the credential itself is never dropped.
@@ -237,6 +249,38 @@ func (a *api) connection(id string) (store.Connection, error) {
 func newRequestID() string {
 	b := make([]byte, 16)
 	rand.Read(b)
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
+
+// chatgptAccountID reads the ChatGPT account id from an OpenAI access token,
+// a JWT whose "https://api.openai.com/auth" claim carries it.
+func chatgptAccountID(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		Auth struct {
+			AccountID string `json:"chatgpt_account_id"`
+		} `json:"https://api.openai.com/auth"`
+	}
+	if json.Unmarshal(raw, &claims) != nil {
+		return ""
+	}
+	return claims.Auth.AccountID
+}
+
+// sessionFor is a stable session id per provider and credential, so the
+// upstream can keep its prompt cache across a conversation's calls.
+func sessionFor(providerID, secret string) string {
+	h := sha256.Sum256([]byte(providerID + "\x00" + secret))
+	b := h[:16]
 	b[6] = b[6]&0x0f | 0x40
 	b[8] = b[8]&0x3f | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])

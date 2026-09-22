@@ -110,7 +110,9 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 			w.Header().Add(k, v)
 		}
 	}
-	isSSE := strings.Contains(resp.Header.Get("Content-Type"), "event-stream")
+	// Codex streams its events under a Content-Type of application/json, so a
+	// shape that only ever streams is read as a stream whatever the header says.
+	isSSE := strings.Contains(resp.Header.Get("Content-Type"), "event-stream") || alwaysStreams(via)
 	if resp.StatusCode >= 400 || !isSSE {
 		body, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslatedBody))
 		if err != nil {

@@ -63,6 +63,9 @@
   .pcard .nm{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .av{width:36px;height:36px;border-radius:9px;display:grid;place-items:center;font-weight:700;font-size:.85rem;color:#fff;flex:none}
   .av.sm{width:22px;height:22px;border-radius:6px;font-size:.62rem}
+  .av.logo{background:#fff;padding:5px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.06)}
+  .av.logo.sm{padding:3px}
+  .av.logo img{width:100%;height:100%;object-fit:contain;display:block}
   .status{display:inline-flex;align-items:center;gap:.3rem;font-size:.72rem;color:var(--faint)}
   .status.on{color:var(--ok)}
   .status.on::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
@@ -306,7 +309,14 @@ function pinfo(id){
   return {name:id,color:'#52525b'};
 }
 const pname=id=>pinfo(id).name;
+const infoOf=p=>S.providers.find(x=>x.id===p)||{};
+// OAuth: an account that signs in as a real tool; API key: a documented API.
+const authOf=p=>infoOf(p).auth||'apikey';
+function authTag(p){
+  return authOf(p)==='oauth'?el('span',{class:'badge accent',title:'Signs in as the real tool (OAuth)'},'OAuth'):el('span',{class:'badge',title:'Documented API with a key'},'API key');
+}
 function avatar(id,sm){
+  if(infoOf(id).icon)return el('span',{class:'av logo'+(sm?' sm':''),'aria-hidden':'true'},el('img',{src:'/icons/'+id+'.png',alt:''}));
   const n=pname(id).replace(/[^A-Za-z0-9 ]/g,'').split(' ').filter(Boolean);
   const t=(n.length>1?n[0][0]+n[1][0]:(n[0]||'?').slice(0,2)).toUpperCase();
   return el('span',{class:'av'+(sm?' sm':''),style:'background:'+pinfo(id).color,'aria-hidden':'true',text:t});
@@ -375,16 +385,11 @@ async function load(){
 // A provider's model list, fetched through its first active account.
 async function modelsFor(p){
   if(modelCache[p])return modelCache[p];
-  const acc=activeOf(p)[0];
-  if(!acc)return modelCache[p]={error:'No active account'};
   try{
-    const r=await fetch('/accounts/'+acc.id+'/models');const d=await r.json();
-    if(!r.ok||d.error)return modelCache[p]={error:'Provider error: '+((d.error&&d.error.message)||d.error||r.status)};
-    let ids=[];
-    if(Array.isArray(d.data))ids=d.data.map(m=>m.id||m.name).filter(Boolean);
-    else if(Array.isArray(d.models))ids=d.models.map(m=>typeof m==='string'?m:(m.id||m.name)).filter(Boolean);
-    return modelCache[p]={ids:[...new Set(ids)].sort()};
-  }catch(e){return modelCache[p]={error:'Could not reach the models endpoint'}}
+    const r=await api('/providers/'+encodeURIComponent(p)+'/models');
+    if(!r.models.length)return modelCache[p]={error:r.ok?'The provider lists no models.':'Could not read the model list from the provider.'};
+    return modelCache[p]={ids:r.models};
+  }catch(e){return modelCache[p]={error:e.message}}
 }
 
 // ---- router
@@ -490,8 +495,9 @@ function viewProviders(v){
       avatar(p),
       el('div',{style:'min-width:0'},
         el('div',{class:'nm',text:pname(p)}),
-        n?el('span',{class:'status'+(act?' on':''),text:act+' connected'+(act<n?' · '+(n-act)+' off':'')})
-         :el('span',{class:'status',text:'No connections'})));
+        el('div',{style:'display:flex;gap:.45rem;align-items:center;flex-wrap:wrap'},
+          n?el('span',{class:'status'+(act?' on':''),text:act+' connected'+(act<n?' · '+(n-act)+' off':'')})
+           :el('span',{class:'status',text:'No connections'}),authTag(p))));
   };
   const sec=(title,list,note)=>list.length?el('div',{class:'sec'},
     el('div',{class:'sech'},el('h2',{},title),note?el('span',{class:'faint small',text:note}):null),
@@ -510,7 +516,7 @@ function viewProviders(v){
 function viewProvider(v,p){
   const list=accountsOf(p),ok=wired(p);
   header(el('div',{style:'display:flex;align-items:center;gap:.6rem'},
-    el('a',{class:'crumb',href:'#/providers'},'Providers'),el('span',{class:'faint'},'›'),avatar(p,true),el('h1',{text:pname(p)})),
+    el('a',{class:'crumb',href:'#/providers'},'Providers'),el('span',{class:'faint'},'›'),avatar(p,true),el('h1',{text:pname(p)}),authTag(p)),
     list.length+' connection'+(list.length===1?'':'s'));
   if(!ok)v.append(el('div',{class:'notice'},'intact cannot call "'+pname(p)+'" yet, so these accounts are stored but not used.'));
   if(setupOf(p)==='account'&&list.some(a=>!a.baseUrl))v.append(el('div',{class:'notice'},'A connection without an account ID cannot be used. Delete it and add it again with the account ID.'));

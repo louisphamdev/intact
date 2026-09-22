@@ -79,6 +79,8 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	mux.HandleFunc("GET /accounts/{id}/models", a.requireSession(a.modelsForAccount))
 	mux.HandleFunc("POST /accounts/{id}/active", a.requireSession(a.setActive))
 	mux.HandleFunc("GET /providers", a.requireSession(a.providers))
+	mux.HandleFunc("GET /providers/{id}/models", a.requireSession(a.providerModelList))
+	mux.HandleFunc("GET /icons/{name}", a.icon)
 	mux.HandleFunc("POST /oauth/{provider}/start", a.requireSession(a.loginStart))
 	mux.HandleFunc("POST /oauth/{provider}/finish", a.requireSession(a.loginFinish))
 	mux.HandleFunc("POST /oauth/github/poll", a.requireSession(a.githubDevicePoll))

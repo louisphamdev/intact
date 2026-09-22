@@ -181,11 +181,13 @@ var registry = map[string]Provider{
 		AuthPrefix: "Bearer ",
 	},
 	"claude": {
-		ID:         "claude",
-		BaseURL:    "https://api.anthropic.com/v1",
-		API:        "anthropic",
-		Watch:      true,
-		Setup:      "oauth",
+		ID:      "claude",
+		BaseURL: "https://api.anthropic.com/v1",
+		API:     "anthropic",
+		Watch:   true,
+		Setup:   "oauth",
+		// Anthropic's /models needs a live token; this list stands in without one.
+		Models:     []string{"claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-fable-5", "claude-haiku-4-5-20251001"},
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
 		Identity: map[string]string{

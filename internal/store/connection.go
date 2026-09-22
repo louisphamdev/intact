@@ -109,6 +109,19 @@ func (s *Store) DeleteConnection(id string) error {
 	return nil
 }
 
+// SetLabel renames a connection.
+func (s *Store) SetLabel(id, label string) error {
+	res, err := s.DB.Exec(`UPDATE connections SET label = ?, updated_at = ? WHERE id = ?`,
+		label, time.Now().UTC().Format(time.RFC3339), id)
+	if err != nil {
+		return fmt.Errorf("set label: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // SetMeta merges values into a connection's provider-specific metadata.
 func (s *Store) SetMeta(id string, kv map[string]string) error {
 	var raw string

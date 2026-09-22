@@ -533,7 +533,7 @@ function viewProvider(v,p){
     return el('div',{class:'row'+(a.isActive?'':' off')},
       el('span',{class:'idx',text:'#'+(i+1)}),
       el('div',{class:'who'},
-        el('div',{class:'l',text:a.label||'(no name)'}),
+        labelEditor(a),
         el('div',{class:'meta'},
           el('span',{class:'badge'+(a.isActive?' ok':''),text:a.isActive?'active':'off'}),
           el('span',{class:'mono faint',title:a.id,text:short(a.id)}))),
@@ -556,6 +556,24 @@ function viewProvider(v,p){
       box.replaceChildren(...r.ids.map(m=>el('button',{class:'chip mono',type:'button',title:'Copy '+p+'/'+m,onclick:()=>copy(p+'/'+m)},el('span',{text:m}))));
     });
   }
+}
+// labelEditor shows an account's name with a pencil that edits it in place.
+function labelEditor(a){
+  const box=el('div',{class:'l',style:'display:flex;align-items:center;gap:.3rem'});
+  const show=()=>box.replaceChildren(el('span',{style:'overflow:hidden;text-overflow:ellipsis',text:a.label||'(no name)'}),
+    el('button',{class:'icon',type:'button',title:'Rename','aria-label':'Rename '+(a.label||a.id),style:'min-height:24px;min-width:24px',onclick:edit},svg(ICON.edit)));
+  const edit=()=>{
+    const inp=el('input',{value:a.label||'',style:'min-height:30px;padding:.2rem .5rem;max-width:22rem'});
+    let busy=false;
+    const save=async()=>{
+      const v=inp.value.trim();if(busy||!v||v===a.label){show();return}
+      busy=true;try{await postJSON('/accounts/'+a.id+'/label',{label:v});a.label=v;toast('Renamed');show()}catch(e){alert(e.message);busy=false}
+    };
+    inp.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing&&e.keyCode!==229)save();if(e.key==='Escape'){e.stopPropagation();show()}};
+    inp.onblur=save;
+    box.replaceChildren(inp);inp.focus();inp.select();
+  };
+  show();return box;
 }
 function addAccount(p){
   // p is null for a new custom OpenAI-compatible provider.
@@ -650,13 +668,21 @@ const LOGIN={
   github:{kind:'device'},
 };
 let loginPoll=null;
-async function startLogin(p){
+function startLogin(p){
   clearTimeout(loginPoll);
   $('lTitle').textContent='Login · '+pname(p);
-  $('lBody').replaceChildren(el('p',{class:'muted',text:'Starting…'}));$('lFoot').replaceChildren();
+  const name=el('input',{placeholder:'e.g. Work, Personal (default: the account email)',autocomplete:'off'});
+  const go=el('button',{class:'primary',type:'button'},'Continue');
+  $('lBody').replaceChildren(el('label',{class:'f'},'Name',name));
+  $('lFoot').replaceChildren(el('button',{class:'ghost',type:'button','data-close':true},'Cancel'),go);
+  const next=()=>runLogin(p,name.value.trim());
+  go.onclick=next;name.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing&&e.keyCode!==229)next()};
   openModal('lModal');
+}
+async function runLogin(p,label){
+  $('lBody').replaceChildren(el('p',{class:'muted',text:'Starting…'}));$('lFoot').replaceChildren();
   let r;
-  try{r=await api('/oauth/'+p+'/start',{method:'POST'})}catch(e){$('lBody').replaceChildren(el('div',{class:'err-msg',text:e.message}));return}
+  try{r=await postJSON('/oauth/'+p+'/start',{label})}catch(e){$('lBody').replaceChildren(el('div',{class:'err-msg',text:e.message}));return}
   const err=el('div',{class:'err-msg'});
   const done=async c=>{closeModal('lModal');toast('Signed in: '+((c&&c.label)||pname(p)));delete modelCache[p];await load()};
   if(r.device){
@@ -666,7 +692,7 @@ async function startLogin(p){
       el('p',{class:'muted small',style:'margin:0'},'Waiting for GitHub…'),err);
     const poll=async()=>{
       if($('lModal').hidden)return;
-      try{const x=await postJSON('/oauth/github/poll',{deviceCode:r.deviceCode});
+      try{const x=await postJSON('/oauth/github/poll',{deviceCode:r.deviceCode,label});
         if(x.status==='done'){done(x.connection);return}}
       catch(e){err.textContent=e.message;return}
       loginPoll=setTimeout(poll,Math.max(5,r.interval||5)*1000);
@@ -683,10 +709,10 @@ async function startLogin(p){
   let busy=false;
   const submit=async()=>{
     if(busy||!input.value.trim())return;busy=true;go.disabled=true;err.textContent='';
-    try{const x=await postJSON('/oauth/'+p+'/finish',{state:r.state,input:input.value.trim()});done(x.connection)}
+    try{const x=await postJSON('/oauth/'+p+'/finish',{state:r.state,input:input.value.trim(),label});done(x.connection)}
     catch(e){err.textContent=e.message;busy=false;go.disabled=false}
   };
-  go.onclick=submit;input.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing)submit()};
+  go.onclick=submit;input.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing&&e.keyCode!==229)submit()};
 }
 
 // ---- Blacklist

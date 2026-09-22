@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/louisphamdev/intact/internal/store"
@@ -78,38 +77,6 @@ var (
 	githubClientID  = "Iv1.b507a08c87ecfe98"
 )
 
-type pendingLogin struct {
-	provider, verifier, state string
-	at                        time.Time
-}
-
-type loginStore struct {
-	mu sync.Mutex
-	m  map[string]pendingLogin
-}
-
-func (l *loginStore) put(p pendingLogin) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for k, v := range l.m {
-		if time.Since(v.at) > 15*time.Minute {
-			delete(l.m, k)
-		}
-	}
-	l.m[p.state] = p
-}
-
-func (l *loginStore) take(state string) (pendingLogin, bool) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	p, ok := l.m[state]
-	delete(l.m, state)
-	if ok && time.Since(p.at) > 15*time.Minute {
-		return pendingLogin{}, false
-	}
-	return p, ok
-}
-
 func randomURLSafe(n int) string {
 	b := make([]byte, n)
 	rand.Read(b)
@@ -129,19 +96,26 @@ func (a *api) loginStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "this provider has no sign-in")
 		return
 	}
-	p := pendingLogin{provider: prov, state: randomURLSafe(24), verifier: randomURLSafe(48), at: time.Now()}
+	var in struct {
+		Label string `json:"label"`
+	}
+	json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in)
+	p := store.PendingLogin{Provider: prov, State: randomURLSafe(24), Verifier: randomURLSafe(48), Label: strings.TrimSpace(in.Label)}
 	q := url.Values{"client_id": {spec.clientID}, "response_type": {"code"}, "redirect_uri": {spec.redirectURI},
-		"scope": {spec.scope}, "state": {p.state}}
+		"scope": {spec.scope}, "state": {p.State}}
 	if spec.pkce {
-		sum := sha256.Sum256([]byte(p.verifier))
+		sum := sha256.Sum256([]byte(p.Verifier))
 		q.Set("code_challenge", base64.RawURLEncoding.EncodeToString(sum[:]))
 		q.Set("code_challenge_method", "S256")
 	}
 	for k, v := range spec.extra {
 		q.Set(k, v)
 	}
-	a.logins.put(p)
-	writeJSON(w, map[string]any{"url": spec.authorizeURL + "?" + q.Encode(), "state": p.state, "redirect": spec.redirectURI})
+	if err := a.store.PutPendingLogin(p); err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot start the sign-in")
+		return
+	}
+	writeJSON(w, map[string]any{"url": spec.authorizeURL + "?" + q.Encode(), "state": p.State, "redirect": spec.redirectURI})
 }
 
 // parseCallback reads the code and state from what the person pasted: the full
@@ -162,6 +136,7 @@ func (a *api) loginFinish(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		State string `json:"state"`
 		Input string `json:"input"`
+		Label string `json:"label"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "bad json")
@@ -171,14 +146,19 @@ func (a *api) loginFinish(w http.ResponseWriter, r *http.Request) {
 	if state == "" {
 		state = body.State
 	}
-	p, ok := a.logins.take(body.State)
-	if !ok || p.provider != r.PathValue("provider") {
-		writeError(w, http.StatusBadRequest, "this sign-in expired; start again")
+	// Check what was pasted before using up the sign-in, so a wrong paste can
+	// be corrected.
+	if state != body.State || code == "" {
+		writeError(w, http.StatusBadRequest, "the pasted URL or code does not belong to this sign-in")
 		return
 	}
-	if state != p.state || code == "" {
-		writeError(w, http.StatusBadRequest, "the pasted URL does not belong to this sign-in")
+	p, ok := a.store.TakePendingLogin(body.State)
+	if !ok || p.Provider != r.PathValue("provider") {
+		writeError(w, http.StatusBadRequest, "this sign-in expired (30 minutes) or was already used; start again")
 		return
+	}
+	if l := strings.TrimSpace(body.Label); l != "" {
+		p.Label = l
 	}
 	c, err := a.exchangeLogin(r.Context(), p, code)
 	if err != nil {
@@ -200,10 +180,10 @@ type tokenAnswer struct {
 	ErrorDesc string `json:"error_description"`
 }
 
-func (a *api) exchangeLogin(ctx context.Context, p pendingLogin, code string) (store.Connection, error) {
-	spec := loginSpecs[p.provider]
+func (a *api) exchangeLogin(ctx context.Context, p store.PendingLogin, code string) (store.Connection, error) {
+	spec := loginSpecs[p.Provider]
 	secret := ""
-	if p.provider == "antigravity" {
+	if p.Provider == "antigravity" {
 		secret = a.antigravityClientSecret()
 		if secret == "" {
 			return store.Connection{}, errors.New("no Antigravity client secret: import one account first or set INTACT_ANTIGRAVITY_CLIENT_SECRET")
@@ -212,10 +192,10 @@ func (a *api) exchangeLogin(ctx context.Context, p pendingLogin, code string) (s
 	fields := map[string]string{"grant_type": "authorization_code", "client_id": spec.clientID, "code": code,
 		"redirect_uri": spec.redirectURI}
 	if spec.pkce {
-		fields["code_verifier"] = p.verifier
+		fields["code_verifier"] = p.Verifier
 	}
 	if spec.jsonExchange {
-		fields["state"] = p.state
+		fields["state"] = p.State
 	}
 	if secret != "" {
 		fields["client_secret"] = secret
@@ -247,8 +227,8 @@ func (a *api) exchangeLogin(ctx context.Context, p pendingLogin, code string) (s
 		return store.Connection{}, err
 	}
 
-	label, meta := p.provider, map[string]string{}
-	switch p.provider {
+	label, meta := p.Provider, map[string]string{}
+	switch p.Provider {
 	case "claude":
 		if t.Account.Email != "" {
 			label = t.Account.Email
@@ -263,7 +243,10 @@ func (a *api) exchangeLogin(ctx context.Context, p pendingLogin, code string) (s
 			label = email
 		}
 	}
-	return a.saveOAuthAccount(p.provider, label, t, spec.tokenURL, spec.clientID, secret, meta)
+	if p.Label != "" {
+		label = p.Label
+	}
+	return a.saveOAuthAccount(p.Provider, label, t, spec.tokenURL, spec.clientID, secret, meta)
 }
 
 func doToken(req *http.Request) (tokenAnswer, error) {
@@ -386,6 +369,7 @@ func (a *api) githubDeviceStart(w http.ResponseWriter, r *http.Request) {
 func (a *api) githubDevicePoll(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		DeviceCode string `json:"deviceCode"`
+		Label      string `json:"label"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil || body.DeviceCode == "" {
 		writeError(w, http.StatusBadRequest, "deviceCode is required")
@@ -425,6 +409,9 @@ func (a *api) githubDevicePoll(w http.ResponseWriter, r *http.Request) {
 		if u.Login != "" {
 			label = u.Login
 		}
+	}
+	if l := strings.TrimSpace(body.Label); l != "" {
+		label = l
 	}
 	c, err := a.saveOAuthAccount("github", label, t, "", "", "", nil)
 	if err != nil {

@@ -33,8 +33,6 @@ type api struct {
 	sigs sigStore
 	// drift learns the structure of what passes through and records changes.
 	drift *drift.Observer
-	// logins holds OAuth sign-ins waiting for their code.
-	logins loginStore
 }
 
 // New builds the route table with no authentication (loopback use and tests).
@@ -48,8 +46,7 @@ func New(s *store.Store, baseOverride map[string]string) http.Handler {
 func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.Config) http.Handler {
 	a := &api{store: s, baseOverride: baseOverride, auth: authCfg, rrNext: map[string]int{},
 		cat: catalog{m: map[string]catalogEntry{}}, copilot: copilotCache{m: map[string]copilotToken{}},
-		sigs: sigStore{m: map[string]sigEntry{}}, drift: drift.New(s),
-		logins: loginStore{m: map[string]pendingLogin{}}}
+		sigs: sigStore{m: map[string]sigEntry{}}, drift: drift.New(s)}
 	mux := http.NewServeMux()
 	// One base URL: the model in the body picks the provider and its accounts.
 	mux.HandleFunc("GET /v1/models", a.requireToken(a.models))
@@ -78,6 +75,7 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	mux.HandleFunc("POST /accounts/{id}/delete", a.requireSession(a.deleteAccount))
 	mux.HandleFunc("GET /accounts/{id}/models", a.requireSession(a.modelsForAccount))
 	mux.HandleFunc("POST /accounts/{id}/active", a.requireSession(a.setActive))
+	mux.HandleFunc("POST /accounts/{id}/label", a.requireSession(a.setLabel))
 	mux.HandleFunc("GET /providers", a.requireSession(a.providers))
 	mux.HandleFunc("GET /providers/{id}/models", a.requireSession(a.providerModelList))
 	mux.HandleFunc("GET /icons/{name}", a.icon)

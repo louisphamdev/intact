@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path"
+	"strings"
 
 	"github.com/louisphamdev/intact/internal/provider"
 	"github.com/louisphamdev/intact/internal/web"
@@ -83,4 +84,20 @@ func (a *api) icon(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	w.Write(b)
+}
+
+// setLabel renames a connection from {"label":"…"}.
+func (a *api) setLabel(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Label string `json:"label"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil || strings.TrimSpace(body.Label) == "" {
+		writeError(w, http.StatusBadRequest, "a label is required")
+		return
+	}
+	if err := a.store.SetLabel(r.PathValue("id"), strings.TrimSpace(body.Label)); err != nil {
+		writeError(w, http.StatusNotFound, "unknown connection")
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }

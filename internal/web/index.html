@@ -730,7 +730,7 @@ function modelTable(p){
     const i=el('input',{type:'checkbox','aria-label':label});
     i.onchange=async()=>{
       const next={autoTest:!!st.policy.autoTest,onlyFree:!!st.policy.onlyFree,[key]:i.checked};
-      if(next.autoTest&&!st.policy.autoTest&&!confirm('Test every '+(next.onlyFree?'free ':'')+'model of '+pname(p)+' now and keep on only those that answer? Tests use the provider\'s quota.')){i.checked=false;return}
+      if(next.autoTest&&!st.policy.autoTest&&!confirm('Test every '+(next.onlyFree?'free ':'')+'model of '+pname(p)+' in the background and keep on only those that answer? Tests use the provider\'s quota.')){i.checked=false;return}
       try{const d=await postJSON('/providers/'+p+'/model-policy',next);st.policy=d.policy;st.running=d.running;delete modelCache[p];await load(false)}
       catch(e){i.checked=!i.checked;alert(e.message)}
     };
@@ -741,8 +741,10 @@ function modelTable(p){
   const polMsg=el('span',{class:'faint small'});
   polBox.append(at.node,of.node,polMsg);
   const paintPolicy=()=>{
-    at.i.checked=!!st.policy.autoTest;of.i.checked=!!st.policy.onlyFree;at.i.disabled=of.i.disabled=st.running;
-    polMsg.textContent=st.running?'Testing models…':st.policy.autoTest&&st.policy.lastRun?'Last run '+new Date(st.policy.lastRun).toLocaleString()+' · '+st.policy.lastResult:
+    at.i.checked=!!st.policy.autoTest;of.i.checked=!!st.policy.onlyFree;
+    // Auto test runs in the background: nothing waits on it; results fill the
+    // table as they come.
+    polMsg.textContent=st.policy.autoTest&&st.policy.lastRun?'Last run '+new Date(st.policy.lastRun).toLocaleString()+' · '+st.policy.lastResult:
       st.policy.autoTest?'':'New models start on'+(st.policy.onlyFree?' when free':'')+'.';
   };
   let poll=null;
@@ -754,7 +756,7 @@ function modelTable(p){
       for(const r of st.rows)if(testing.has(r.model))r.testing=true;
       render();
       clearTimeout(poll);
-      if(st.running)poll=setTimeout(()=>{if(card.isConnected)load(false)},3000);
+      if(st.running)poll=setTimeout(()=>{if(card.isConnected&&!document.hidden)load(false)},10000);
     }
     catch(e){body.replaceChildren(el('tr',{},el('td',{colspan:5,class:'empty',text:e.message})))}
   };

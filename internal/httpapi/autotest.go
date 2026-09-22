@@ -30,32 +30,55 @@ const (
 )
 
 // autoState tracks the providers being auto-tested, one run at a time each.
+// A run can be cancelled (the policy changed under it); cancel waits until
+// it has stopped, so the next run or switch change is not undone by it.
 type autoState struct {
 	mu      sync.Mutex
-	running map[string]bool
+	running map[string]*autoRun
+}
+
+type autoRun struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 func (s *autoState) start(prov string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.running[prov] {
+	if s.running[prov] != nil {
 		return false
 	}
-	s.running[prov] = true
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
+	s.running[prov] = &autoRun{ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	return true
 }
 
-func (s *autoState) done(prov string) {
-	s.mu.Lock()
-	delete(s.running, prov)
-	s.mu.Unlock()
-}
-
-func (s *autoState) isRunning(prov string) bool {
+func (s *autoState) run(prov string) *autoRun {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.running[prov]
 }
+
+func (s *autoState) done(prov string) {
+	s.mu.Lock()
+	if r := s.running[prov]; r != nil {
+		r.cancel()
+		close(r.done)
+	}
+	delete(s.running, prov)
+	s.mu.Unlock()
+}
+
+// stop cancels a provider's run and waits for it to end.
+func (s *autoState) stop(prov string) {
+	if r := s.run(prov); r != nil {
+		r.cancel()
+		<-r.done
+	}
+}
+
+func (s *autoState) isRunning(prov string) bool { return s.run(prov) != nil }
 
 func policyKey(prov string) string { return "model-policy:" + prov }
 
@@ -125,8 +148,7 @@ func (a *api) autoTest(prov string, models []string) {
 // autoTestHeld is autoTest once the provider is marked running.
 func (a *api) autoTestHeld(prov string, models []string) {
 	defer a.auto.done(prov)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
+	ctx := a.auto.run(prov).ctx
 	p := a.modelPolicy(prov)
 	full := models == nil
 	if full {
@@ -173,6 +195,9 @@ func (a *api) autoTestHeld(prov string, models []string) {
 					case <-ctx.Done():
 					}
 				}
+				if ctx.Err() != nil {
+					return
+				}
 				a.store.RecordModelTest(prov, m, res.OK, res.Ms, res.Message, res.Account)
 				if res.Status == http.StatusTooManyRequests {
 					continue
@@ -187,7 +212,7 @@ func (a *api) autoTestHeld(prov string, models []string) {
 		}()
 	}
 	wg.Wait()
-	if full {
+	if full && ctx.Err() == nil {
 		p = a.modelPolicy(prov)
 		p.LastRun = time.Now().UTC().Format(time.RFC3339)
 		p.LastResult = fmt.Sprintf("%d of %d tested work", works, len(test))
@@ -257,6 +282,8 @@ func (a *api) setModelPolicy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) updatePolicy(prov string, autoTest, onlyFree bool) (modelPolicy, error) {
+	// A run under the old policy would undo the new one.
+	a.auto.stop(prov)
 	p := a.modelPolicy(prov)
 	p.AutoTest, p.OnlyFree = autoTest, onlyFree
 	if err := a.saveModelPolicy(prov, p); err != nil {

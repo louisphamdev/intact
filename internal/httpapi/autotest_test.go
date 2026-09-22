@@ -223,3 +223,46 @@ func TestTypeSafeTestSuite(t *testing.T) {
 		}
 	}
 }
+
+func TestPolicyChangeStopsTheRunningTest(t *testing.T) {
+	var paidAfter atomic.Int32
+	var switched atomic.Bool
+	var ids []string
+	for i := 0; i < 30; i++ {
+		ids = append(ids, `{"id":"paid-`+string(rune('a'+i%26))+string(rune('a'+i/26))+`"}`)
+	}
+	ids = append(ids, `{"id":"x:free"}`)
+	list := `{"data":[` + strings.Join(ids, ",") + `]}`
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			w.Write([]byte(list))
+			return
+		}
+		var b struct{ Model string }
+		json.NewDecoder(r.Body).Decode(&b)
+		if switched.Load() && !strings.Contains(b.Model, "free") {
+			paidAfter.Add(1)
+		}
+		time.Sleep(20 * time.Millisecond)
+		w.Write([]byte(`{"choices":[{"message":{"content":"OK"}}]}`))
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("openrouter", "o", "k")
+	h := New(s, map[string]string{"openrouter": up.URL})
+	tableOf(t, h, "openrouter")
+	post(h, "/providers/openrouter/model-policy", `{"autoTest":true}`)
+	time.Sleep(30 * time.Millisecond)
+	post(h, "/providers/openrouter/model-policy", `{"autoTest":true,"onlyFree":true}`)
+	switched.Store(true)
+	waitIdle(t, h, "openrouter")
+	// A request already in flight when the policy changed may land; no new one.
+	if n := paidAfter.Load(); n > 3 {
+		t.Errorf("%d paid models tested after only free was switched on", n)
+	}
+	m := tableOf(t, h, "openrouter")
+	if !m["x:free"].Active || m["paid-aa"].Active {
+		t.Errorf("after the change: free=%+v paid=%+v", m["x:free"], m["paid-aa"])
+	}
+}

@@ -54,7 +54,7 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 		cat: catalog{m: map[string]catalogEntry{}}, copilot: copilotCache{m: map[string]copilotToken{}},
 		sigs: sigStore{m: map[string]sigEntry{}}, drift: drift.New(s),
 		rate: rateHeaders{m: map[string]rateSnapshot{}}, quota: quotaCache{m: map[string]AccountQuota{}},
-		auto: autoState{running: map[string]bool{}}}
+		auto: autoState{running: map[string]*autoRun{}}}
 	go a.autoTestLoop()
 	mux := http.NewServeMux()
 	// One base URL: the model in the body picks the provider and its accounts.

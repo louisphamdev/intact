@@ -44,7 +44,7 @@
   .crumb{color:var(--muted);text-decoration:none}
   .crumb:hover{color:var(--fg)}
   /* The content fills the window: tables and the quota grid use a wide
-     screen. Only running text keeps a readable line length (.doc p). */
+     screen. Docs keep a readable column, centred (.docwrap). */
   .content{padding:1.5rem 2rem 3rem;width:100%;display:grid;gap:1.5rem;align-content:start}
   h2{font-size:1.02rem;margin:0;font-weight:600}
   .sec{display:grid;gap:.85rem}
@@ -178,7 +178,7 @@
   .drow details pre{margin-top:.4rem;max-height:10rem}
   @media (max-width:820px){.drow{grid-template-columns:1fr auto}.drow details{grid-column:1/-1}}
   .doc{display:grid;gap:1rem;line-height:1.65}
-  .doc p,.doc ul,.doc ol,.doc h2,.doc h3{max-width:52rem}
+  .docwrap{width:100%;max-width:56rem;margin:0 auto;display:grid;gap:1.5rem;min-width:0}
   .doc h2{font-size:1.15rem;margin:.5rem 0 0}
   .doc p,.doc ul,.doc ol{margin:0;color:var(--muted)}
   .doc li{margin:.2rem 0}
@@ -1287,8 +1287,9 @@ const DOCS=[
 function viewDocs(v,id){
   const d=DOCS.find(x=>x.id===id)||DOCS[0];
   header('Docs');
-  v.append(el('div',{class:'tabs',role:'tablist'},DOCS.map(x=>el('a',{role:'tab',href:'#/docs/'+x.id,'aria-selected':String(x===d),class:x===d?'on':''},x.title))),
-    el('article',{class:'doc'},d.body()));
+  v.append(el('div',{class:'docwrap'},
+    el('div',{class:'tabs',role:'tablist'},DOCS.map(x=>el('a',{role:'tab',href:'#/docs/'+x.id,'aria-selected':String(x===d),class:x===d?'on':''},x.title))),
+    el('article',{class:'doc'},d.body())));
 }
 
 // ---- Usage

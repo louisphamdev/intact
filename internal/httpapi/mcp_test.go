@@ -119,3 +119,50 @@ func TestManagementAPINeedsTheToken(t *testing.T) {
 		t.Errorf("delete: code=%d", rec.Code)
 	}
 }
+
+func TestDashboardKeysWorkAsAPITokens(t *testing.T) {
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	cfg := authConfig()
+	h := NewWithAuth(s, nil, cfg)
+	ck := loginCookie(t, h, cfg)
+
+	req := httptest.NewRequest("POST", "/keys", strings.NewReader(`{"name":"laptop"}`))
+	req.AddCookie(ck)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var k store.APIKey
+	json.Unmarshal(rec.Body.Bytes(), &k)
+	if !strings.HasPrefix(k.Key, "sk-intact-") {
+		t.Fatalf("create: %s", rec.Body.String())
+	}
+	call := func(hdr, val string) int {
+		req := httptest.NewRequest("GET", "/api/filters", nil)
+		req.Header.Set(hdr, val)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if c := call("Authorization", "Bearer "+k.Key); c != http.StatusOK {
+		t.Errorf("bearer key: code=%d", c)
+	}
+	if c := call("X-Api-Key", k.Key); c != http.StatusOK {
+		t.Errorf("x-api-key: code=%d", c)
+	}
+	s.SetAPIKeyEnabled(k.ID, false)
+	if c := call("Authorization", "Bearer "+k.Key); c != http.StatusUnauthorized {
+		t.Errorf("disabled key: code=%d", c)
+	}
+	// A machine token cannot manage keys.
+	req = httptest.NewRequest("GET", "/keys", nil)
+	req.Header.Set("Authorization", "Bearer "+cfg.APIToken)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Error("the key list answered a bearer token")
+	}
+	list, _ := s.ListAPIKeys()
+	if len(list) != 1 || list[0].Key != "" || !strings.Contains(list[0].Masked, "••") {
+		t.Errorf("listing leaks or lost the key: %+v", list)
+	}
+}

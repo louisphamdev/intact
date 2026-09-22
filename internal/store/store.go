@@ -46,6 +46,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if _, err := db.Exec(apiKeySchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply api key schema: %w", err)
+	}
 	if _, err := db.Exec(filterSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply filter schema: %w", err)

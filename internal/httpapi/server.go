@@ -3,6 +3,7 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/louisphamdev/intact/internal/auth"
@@ -60,6 +61,11 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	mux.HandleFunc("GET /accounts/{id}/models", a.requireSession(a.modelsForAccount))
 	mux.HandleFunc("POST /accounts/{id}/active", a.requireSession(a.setActive))
 	mux.HandleFunc("GET /providers", a.requireSession(a.providers))
+	mux.HandleFunc("GET /keys", a.requireSession(a.listKeys))
+	mux.HandleFunc("POST /keys", a.requireSession(a.createKey))
+	mux.HandleFunc("POST /keys/{id}/reveal", a.requireSession(a.revealKey))
+	mux.HandleFunc("POST /keys/{id}/active", a.requireSession(a.setKeyActive))
+	mux.HandleFunc("POST /keys/{id}/delete", a.requireSession(a.deleteKey))
 	mux.HandleFunc("GET /filters", a.requireSession(a.listFilters))
 	mux.HandleFunc("POST /filters", a.requireSession(a.saveFilter))
 	mux.HandleFunc("POST /filters/{id}/delete", a.requireSession(a.deleteFilter))
@@ -89,13 +95,17 @@ func (a *api) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// requireToken lets a request through when auth is off or the API token
-// matches; otherwise it answers 401 for the machine caller. The token is read
-// from Authorization: Bearer, or from x-api-key, which Anthropic clients send.
+// requireToken lets a request through when auth is off or it carries a valid
+// API token: the one in the environment, or an enabled key made in the
+// dashboard. The token is read from Authorization: Bearer, or from x-api-key,
+// which Anthropic clients send. Otherwise it answers 401 for the machine caller.
 func (a *api) requireToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if a.auth == nil || a.auth.CheckAPIToken(r.Header.Get("Authorization")) ||
-			(r.Header.Get("X-Api-Key") != "" && a.auth.CheckAPIToken("Bearer "+r.Header.Get("X-Api-Key"))) {
+		tok := r.Header.Get("X-Api-Key")
+		if b, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+			tok = b
+		}
+		if a.auth == nil || (tok != "" && (a.auth.CheckAPIToken("Bearer "+tok) || a.store.ValidAPIKey(tok))) {
 			next(w, r)
 			return
 		}

@@ -177,7 +177,7 @@
   <nav>
   <a href="#/endpoint" data-nav="endpoint"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h16M12 4v16"/><circle cx="12" cy="12" r="8"/></svg>Endpoint &amp; keys</a>
   <a href="#/providers" data-nav="providers"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/></svg>Providers<span class="ct" id="ctProv"></span></a>
-  <a href="#/filters" data-nav="filters"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 5h18l-7 8v6l-4-2v-4L3 5Z"/></svg>Filters<span class="ct" id="ctFilter"></span></a>
+  <a href="#/blacklist" data-nav="blacklist"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>Blacklist<span class="ct" id="ctFilter"></span></a>
   <a href="#/usage" data-nav="usage"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Usage</a>
   </nav>
   <div class="spacer"></div>
@@ -222,13 +222,13 @@
 <!-- filter -->
 <div id="fModal" class="overlay" hidden>
   <div class="modal sm" role="dialog" aria-modal="true" aria-labelledby="fTitle">
-    <div class="mh"><strong id="fTitle">Add filter</strong><button class="icon" type="button" data-close aria-label="Close">✕</button></div>
+    <div class="mh"><strong id="fTitle">Block</strong><button class="icon" type="button" data-close aria-label="Close">✕</button></div>
     <form id="fForm">
       <div class="mb">
         <label class="f">Applies to<select id="fProv"></select></label>
         <label class="f">Kind<select id="fKind"></select></label>
-        <label class="f">Pattern<input id="fPat" autocomplete="off" spellcheck="false" required></label>
-        <label class="f">Note<input id="fNote" autocomplete="off" placeholder="Why this is removed"></label>
+        <label class="f">Block<input id="fPat" autocomplete="off" spellcheck="false" required></label>
+        <label class="f">Note<input id="fNote" autocomplete="off"></label>
         <div class="err-msg" id="fErr"></div>
       </div>
       <div class="mf"><button class="ghost" type="button" data-close>Cancel</button><button class="primary" type="submit">Save</button></div>
@@ -372,7 +372,7 @@ function route(){
   const v=$('view');v.replaceChildren();
   if(page==='endpoint')return viewEndpoint(v,parts[1]);
   if(page==='usage')return viewUsage(v);
-  if(page==='filters')return viewFilters(v);
+  if(page==='blacklist')return viewBlacklist(v,parts[1]);
   if(page==='providers'&&parts[1])return viewProvider(v,decodeURIComponent(parts[1]));
   if(page!=='providers'){location.hash='#/providers';return}
   viewProviders(v);
@@ -581,37 +581,42 @@ function createKey(){
   openModal('kModal');
 }
 
-// ---- Filters
+// ---- Blacklist
+// What intact removes from a request before it reaches a provider, by kind.
 const KINDS={
-  field:{name:'Body field',ex:'messages.*.cache_control'},
-  schema:{name:'Schema key',ex:'$id'},
-  system:{name:'System line',ex:'^x-anthropic-billing-header:.*$'},
-  header:{name:'Header',ex:'anthropic-beta'},
+  field:{name:'Body field',tab:'Fields',ex:'messages.*.cache_control'},
+  schema:{name:'Schema key',tab:'Schema keys',ex:'$id'},
+  system:{name:'System line',tab:'System lines',ex:'^x-anthropic-billing-header:.*$'},
+  header:{name:'Header',tab:'Headers',ex:'anthropic-beta'},
 };
-function viewFilters(v){
-  header('Filters',null,
-    el('button',{class:'primary',type:'button',onclick:()=>editFilter(null)},svg(ICON.plus),'Add filter'));
-  const scopes=[...new Set(S.filters.map(f=>f.provider))].sort((a,b)=>a==='*'?-1:b==='*'?1:pname(a).localeCompare(pname(b)));
-  if(!scopes.length){v.append(el('div',{class:'card empty'},el('b',{},'No filters'),'Add one when a provider rejects a field it does not know.'));return}
-  v.append(...scopes.map(sc=>el('div',{class:'card'},
-    el('div',{class:'cardh'},sc==='*'?el('span',{class:'av sm',style:'background:var(--accent-strong)',text:'*'}):avatar(sc,true),
-      el('h2',{class:'grow'},sc==='*'?'All providers':pname(sc))),
-    ...S.filters.filter(f=>f.provider===sc).map(f=>{
-      const sw=el('input',{type:'checkbox',checked:f.enabled,'aria-label':'Enabled'});
-      sw.onchange=async()=>{try{await postJSON('/filters',{...f,enabled:sw.checked});f.enabled=sw.checked;await load()}catch(e){sw.checked=!sw.checked;alert(e.message)}};
-      return el('div',{class:'row'+(f.enabled?'':' off')},
-        el('span',{class:'badge accent',style:'min-width:5.5rem;justify-content:center',text:(KINDS[f.kind]||{}).name||f.kind}),
-        el('div',{class:'who'},el('div',{class:'l mono',text:f.pattern}),f.note?el('div',{class:'faint small',text:f.note}):null),
-        el('button',{class:'ghost',type:'button',onclick:()=>editFilter(f)},svg(ICON.edit),'Edit'),
-        el('button',{class:'danger',type:'button',onclick:async()=>{if(!confirm('Delete this filter?'))return;
-          try{await api('/filters/'+f.id+'/delete',{method:'POST'});toast('Deleted');await load()}catch(e){alert(e.message)}}},svg(ICON.trash),'Delete'),
-        el('label',{class:'switch'},sw,el('span')));
-    }))));
+function viewBlacklist(v,tab){
+  if(!KINDS[tab])tab='field';
+  header('Blacklist',null,el('button',{class:'primary',type:'button',onclick:()=>editFilter(null,tab)},svg(ICON.plus),'Block '+KINDS[tab].name.toLowerCase()));
+  v.append(el('div',{class:'tabs',role:'tablist'},Object.entries(KINDS).map(([k,d])=>{
+    const n=S.filters.filter(f=>f.kind===k).length;
+    return el('a',{role:'tab',href:'#/blacklist/'+k,'aria-selected':String(k===tab),class:k===tab?'on':''},d.tab,n?el('span',{class:'ct',text:String(n)}):null);
+  })));
+  const list=S.filters.filter(f=>f.kind===tab)
+    .sort((a,b)=>(a.provider==='*'?-1:b.provider==='*'?1:pname(a.provider).localeCompare(pname(b.provider)))||a.pattern.localeCompare(b.pattern));
+  if(!list.length){v.append(el('div',{class:'card empty'},el('b',{},'Nothing blocked'),
+    el('button',{class:'primary',type:'button',onclick:()=>editFilter(null,tab)},svg(ICON.plus),'Block '+KINDS[tab].name.toLowerCase())));return}
+  v.append(el('div',{class:'card'},list.map(f=>{
+    const sw=el('input',{type:'checkbox',checked:f.enabled,'aria-label':'Enabled'});
+    sw.onchange=async()=>{try{await postJSON('/filters',{...f,enabled:sw.checked});f.enabled=sw.checked;await load()}catch(e){sw.checked=!sw.checked;alert(e.message)}};
+    return el('div',{class:'row'+(f.enabled?'':' off')},
+      el('div',{class:'who'},el('div',{class:'l mono',text:f.pattern}),f.note?el('div',{class:'faint small',text:f.note}):null),
+      f.provider==='*'?el('span',{class:'badge'},'All providers')
+        :el('span',{class:'badge',style:'gap:.35rem'},avatar(f.provider,true),pname(f.provider)),
+      el('button',{class:'icon',type:'button',title:'Edit','aria-label':'Edit '+f.pattern,onclick:()=>editFilter(f)},svg(ICON.edit)),
+      el('button',{class:'icon',type:'button',title:'Delete','aria-label':'Delete '+f.pattern,onclick:async()=>{if(!confirm('Unblock "'+f.pattern+'"?'))return;
+        try{await api('/filters/'+f.id+'/delete',{method:'POST'});toast('Removed');await load()}catch(e){alert(e.message)}}},svg(ICON.trash)),
+      el('label',{class:'switch'},sw,el('span')));
+  })));
 }
 let F=null;
-function editFilter(f){
-  F=f?{...f}:{provider:'*',kind:'field',pattern:'',note:'',enabled:true};
-  $('fTitle').textContent=f?'Edit filter':'Add filter';
+function editFilter(f,kind){
+  F=f?{...f}:{provider:'*',kind:kind||'field',pattern:'',note:'',enabled:true};
+  $('fTitle').textContent=(f?'Edit blocked ':'Block ')+(KINDS[F.kind]||KINDS.field).name.toLowerCase();
   const ids=[...new Set([...S.providers.map(x=>x.id),...S.accounts.map(a=>a.provider)])].sort((a,b)=>pname(a).localeCompare(pname(b)));
   if(!ids.includes(F.provider)&&F.provider!=='*')ids.push(F.provider);
   $('fProv').replaceChildren(el('option',{value:'*',text:'All providers'}),...ids.map(p=>el('option',{value:p,text:pname(p)+(pname(p)!==p?' ('+p+')':'')})));
@@ -628,7 +633,8 @@ $('fForm').onsubmit=async e=>{
   if(guard($('fForm')))return;
   try{
     await postJSON('/filters',{...F,provider:$('fProv').value,kind:$('fKind').value,pattern:$('fPat').value.trim(),note:$('fNote').value.trim()});
-    closeModal('fModal');toast('Filter saved');await load();
+    closeModal('fModal');toast('Blocked');
+    const k=$('fKind').value;if(!location.hash.endsWith('/'+k))location.hash='#/blacklist/'+k;await load();
   }catch(err){$('fErr').textContent=err.message}
   finally{release($('fForm'))}
 };

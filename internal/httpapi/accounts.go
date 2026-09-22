@@ -38,7 +38,9 @@ func (a *api) createAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prov := strings.TrimSpace(r.PostFormValue("provider"))
-	secret := r.PostFormValue("secret")
+	// A pasted key often carries a newline or a stray space, which no
+	// provider accepts in a header.
+	secret := strings.TrimSpace(r.PostFormValue("secret"))
 	baseURL := strings.TrimRight(strings.TrimSpace(r.PostFormValue("base_url")), "/")
 	p, registered := provider.Lookup(prov)
 	switch {

@@ -391,7 +391,7 @@ window.addEventListener('hashchange',route);
 // ---- Endpoint
 // The two API shapes have different base URLs: an OpenAI client appends
 // /chat/completions to …/v1, an Anthropic client appends /v1/messages to the root.
-const ENDPOINT_TABS=[['openai','OpenAI'],['anthropic','Anthropic'],['keys','API keys'],['mcp','MCP']];
+const ENDPOINT_TABS=[['openai','OpenAI'],['anthropic','Anthropic'],['systemone','TypeSafe'],['keys','API keys'],['mcp','MCP']];
 function viewEndpoint(v,tab){
   if(!ENDPOINT_TABS.some(t=>t[0]===tab))tab='openai';
   header('Endpoint & keys');
@@ -400,6 +400,7 @@ function viewEndpoint(v,tab){
       k==='keys'&&S.keys.length?el('span',{class:'ct',text:String(S.keys.length)}):null))));
   if(tab==='keys'){v.append(keysCard());return}
   if(tab==='mcp'){v.append(mcpCard());return}
+  if(tab==='systemone'){v.append(...systemOneCards());return}
   const anth=tab==='anthropic', o=location.origin;
   const base=anth?o:o+'/v1', path=anth?'/v1/messages':'/v1/chat/completions';
   const pre=el('pre'), curl={text:''};
@@ -425,6 +426,25 @@ function viewEndpoint(v,tab){
     el('div',{class:'card pad sec'},
       el('div',{class:'sech'},el('h2',{class:'grow'},'curl'),
         el('button',{class:'ghost',type:'button',onclick:()=>copy(curl.text,'curl')},svg(ICON.copy),'Copy')),pre));
+}
+// TypeSafe's System One API: state plus typed questions, structured answers.
+function systemOneCards(){
+  const o=location.origin;
+  const curl='curl '+o+'/v1/systemone \\\n  -H "Authorization: Bearer $INTACT_KEY" \\\n  -H "Content-Type: application/json" \\\n'+
+    '  -d \'{"model":"typesafe/jev-latest","state":"I have been trying to connect my Stripe account for 3 days and it keeps failing.",'+
+    '"questions":{"is_urgent":{"type":"noul","instructions":"The message conveys urgency"},'+
+    '"department":{"type":"choice","instructions":"Which team should handle this","criteria":{"billing":"Payment issues","technical":"Bugs or integration problems","sales":"Pricing questions"}}}}\'';
+  return [
+    el('div',{class:'card pad sec'},
+      el('h2',{},'TypeSafe System One API'),
+      el('div',{class:'kv'},
+        el('span',{class:'k'},'Base URL'),copyLine(o+'/v1'),
+        el('span',{class:'k'},'Endpoint'),el('code',{text:'POST /v1/systemone'}),
+        el('span',{class:'k'},'Models'),el('code',{text:'GET /v1/models'}),
+        el('span',{class:'k'},'Auth'),el('code',{text:'Authorization: Bearer <API key>'}))),
+    el('div',{class:'card pad sec'},
+      el('div',{class:'sech'},el('h2',{class:'grow'},'curl'),
+        el('button',{class:'ghost',type:'button',onclick:()=>copy(curl,'curl')},svg(ICON.copy),'Copy')),el('pre',{text:curl}))];
 }
 function mcpCard(){
   return el('div',{class:'card pad sec'},

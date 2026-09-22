@@ -407,6 +407,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		tried++
 		resp, err := a.send(r, p, conn.Provider, path, secret, send)
 		if err != nil {
+			log.Printf("connection %s: %v", conn.ID, err)
 			continue
 		}
 		// Copilot answers some models only on /responses and says so with a

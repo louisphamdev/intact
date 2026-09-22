@@ -164,3 +164,29 @@ func TestCreateAccountFillsCloudflareAccountID(t *testing.T) {
 		t.Errorf("custom provider without base url: code=%d", rec.Code)
 	}
 }
+
+func TestSystemOnePassesThroughToTypeSafe(t *testing.T) {
+	var gotPath, gotBody string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotPath, gotBody = r.URL.Path, string(b)
+		w.Write([]byte(`{"model":"jev-1.13.0","answers":{"u":{"type":"noul","noul":1.0}},"usage":{"input_tokens":9,"output_tokens":2}}`))
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	c, _ := s.CreateConnection("typesafe", "ts", "k")
+	h := New(s, map[string]string{"typesafe": up.URL})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/systemone", strings.NewReader(`{"model":"typesafe/jev-latest","state":"x","questions":{"u":{"type":"noul","instructions":"?"}}}`)))
+	if gotPath != "/systemone" || gotBody != `{"model":"jev-latest","state":"x","questions":{"u":{"type":"noul","instructions":"?"}}}` {
+		t.Errorf("upstream got %s %s", gotPath, gotBody)
+	}
+	if rec.Body.String() != `{"model":"jev-1.13.0","answers":{"u":{"type":"noul","noul":1.0}},"usage":{"input_tokens":9,"output_tokens":2}}` {
+		t.Errorf("answer altered: %s", rec.Body.String())
+	}
+	rows, _ := s.Usage()
+	if len(rows) != 1 || rows[0].ConnectionID != c.ID || rows[0].InputTokens != 9 {
+		t.Errorf("usage = %+v", rows)
+	}
+}

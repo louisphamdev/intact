@@ -162,6 +162,7 @@ var registry = map[string]Provider{
 		ID:         "typesafe",
 		BaseURL:    "https://api.typesafe.ai/v1",
 		API:        "typesafe",
+		Models:     []string{"jev-latest"},
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
 	},

@@ -80,7 +80,9 @@ set in **Drift → ⚙ Review settings**, `POST /api/drift/review` or the MCP to
    - whether a client started streaming or sending tools that hour;
    - which client sent it, and whether that client is new;
    - how many other changes the provider had that hour;
-   - how many answers of the provider failed since.
+   - how many requests the provider refused since, from the
+     [error log](errors.md): `rejected` answers and fake 429s. Real limits,
+     timeouts and network errors are not counted.
 2. The decision model chooses the cause:
 
    | Cause | Meaning |
@@ -105,7 +107,7 @@ set in **Drift → ⚙ Review settings**, `POST /api/drift/review` or the MCP to
    **Guard on blacklisting.** A model may blacklist only when all of these
    hold, and otherwise the change is only acknowledged, with the reason noted:
    - it is a request field that appeared or changed type;
-   - answers have failed since the change;
+   - the provider has refused requests since the change;
    - it is not a field the request needs (`model`, `messages`, `tools`,
      `stream`, `system`, `max_tokens`…).
 5. Without a resolver, the changes the decision model did not close wait in

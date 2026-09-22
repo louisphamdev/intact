@@ -269,6 +269,7 @@
   <a href="#/providers" data-nav="providers"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/></svg>Providers<span class="ct" id="ctProv"></span></a>
   <a href="#/blacklist" data-nav="blacklist"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>Blacklist<span class="ct" id="ctFilter"></span></a>
   <a href="#/drift" data-nav="drift"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Drift<span class="ct" id="ctDrift"></span></a>
+  <a href="#/errors" data-nav="errors"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 2.5 20h19z"/><path d="M12 10v4M12 17.2v.3"/></svg>Errors</a>
   <a href="#/docs" data-nav="docs"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h7"/></svg>Docs</a>
   <a href="#/quota" data-nav="quota"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 16a8 8 0 1 1 16 0"/><path d="m12 16 4-5"/></svg>Quota</a>
   <a href="#/usage" data-nav="usage"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Usage</a>
@@ -468,6 +469,15 @@ const VI={
 'JSON: {0}':'JSON: {0}','Form':'Form','Edit provider · {0}':'Sửa provider · {0}','Definition':'Định nghĩa','Copy the definition as JSON':'Sao chép định nghĩa dạng JSON',
 'Delete the provider "{0}"?':'Xoá provider "{0}"?','2. Enter it at {0}':'2. Nhập mã tại {0}','Waiting for {0}…':'Đang chờ {0}…',
 'After signing in, copy the address the browser ends on (it may fail to load), or the code the page shows, and paste it here.':'Sau khi đăng nhập, sao chép địa chỉ trình duyệt dừng lại (có thể không tải được), hoặc mã trang hiện ra, rồi dán vào đây.',
+// errors
+'Errors':'Lỗi','Groups':'Nhóm','Signature':'Chữ ký','Class':'Loại','Latency':'Độ trễ','Quota left':'Quota còn','Count':'Số lần',
+'First':'Lần đầu','Last':'Lần cuối','Median latency':'Độ trễ trung vị','Message':'Thông điệp','Client':'Client','Time':'Thời gian',
+'No errors recorded':'Chưa ghi nhận lỗi nào','Every failed answer of a provider shows up here, also the attempts intact failed over from.':'Mọi response lỗi của provider hiện ở đây, kể cả các lần intact đã chuyển sang account khác.',
+'network':'mạng','timeout':'hết giờ','auth':'xác thực','rejected':'bị từ chối','rate_limit':'rate limit thật','fake_rate_limit':'429 giả',
+'server':'lỗi server','other':'khác','Error #{0}':'Lỗi #{0}','Response body':'Body response','Request sent':'Request đã gửi','Status':'Trạng thái',
+'Last 24 hours':'24 giờ qua','Last 7 days':'7 ngày qua','Everything kept':'Toàn bộ đã lưu','Show the errors of this group':'Xem các lỗi của nhóm này',
+'A 429 answered at once while quota was left: the provider refused the content, not a real limit.':'429 trả về ngay trong khi quota còn: provider từ chối nội dung, không phải giới hạn thật.',
+'Errors (24h)':'Lỗi (24h)','Signatures':'Chữ ký','Fake 429':'429 giả','Real limits':'Giới hạn thật',
 // drift review
 'A client started using it':'Client bắt đầu dùng','Data, not API':'Dữ liệu, không phải API','Optional field':'Trường tuỳ chọn',
 'Provider changed format':'Provider đổi format','Judged by Jev at {0}':'Jev đánh giá lúc {0}','confidence {0}':'độ tự tin {0}',
@@ -671,6 +681,7 @@ function route(){
   if(page==='blacklist')return viewBlacklist(v,parts[1]);
   if(page==='docs')return viewDocs(v,parts[1]);
   if(page==='drift')return viewDrift(v,parts[1]);
+  if(page==='errors')return viewErrors(v,parts[1]);
   if(page==='quota')return viewQuota(v,parts[1]);
   if(page==='providers'&&parts[1])return viewProvider(v,decodeURIComponent(parts[1]));
   if(page!=='providers'){location.hash='#/providers';return}
@@ -1615,6 +1626,88 @@ function viewDrift(v,tab){
       c.sample?el('details',{},el('summary',{class:'faint small'},'Sample'),el('pre',{text:c.sample})):null);
   })));
 }
+// ---- Errors
+// Every error a provider answered, kept for analysis: grouped by signature
+// (status and message with ids and numbers removed), or one by one.
+const ERR_CLASS={network:'err',timeout:'warn',auth:'err',rejected:'warn',rate_limit:'warn',fake_rate_limit:'err',server:'err',other:''};
+const errChip=c=>el('span',{class:'badge '+(ERR_CLASS[c]||''),title:c==='fake_rate_limit'?tr('A 429 answered at once while quota was left: the provider refused the content, not a real limit.'):''},tr(c||'other'));
+const errTime=s=>(s||'').replace('T',' ').replace('Z','').slice(0,19);
+let errSince='24h';
+async function viewErrors(v,tab){
+  if(!['groups','all'].includes(tab))tab='groups';
+  const range=el('select',{'aria-label':'Time',style:'width:auto'},[['24h','Last 24 hours'],['7d','Last 7 days'],['all','Everything kept']].map(([k,n])=>el('option',{value:k,selected:k===errSince},n)));
+  range.onchange=()=>{errSince=range.value;route()};
+  header('Errors',null,range);
+  v.append(el('div',{class:'tabs',role:'tablist'},[['groups','Groups'],['all','All']].map(([k,n])=>
+    el('a',{role:'tab',href:'#/errors/'+k,'aria-selected':String(k===tab),class:k===tab?'on':''},n))));
+  const since=errSince==='all'?'':new Date(Date.now()-(errSince==='7d'?7*864e5:864e5)).toISOString().slice(0,19)+'Z';
+  const q=since?'since='+encodeURIComponent(since):'';
+  const box=el('div',{});v.append(box);
+  let data;
+  try{data=tab==='groups'?(await api('/errors/stats?'+q)).groups||[]:(await api('/errors?limit=5000&'+q)).errors||[]}
+  catch(e){box.append(el('div',{class:'card empty'},el('b',{},e.message)));return}
+  if(!data.length){box.append(el('div',{class:'card empty'},el('b',{},'No errors recorded'),'Every failed answer of a provider shows up here, also the attempts intact failed over from.'));return}
+  const stats=el('div',{class:'stats'});
+  const provCol={id:'prov',label:'Provider',type:'chip',get:e=>e.provider,chipLabel:pname,
+    td:e=>el('span',{style:'display:inline-flex;align-items:center;gap:.45rem'},avatar(e.provider,true),pname(e.provider))};
+  const tbl=tab==='groups'?dataTable({rows:()=>data,
+    cols:[
+      {id:'last',label:'Last',type:'text',get:g=>errTime(g.last),cls:'faint',tdStyle:'white-space:nowrap'},
+      provCol,
+      {id:'status',label:'Status',type:'chip',get:g=>String(g.status||'net')},
+      {id:'class',label:'Class',type:'chip',chips:g=>Object.keys(g.classes||{}),chipLabel:tr,
+        td:g=>el('span',{style:'display:inline-flex;gap:.3rem;flex-wrap:wrap'},Object.entries(g.classes||{}).map(([c,n])=>el('span',{style:'display:inline-flex;gap:.2rem;align-items:center'},errChip(c),n>1&&Object.keys(g.classes).length>1?el('span',{class:'faint small',text:'×'+n}):null)))},
+      {id:'count',label:'Count',type:'num',cls:'num',get:g=>g.count,td:g=>fmt(g.count)},
+      {id:'msg',label:'Message',type:'text',get:g=>g.message||g.signature,
+        td:g=>el('div',{style:'min-width:18rem;max-width:44rem'},el('div',{class:'small',style:'word-break:break-word',text:g.message||g.signature}),
+          el('div',{class:'faint small mono',text:(g.models||[]).join(', ')}))},
+      {id:'lat',label:'Median latency',type:'num',cls:'num',get:g=>g.medianMs,td:g=>fmt(g.medianMs)+' ms'},
+      {id:'first',label:'First',type:'text',get:g=>errTime(g.first),cls:'faint',tdStyle:'white-space:nowrap'},
+      {id:'act',th:'',td:g=>el('button',{class:'ghost',type:'button',title:tr('Show the errors of this group'),onclick:()=>errorDetail(g.lastId)},'…')},
+    ],
+    onRender:rows=>{const n=rows.reduce((s,g)=>s+g.count,0),cl=k=>rows.reduce((s,g)=>s+((g.classes||{})[k]||0),0);
+      stats.replaceChildren(...[['Errors',n],['Signatures',rows.length],['Fake 429',cl('fake_rate_limit')],['Real limits',cl('rate_limit')]]
+        .map(([k,x])=>el('div',{class:'stat'},el('div',{class:'k',text:k}),el('div',{class:'v',text:fmt(x)}))))},
+  }):dataTable({rows:()=>data,rowAttrs:e=>({style:'cursor:pointer',onclick:ev=>{if(!ev.target.closest('button,a,input'))errorDetail(e.id)}}),
+    cols:[
+      {id:'at',label:'Time',type:'text',get:e=>errTime(e.at),cls:'faint',tdStyle:'white-space:nowrap'},
+      provCol,
+      {id:'acct',label:'Account',type:'chip',get:e=>{const a=accById(e.connectionId);return a?(a.label||short(a.id)):short(e.connectionId||'')}},
+      {id:'model',label:'Model',type:'text',get:e=>e.model||'',cls:'mono'},
+      {id:'client',label:'Client',type:'chip',get:e=>e.client||''},
+      {id:'status',label:'Status',type:'chip',get:e=>String(e.status||'net')},
+      {id:'class',label:'Class',type:'chip',get:e=>e.class,chipLabel:tr,td:e=>errChip(e.class)},
+      {id:'lat',label:'Latency',type:'num',cls:'num',get:e=>e.latencyMs,td:e=>fmt(e.latencyMs)+' ms'},
+      {id:'quota',label:'Quota left',type:'num',cls:'num',get:e=>e.quotaLeft<0?-1:Math.round(e.quotaLeft*100),td:e=>e.quotaLeft<0?'—':Math.round(e.quotaLeft*100)+'%'},
+      {id:'msg',label:'Message',type:'text',get:e=>e.message||'',td:e=>el('div',{class:'small',style:'min-width:16rem;max-width:36rem;word-break:break-word',text:e.message||''})},
+    ],
+    onRender:rows=>{const cl=k=>rows.filter(e=>e.class===k).length;
+      stats.replaceChildren(...[['Errors',rows.length],['Fake 429',cl('fake_rate_limit')],['Real limits',cl('rate_limit')]]
+        .map(([k,x])=>el('div',{class:'stat'},el('div',{class:'k',text:k}),el('div',{class:'v',text:fmt(x)}))))},
+  });
+  stats.style.marginBottom='1.2rem';
+  box.append(stats,el('div',{style:'display:flex;justify-content:flex-end;margin-bottom:.4rem'},tbl.clearBtn),el('div',{class:'card scroll'},tbl.table));
+  tbl.render();
+}
+// One error in full: what was sent, what came back.
+async function errorDetail(id){
+  let e;try{e=await api('/errors/'+id)}catch(err){alert(err.message);return}
+  const pretty=s=>{try{return JSON.stringify(JSON.parse(s),null,2)}catch(_){return s||''}};
+  const close=()=>ov.remove();
+  const kv=(k,v)=>el('div',{style:'display:contents'},el('span',{class:'faint small',text:k}),el('span',{class:'small',style:'word-break:break-word'},v));
+  const sec=(k,body)=>body?el('details',{open:k==='Response body'},el('summary',{},k),el('pre',{style:'max-height:22rem;overflow:auto;white-space:pre-wrap;word-break:break-word',text:pretty(body)})):null;
+  const ov=el('div',{class:'overlay',onclick:ev=>{if(ev.target===ov)close()}},el('div',{class:'modal',role:'dialog','aria-modal':'true'},
+    el('div',{class:'mh'},el('strong',{},t('Error #{0}',e.id)),el('button',{class:'icon',type:'button','aria-label':'Close',onclick:close},'✕')),
+    el('div',{class:'mb'},
+      el('div',{style:'display:grid;grid-template-columns:max-content 1fr;gap:.35rem .9rem;margin-bottom:.8rem'},
+        kv(tr('Time'),errTime(e.at)),kv(tr('Provider'),pname(e.provider)),kv(tr('Account'),(accById(e.connectionId)||{}).label||short(e.connectionId||'')),
+        kv(tr('Model'),el('code',{text:e.model||'—'})),kv(tr('Client'),e.client||'—'),kv('Endpoint',el('code',{text:e.endpoint||''})),
+        kv(tr('Status'),String(e.status||'—')),kv(tr('Class'),errChip(e.class)),kv(tr('Latency'),fmt(e.latencyMs)+' ms'),
+        kv(tr('Quota left'),e.quotaLeft<0?'—':Math.round(e.quotaLeft*100)+'%'),kv(tr('Signature'),el('code',{text:e.signature})),
+        kv(tr('Message'),e.message||'—')),
+      sec('Headers',e.headers),sec('Response body',e.respBody),sec('Request sent',e.reqBody))));
+  document.body.append(ov);
+}
 // The verdict on a change: which model gave it, why, and whether it closed it.
 const CAUSES={new_client_usage:['A client started using it','ok'],data_noise:['Data, not API','ok'],
   optional_field_flap:['Optional field','ok'],provider_format_change:['Provider changed format','err']};
@@ -1890,7 +1983,7 @@ const DOCS=[
         dt('tr',dt('td','returned'),dt('td','A removed field came back.')))),
       dt('p','Each endpoint learns quietly for its first three documents, then every change is recorded with a sample of the document it was seen in.'),
       dt('h2','Automatic review'),
-      dt('p','Auto-resolve drift settles every change with no person involved. A decision model (a System One model such as typesafe/jev-latest) is told what intact knows of the change (tool arguments or schema, the field came and went today, a client started streaming or tools that hour, which client, answers failed since) and chooses its cause; a benign cause at the set confidence (60%) with no failed answer is closed. A resolver model (any chat model, such as antigravity/gemini-3.8-flash) settles all the rest: acknowledge, or blacklist a request field the provider refuses, which it may only do when answers failed since and the field is not one the request needs. Set both under ⚙; the switch needs a decision model. Without a resolver, the unsure changes wait here.'),
+      dt('p','Auto-resolve drift settles every change with no person involved. A decision model (a System One model such as typesafe/jev-latest) is told what intact knows of the change (tool arguments or schema, the field came and went today, a client started streaming or tools that hour, which client, answers failed since) and chooses its cause; a benign cause at the set confidence (60%) with no failed answer is closed. A resolver model (any chat model, such as antigravity/gemini-3.8-flash) settles all the rest: acknowledge, or blacklist a request field the provider refuses, which it may only do when the provider refused requests since (per the error log) and the field is not one the request needs. Set both under ⚙; the switch needs a decision model. Without a resolver, the unsure changes wait here.'),
       dt('h2','Acting on a change'),
       dt('p','On the Drift page, Block adds the field to the blacklist for that provider (the path ',dc('messages[].x'),' becomes the pattern ',dc('messages.*.x'),'), and Ack marks the change as reviewed.'),
       dt('h2','Reference captures'),
@@ -1898,6 +1991,21 @@ const DOCS=[
       dt('h2','API and MCP'),
       codeBlock('curl "'+o+'/api/drift/changes?unacked=1" -H "Authorization: Bearer $INTACT_KEY"\ncurl '+o+'/api/drift/ack -H "Authorization: Bearer $INTACT_KEY" -d \'{"ids":[12]}\'\ncurl "'+o+'/api/drift/fields?provider=codex&direction=response" -H "Authorization: Bearer $INTACT_KEY"'),
       dt('p','MCP tools: ',dc('list_drift_changes'),', ',dc('ack_drift_changes'),', ',dc('list_drift_fields'),'. An agent can read new request fields and add them with ',dc('add_filter'),'.'),
+    ];
+  }},
+  {id:'errors',title:'Errors',body:()=>{
+    const o=location.origin;
+    return [
+      dt('h2','What is kept'),
+      dt('p','Every error a provider answers is kept, including the attempts intact failed over from: time, provider, account, model, client, endpoint, status, latency, the rate-limit and request-id headers, the answer (up to 64 KB) and the exact request that was sent (after the blacklist, up to 64 KB). The client still gets the answer untouched. Errors are kept 14 days, 20 000 at most.'),
+      dt('p','A signature groups alike errors: the status and the message with ids and numbers removed.'),
+      dt('h2','Classes'),
+      dt('p',dc('network'),' no answer · ',dc('timeout'),' deadline, 408, 504, 524 · ',dc('auth'),' 401, 403 · ',dc('rejected'),' other 4xx · ',dc('rate_limit'),' a 429 with low or unknown quota · ',dc('fake_rate_limit'),' a 429 in under 800 ms with more than 10% of the model\'s quota left · ',dc('server'),' 5xx.'),
+      dt('h2','Fake 429'),
+      dt('p','Antigravity answers some refused requests (an unknown field, a system line it does not accept) with the very body of a real rate limit. The body cannot tell them apart; the latency and the quota can: a refusal comes back in about 0.2 s with the quota nearly full, a real limit after 2 s or more. After every 429 intact reads the account\'s quota in the background and marks the error. A fake 429 counts as a refusal for the drift review.'),
+      dt('h2','API and MCP'),
+      codeBlock('curl "'+o+'/api/errors/stats?provider=antigravity" -H "Authorization: Bearer $INTACT_KEY"\ncurl "'+o+'/api/errors?class=fake_rate_limit&limit=50" -H "Authorization: Bearer $INTACT_KEY"\ncurl '+o+'/api/errors/42 -H "Authorization: Bearer $INTACT_KEY"'),
+      dt('p','MCP tools: ',dc('error_stats'),', ',dc('list_errors'),', ',dc('get_error'),'. Start from the groups, then open the newest error of one.'),
     ];
   }},
 ];
@@ -1992,7 +2100,7 @@ const DOCS_VI={
         dt('tr',dt('td','returned'),dt('td','Một field đã bị removed nay xuất hiện lại.')))),
       dt('p','Mỗi endpoint học lặng lẽ trong ba document đầu tiên, sau đó mọi thay đổi đều được ghi lại kèm một mẫu của document chứa nó.'),
       dt('h2','Tự xử lý drift'),
-      dt('p','Tự xử lý drift giải quyết mọi thay đổi mà không cần người. Model quyết định (model System One như typesafe/jev-latest) nhận những gì intact biết chắc về thay đổi (tham số hay schema của tool, trường vừa mất rồi xuất hiện lại trong ngày, client bắt đầu dùng stream hoặc tool trong giờ đó, client nào, số response lỗi sau đó) rồi chọn nguyên nhân; nguyên nhân lành tính đạt độ tự tin đã đặt (60%) và không có lỗi thì tự khép. Model xử lý (model chat bất kỳ như antigravity/gemini-3.8-flash) giải quyết toàn bộ phần còn lại: đánh dấu đã xem, hoặc blacklist một trường request mà provider từ chối, việc này chỉ được làm khi có response lỗi sau thay đổi và trường đó không phải trường request bắt buộc. Đặt cả hai trong ⚙; công tắc cần có model quyết định. Không có model xử lý thì các ca chưa chắc nằm chờ ở đây.'),
+      dt('p','Tự xử lý drift giải quyết mọi thay đổi mà không cần người. Model quyết định (model System One như typesafe/jev-latest) nhận những gì intact biết chắc về thay đổi (tham số hay schema của tool, trường vừa mất rồi xuất hiện lại trong ngày, client bắt đầu dùng stream hoặc tool trong giờ đó, client nào, số response lỗi sau đó) rồi chọn nguyên nhân; nguyên nhân lành tính đạt độ tự tin đã đặt (60%) và không có lỗi thì tự khép. Model xử lý (model chat bất kỳ như antigravity/gemini-3.8-flash) giải quyết toàn bộ phần còn lại: đánh dấu đã xem, hoặc blacklist một trường request mà provider từ chối, việc này chỉ được làm khi provider đã từ chối request sau thay đổi (theo nhật ký lỗi) và trường đó không phải trường request bắt buộc. Đặt cả hai trong ⚙; công tắc cần có model quyết định. Không có model xử lý thì các ca chưa chắc nằm chờ ở đây.'),
       dt('h2','Xử lý một thay đổi'),
       dt('p','Trên trang Drift, Chặn thêm field vào blacklist cho nhà cung cấp đó (đường dẫn ',dc('messages[].x'),' trở thành pattern ',dc('messages.*.x'),'), còn Đã xem đánh dấu thay đổi là đã xem xét.'),
       dt('h2','Capture tham chiếu'),
@@ -2000,6 +2108,21 @@ const DOCS_VI={
       dt('h2','API và MCP'),
       codeBlock('curl "'+o+'/api/drift/changes?unacked=1" -H "Authorization: Bearer $INTACT_KEY"\ncurl '+o+'/api/drift/ack -H "Authorization: Bearer $INTACT_KEY" -d \'{"ids":[12]}\'\ncurl "'+o+'/api/drift/fields?provider=codex&direction=response" -H "Authorization: Bearer $INTACT_KEY"'),
       dt('p','Tool MCP: ',dc('list_drift_changes'),', ',dc('ack_drift_changes'),', ',dc('list_drift_fields'),'. Agent có thể đọc các field request mới và thêm chúng bằng ',dc('add_filter'),'.'),
+    ];
+  },
+  errors:()=>{
+    const o=location.origin;
+    return [
+      dt('h2','Lưu những gì'),
+      dt('p','Mọi lỗi provider trả về đều được lưu, kể cả những lần intact đã chuyển sang account khác: thời gian, provider, account, model, client, endpoint, status, độ trễ, các header rate-limit và request-id, body response (tối đa 64 KB) và đúng request đã gửi (sau blacklist, tối đa 64 KB). Client vẫn nhận response nguyên vẹn. Lỗi được giữ 14 ngày, tối đa 20 000 bản.'),
+      dt('p','Chữ ký gom các lỗi giống nhau: status cùng thông điệp đã bỏ id và số.'),
+      dt('h2','Phân loại'),
+      dt('p',dc('network'),' không có response · ',dc('timeout'),' hết giờ, 408, 504, 524 · ',dc('auth'),' 401, 403 · ',dc('rejected'),' 4xx khác · ',dc('rate_limit'),' 429 khi quota thấp hoặc chưa rõ · ',dc('fake_rate_limit'),' 429 trả về dưới 800 ms trong khi quota của model còn hơn 10% · ',dc('server'),' 5xx.'),
+      dt('h2','429 giả'),
+      dt('p','Antigravity trả một số request bị từ chối (field lạ, dòng system không chấp nhận) bằng đúng body của rate limit thật. Body không phân biệt được; độ trễ và quota thì được: từ chối trả về khoảng 0,2 s khi quota gần đầy, giới hạn thật trả về sau 2 s trở lên. Sau mỗi 429, intact đọc quota của account ở nền rồi đánh dấu lỗi. 429 giả được tính là một lần từ chối khi đánh giá drift.'),
+      dt('h2','API và MCP'),
+      codeBlock('curl "'+o+'/api/errors/stats?provider=antigravity" -H "Authorization: Bearer $INTACT_KEY"\ncurl "'+o+'/api/errors?class=fake_rate_limit&limit=50" -H "Authorization: Bearer $INTACT_KEY"\ncurl '+o+'/api/errors/42 -H "Authorization: Bearer $INTACT_KEY"'),
+      dt('p','Tool MCP: ',dc('error_stats'),', ',dc('list_errors'),', ',dc('get_error'),'. Bắt đầu từ các nhóm, rồi mở lỗi mới nhất của một nhóm.'),
     ];
   },
 };

@@ -80,6 +80,9 @@ Then, for each account, starting there:
 5. Any other answer, success or error, goes back to the client as it came. The
    last account's answer is returned even when it is busy.
 
+Every error answer, and every attempt that got no answer, is kept in the
+[error log](errors.md), including the attempts intact moved on from.
+
 When no account can be used, the client gets `500 no usable account`. When
 every account failed without an answer, it gets `502 all accounts failed`.
 

@@ -126,36 +126,6 @@ var reviewQuestions = map[string]any{
 		}},
 }
 
-// errTrack counts the failed answers of each provider, for the reviewer.
-type errTrack struct {
-	mu sync.Mutex
-	m  map[string][]time.Time
-}
-
-func (e *errTrack) note(prov string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	now := time.Now()
-	list := e.m[prov]
-	// Keep a day.
-	for len(list) > 0 && now.Sub(list[0]) > 24*time.Hour {
-		list = list[1:]
-	}
-	e.m[prov] = append(list, now)
-}
-
-func (e *errTrack) since(prov string, t time.Time) int {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	n := 0
-	for _, at := range e.m[prov] {
-		if !at.Before(t) {
-			n++
-		}
-	}
-	return n
-}
-
 type reviewState struct {
 	mu        sync.Mutex
 	pauseTill time.Time
@@ -200,7 +170,7 @@ func (a *api) reviewFacts(c store.ShapeChange, around []store.ShapeChange) map[s
 		"client":                                firstNonEmpty(c.Client, "unknown"),
 		"client_first_seen_within_an_hour":      c.Client != "" && at.Sub(first) < time.Hour,
 		"other_changes_same_provider_same_hour": burst - 1,
-		"failed_answers_since":                  a.errs.since(c.Provider, at),
+		"failed_answers_since":                  a.refusalsSince(c.Provider, at.UTC().Format(time.RFC3339)),
 	}
 }
 

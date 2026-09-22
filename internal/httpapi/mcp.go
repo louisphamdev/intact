@@ -220,6 +220,30 @@ var mcpTools = []mcpTool{
 			a.reloadFilters()
 			return map[string]any{"deleted": argStr(args, "id")}, nil
 		}},
+	{Name: "list_errors", Description: "List the errors providers answered, newest first: every failed attempt, also the ones intact failed over from. Class is network, timeout, auth, rejected, rate_limit, fake_rate_limit (a 429 answered at once while quota was left: the provider refused the content) or server. Bodies are left out; get_error has them.",
+		InputSchema: schema(map[string]any{"provider": pString, "class": pString, "signature": pString, "status": map[string]any{"type": "integer"},
+			"since": map[string]any{"type": "string", "description": "RFC 3339 time"}, "limit": map[string]any{"type": "integer"}}),
+		run: func(a *api, args map[string]any) (any, error) {
+			f := store.ErrorFilter{Provider: argStr(args, "provider"), Class: argStr(args, "class"), Signature: argStr(args, "signature"), Since: argStr(args, "since")}
+			if v, ok := args["status"].(float64); ok {
+				f.Status = int(v)
+			}
+			if v, ok := args["limit"].(float64); ok {
+				f.Limit = int(v)
+			}
+			return a.store.ListUpstreamErrors(f)
+		}},
+	{Name: "get_error", Description: "One provider error with its headers, the answer's body and the request that was sent.",
+		InputSchema: schema(map[string]any{"id": map[string]any{"type": "integer"}}, "id"),
+		run: func(a *api, args map[string]any) (any, error) {
+			id, _ := args["id"].(float64)
+			return a.store.GetUpstreamError(int64(id))
+		}},
+	{Name: "error_stats", Description: "Provider errors grouped by signature (status and message with ids and numbers removed): count, classes, first and last time, models, median latency. Start an analysis here.",
+		InputSchema: schema(map[string]any{"provider": pString, "since": map[string]any{"type": "string", "description": "RFC 3339 time"}}),
+		run: func(a *api, args map[string]any) (any, error) {
+			return a.errorGroups(store.ErrorFilter{Provider: argStr(args, "provider"), Since: argStr(args, "since")})
+		}},
 	{Name: "list_drift_changes", Description: "List structure changes seen in traffic: fields a client started or stopped sending (direction request), or a provider started or stopped answering (direction response). Use it to decide what to blacklist.",
 		InputSchema: schema(map[string]any{"provider": pString, "direction": map[string]any{"type": "string", "enum": []string{"request", "response"}},
 			"unacked": pBool, "since": map[string]any{"type": "integer"}, "limit": map[string]any{"type": "integer"}}),

@@ -545,7 +545,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		}
 		send = filterFor(a, p, conn.Provider, send)
 		tried++
-		resp, err := a.send(r, p, conn.Provider, path, secret, send)
+		resp, err := a.sendLogged(r, p, conn, path, secret, send, model)
 		if err != nil {
 			log.Printf("connection %s: %v", conn.ID, err)
 			continue
@@ -558,7 +558,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 				copilotResponsesModels.Store(model, true)
 				if err := prepare(); err == nil {
 					send = filterFor(a, p, conn.Provider, send)
-					if resp, err = a.send(r, p, conn.Provider, path, secret, send); err != nil {
+					if resp, err = a.sendLogged(r, p, conn, path, secret, send, model); err != nil {
 						continue
 					}
 				}
@@ -570,7 +570,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			a.dropExchanged(conn.ID)
 			if fresh, err := a.exchanged(r.Context(), p, conn.ID, secret0(a, r, conn.ID)); err == nil {
 				resp.Body.Close()
-				if resp, err = a.send(r, p, conn.Provider, path, fresh, send); err != nil {
+				if resp, err = a.sendLogged(r, p, conn, path, fresh, send, model); err != nil {
 					continue
 				}
 			}
@@ -578,7 +578,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		if resp.StatusCode == http.StatusUnauthorized && a.isOAuth(conn.ID) {
 			if fresh, ok := a.forceRefresh(r.Context(), conn.ID); ok {
 				resp.Body.Close()
-				if resp, err = a.send(r, p, conn.Provider, path, fresh, send); err != nil {
+				if resp, err = a.sendLogged(r, p, conn, path, fresh, send, model); err != nil {
 					continue
 				}
 			}
@@ -592,9 +592,6 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			continue
 		}
 		defer resp.Body.Close()
-		if resp.StatusCode >= 400 {
-			a.errs.note(conn.Provider)
-		}
 		if at.model != "" {
 			// The model that answered, when intact chose it (a level variant).
 			w.Header().Set("X-Intact-Model", at.model)

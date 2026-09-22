@@ -50,6 +50,14 @@ tools) and wants to use them all from any client.
 
   The decisions and the trial behind them are in
   [Drift](docs/drift.md#automatic-review).
+- **Error log.** Every error a provider answers is kept for 14 days, with the
+  request that was sent, the answer, the headers and the latency. That
+  includes the attempts intact failed over from.
+  - Errors are grouped by signature.
+  - A 429 is marked a real limit or a fake one: a fake one comes back at once
+    while the account's quota is left.
+
+  [Errors](docs/errors.md)
 - **Quota and usage.** Quota is read from each provider (rolling windows, weekly
   pools, per-model shares). Token usage is counted per account, model and day.
   [Quota and usage](docs/quota-and-usage.md)
@@ -92,6 +100,7 @@ and Cloudflare Tunnel deployment.
 | [Models](docs/models.md) | The model table, fetching, switches, tests, auto test, only free, thinking |
 | [Blacklist](docs/blacklist.md) | Request filters: kinds, scope, seeded rules |
 | [Drift](docs/drift.md) | Structure learning and change alerts |
+| [Errors](docs/errors.md) | The error log: what is kept, classes, fake 429s, reading |
 | [Quota and usage](docs/quota-and-usage.md) | Quota sources, the Quota page, usage counting |
 | [API](docs/api.md) | Every HTTP endpoint and MCP tool |
 | [Security](docs/security.md) | Sign-in, API keys, where credentials live |

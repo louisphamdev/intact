@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/louisphamdev/intact/internal/auth"
 	"github.com/louisphamdev/intact/internal/drift"
@@ -44,8 +43,7 @@ type api struct {
 	auto autoState
 	// arena holds the model leaderboard and its name index.
 	arena arenaState
-	// errs counts failed answers per provider; review is the drift review.
-	errs   errTrack
+	// review is the drift review.
 	review reviewState
 }
 
@@ -68,7 +66,7 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 		cat: catalog{m: map[string]catalogEntry{}}, copilot: copilotCache{m: map[string]copilotToken{}},
 		sigs: sigStore{m: map[string]sigEntry{}}, drift: drift.New(s),
 		rate: rateHeaders{m: map[string]rateSnapshot{}}, quota: quotaCache{m: map[string]AccountQuota{}},
-		auto: autoState{running: map[string]*autoRun{}}, errs: errTrack{m: map[string][]time.Time{}}}
+		auto: autoState{running: map[string]*autoRun{}}}
 	go a.autoTestLoop()
 	a.loadDefs()
 	a.migrateCustomEndpoints()
@@ -92,6 +90,12 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	mux.HandleFunc("POST /api/drift/ack", a.requireToken(a.driftAck))
 	mux.HandleFunc("GET /api/drift/fields", a.requireToken(a.driftFields))
 	mux.HandleFunc("POST /api/drift/seed", a.requireToken(a.driftSeed))
+	mux.HandleFunc("GET /errors", a.requireSession(a.errorsList))
+	mux.HandleFunc("GET /errors/stats", a.requireSession(a.errorStats))
+	mux.HandleFunc("GET /errors/{id}", a.requireSession(a.errorGet))
+	mux.HandleFunc("GET /api/errors", a.requireToken(a.errorsList))
+	mux.HandleFunc("GET /api/errors/stats", a.requireToken(a.errorStats))
+	mux.HandleFunc("GET /api/errors/{id}", a.requireToken(a.errorGet))
 	mux.HandleFunc("GET /drift/changes", a.requireSession(a.driftChanges))
 	mux.HandleFunc("GET /drift/review", a.requireSession(a.driftReview))
 	mux.HandleFunc("POST /drift/review", a.requireSession(a.driftReview))

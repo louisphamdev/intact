@@ -81,6 +81,10 @@ func TestAntigravityVariantsFoldAndFallBack(t *testing.T) {
 		default:
 			var env struct{ Model string }
 			json.Unmarshal(b, &env)
+			if env.Model == "" { // a quota read after a 429
+				w.Write([]byte(`{}`))
+				return
+			}
 			mu.Lock()
 			sent = append(sent, env.Model)
 			refuse := busy[env.Model]
@@ -140,6 +144,12 @@ func TestAntigravityVariantsFoldAndFallBack(t *testing.T) {
 	rec, got := call(`{"model":"antigravity/gemini-3.8-flash","reasoning_effort":"high","messages":[{"role":"user","content":"hi"}]}`)
 	if rec.Code != 200 || !reflect.DeepEqual(got, []string{"gemini-3.8-flash-high", "gemini-3.8-flash-high", "gemini-3.8-flash-tiered"}) {
 		t.Errorf("fallback: %d %v", rec.Code, got)
+	}
+	// Each refused attempt is kept, with the answer it gave.
+	errs, _ := s.ListUpstreamErrors(store.ErrorFilter{Provider: "antigravity"})
+	if len(errs) != 2 || errs[0].Status != 429 || errs[0].Model != "gemini-3.8-flash-high" || errs[0].Message != "capacity exhausted" ||
+		errs[0].Signature != "429 capacity exhausted" || errs[0].Endpoint == "" {
+		t.Errorf("errors kept = %+v", errs)
 	}
 	if rec.Header().Get("X-Intact-Model") != "gemini-3.8-flash-tiered" {
 		t.Errorf("X-Intact-Model = %q", rec.Header().Get("X-Intact-Model"))

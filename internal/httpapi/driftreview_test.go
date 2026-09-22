@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/louisphamdev/intact/internal/store"
 )
@@ -56,7 +57,7 @@ func TestDriftReviewAcksOnlyConfidentBenignChanges(t *testing.T) {
 	add("github", "request", "messages[].tool_calls", "added", "hermes")
 	add("codex", "response", "response.parts[].args.{*}", "added", "")
 	// github answered with an error after its change: no automatic ack.
-	a.errs.note("github")
+	s.AddUpstreamError(store.UpstreamError{Provider: "github", Status: 400, Class: ClassRejected, QuotaLeft: -1})
 	n, err := a.reviewPending(context.Background())
 	if err != nil || n != 5 {
 		t.Fatalf("reviewed %d, %v", n, err)
@@ -236,8 +237,9 @@ func TestDriftResolverSettlesEverything(t *testing.T) {
 	add("request", "anti_cheat", "added")
 	add("request", "tools", "added")
 	add("request", "stream", "added")
-	a.errs.note("codex") // answers fail since: the evidence a blacklist needs
-	a.errs.m["codex"][0] = a.errs.m["codex"][0].Add(10e9)
+	// answers refused since: the evidence a blacklist needs
+	s.AddUpstreamError(store.UpstreamError{Provider: "codex", Status: 400, Class: ClassRejected, QuotaLeft: -1,
+		At: time.Now().Add(10 * time.Second).UTC().Format(time.RFC3339)})
 	n, err := a.reviewPending(context.Background())
 	if err != nil || n != 5 {
 		t.Fatalf("judged %d, %v", n, err)

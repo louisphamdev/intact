@@ -197,8 +197,7 @@
       <div class="mb">
         <input type="hidden" name="provider" id="aProv">
         <label class="f" id="aIdRow">Provider id
-          <input id="aId" placeholder="e.g. tokenharbor" autocomplete="off" spellcheck="false">
-          <span class="hint">Lowercase letters, digits and -. Models are called as <code>&lt;id&gt;/&lt;model&gt;</code>.</span></label>
+          <input id="aId" placeholder="e.g. tokenharbor" autocomplete="off" spellcheck="false"></label>
         <label class="f" id="aBaseRow">Base URL<input name="base_url" id="aBase" placeholder="https://example.com/v1" autocomplete="off" spellcheck="false"></label>
         <label class="f">Name<input name="label" placeholder="e.g. Work key" autocomplete="off"></label>
         <label class="f" id="aAcctRow">Account ID<input name="account_id" id="aAcct" autocomplete="off" spellcheck="false"></label>
@@ -227,7 +226,7 @@
     <form id="fForm">
       <div class="mb">
         <label class="f">Applies to<select id="fProv"></select></label>
-        <label class="f">Kind<select id="fKind"></select><span class="hint" id="fKindHint"></span></label>
+        <label class="f">Kind<select id="fKind"></select></label>
         <label class="f">Pattern<input id="fPat" autocomplete="off" spellcheck="false" required></label>
         <label class="f">Note<input id="fNote" autocomplete="off" placeholder="Why this is removed"></label>
         <div class="err-msg" id="fErr"></div>
@@ -382,7 +381,7 @@ window.addEventListener('hashchange',route);
 const ENDPOINT_TABS=[['openai','OpenAI'],['anthropic','Anthropic'],['keys','API keys'],['mcp','MCP']];
 function viewEndpoint(v,tab){
   if(!ENDPOINT_TABS.some(t=>t[0]===tab))tab='openai';
-  header('Endpoint & keys','One gateway for every provider, in the API shape your client speaks.');
+  header('Endpoint & keys');
   v.append(el('div',{class:'tabs',role:'tablist'},ENDPOINT_TABS.map(([k,n])=>
     el('a',{role:'tab',href:'#/endpoint/'+k,'aria-selected':String(k===tab),class:k===tab?'on':''},n,
       k==='keys'&&S.keys.length?el('span',{class:'ct',text:String(S.keys.length)}):null))));
@@ -410,18 +409,14 @@ function viewEndpoint(v,tab){
       el('div',{class:'kv'},
         el('span',{class:'k'},'Base URL'),copyLine(base),
         el('span',{class:'k'},'Endpoint'),el('code',{text:'POST '+path}),
-        el('span',{class:'k'},'Models'),el('code',{text:anth?'GET /v1/models':'GET /v1/models'}),
-        el('span',{class:'k'},'Auth'),el('code',{text:anth?'x-api-key: <API key>  (or Authorization: Bearer)':'Authorization: Bearer <API key>'})),
-      el('p',{class:'muted small',style:'margin:0'},
-        'Any provider answers in this shape; intact translates when the provider speaks the other one. '+
-        'Name the model as ',el('code',{},'<provider>/<model>'),' (copy it from a provider page), or give the bare id to use every provider that has it.')),
+        el('span',{class:'k'},'Models'),el('code',{text:'GET /v1/models'}),
+        el('span',{class:'k'},'Auth'),el('code',{text:anth?'x-api-key: <API key>  (or Authorization: Bearer)':'Authorization: Bearer <API key>'}))),
     el('div',{class:'card pad sec'},
       el('div',{class:'sech'},el('h2',{class:'grow'},'Client setup'),provs.length?sel:null),pre));
 }
 function mcpCard(){
   return el('div',{class:'card pad sec'},
     el('h2',{},'MCP server'),
-    el('p',{class:'muted',style:'margin:0'},'Agents can list providers, accounts, models and usage, switch accounts, and edit the filters, with an API key.'),
     el('div',{class:'kv'},el('span',{class:'k'},'URL'),copyLine(location.origin+'/mcp'),
       el('span',{class:'k'},'Transport'),el('code',{},'Streamable HTTP'),
       el('span',{class:'k'},'Auth'),el('code',{},'Authorization: Bearer <API key>')),
@@ -431,7 +426,7 @@ function mcpCard(){
 // ---- Providers
 function viewProviders(v){
   const q=el('input',{placeholder:'Search providers…',autocomplete:'off','aria-label':'Search providers'});
-  header('Providers','Manage the accounts intact holds for each provider.',el('div',{class:'search'},svg(ICON.search),q),
+  header('Providers',null,el('div',{class:'search'},svg(ICON.search),q),
     el('button',{class:'ghost',type:'button',onclick:()=>addAccount(null)},svg(ICON.plus),'Custom provider'));
   const ids=[...new Set([...S.providers.map(x=>x.id),...S.accounts.map(a=>a.provider)])];
   const card=p=>{
@@ -450,7 +445,7 @@ function viewProviders(v){
   const body=el('div',{style:'display:grid;gap:1.75rem'},
     sec('Connected',ids.filter(p=>wired(p)&&accountsOf(p).length).sort(byName)),
     sec('Available',ids.filter(p=>wired(p)&&!accountsOf(p).length).sort(byName)),
-    sec('Not supported yet',ids.filter(p=>!wired(p)).sort(byName),'Accounts imported from another gateway that intact cannot call yet'));
+    sec('Not supported yet',ids.filter(p=>!wired(p)).sort(byName)));
   v.append(body);
   q.oninput=()=>{const s=q.value.trim().toLowerCase();
     for(const c of body.querySelectorAll('.pcard'))c.hidden=!!s&&!c.dataset.q.includes(s);
@@ -484,13 +479,13 @@ function viewProvider(v,p){
   });
   v.append(el('div',{class:'card'},
     el('div',{class:'cardh'},el('h2',{class:'grow'},'Connections'),
-      ok&&list.length>1?el('span',{class:'muted small'},'Requests rotate across the active accounts'):null),
+      null),
     list.length?rows:el('div',{class:'empty'},el('b',{},'No connections yet'),ok?'Add an API key to start using '+pname(p)+'.':null,addBtn),
     list.length&&addBtn?el('div',{style:'padding:.8rem 1.25rem;border-top:1px solid var(--line)'},addBtn):null));
   if(ok&&activeOf(p).length){
     const box=el('div',{class:'chips'},el('span',{class:'muted',text:'Loading…'}));
     v.append(el('div',{class:'card'},
-      el('div',{class:'cardh'},el('h2',{class:'grow'},'Available models'),el('span',{class:'faint small',text:'Click to copy the model name for /v1'})),
+      el('div',{class:'cardh'},el('h2',{class:'grow'},'Available models')),
       el('div',{style:'padding:1rem 1.25rem'},box)));
     modelsFor(p).then(r=>{
       if(r.error){box.replaceChildren(el('span',{class:'muted',text:r.error}));return}
@@ -553,7 +548,6 @@ function keysCard(){
   return el('div',{class:'card'},
     el('div',{class:'cardh'},el('h2',{class:'grow'},'API keys'),
       el('button',{class:'primary',type:'button',onclick:createKey},svg(ICON.plus),'Create key')),
-    el('div',{style:'padding:.8rem 1.25rem',class:'muted small'},'Send a key as ',el('code',{},'Authorization: Bearer <key>'),' (or ',el('code',{},'x-api-key'),' for Anthropic clients) to /v1, /api and /mcp.'),
     rows.length?rows:el('div',{class:'empty',style:'padding:1.25rem'},'No keys yet.'));
 }
 function createKey(){
@@ -567,7 +561,7 @@ function createKey(){
     try{
       const k=await postJSON('/keys',{name:name.value.trim()});
       $('kTitle').textContent='Key created';
-      $('kBody').replaceChildren(el('p',{class:'muted',style:'margin:0'},'Copy it now, or reveal it later from this page.'),copyLine(k.key));
+      $('kBody').replaceChildren(copyLine(k.key));
       $('kFoot').replaceChildren(el('button',{class:'primary',type:'button','data-close':true},'Done'));
       await load();
     }catch(e){err.textContent=e.message}
@@ -578,16 +572,14 @@ function createKey(){
 
 // ---- Filters
 const KINDS={
-  field:{name:'Body field',hint:'Dot path into the request body; * matches any key or list item.',ex:'messages.*.cache_control'},
-  schema:{name:'Schema key',hint:'Removed at every depth of each tool\'s JSON schema.',ex:'$id'},
-  system:{name:'System line',hint:'Regular expression; matching lines are removed from the system prompt.',ex:'^x-anthropic-billing-header:.*$'},
-  header:{name:'Header',hint:'A request header that is not sent to the provider.',ex:'anthropic-beta'},
+  field:{name:'Body field',ex:'messages.*.cache_control'},
+  schema:{name:'Schema key',ex:'$id'},
+  system:{name:'System line',ex:'^x-anthropic-billing-header:.*$'},
+  header:{name:'Header',ex:'anthropic-beta'},
 };
 function viewFilters(v){
-  header('Filters','Remove what a provider refuses before the request leaves. Changes apply to the next request.',
+  header('Filters',null,
     el('button',{class:'primary',type:'button',onclick:()=>editFilter(null)},svg(ICON.plus),'Add filter'));
-  v.append(el('div',{class:'muted',style:'display:grid;gap:.2rem'},
-    ...Object.values(KINDS).map(k=>el('div',{},el('b',{style:'color:var(--fg)',text:k.name}),' — '+k.hint+' ',el('code',{text:k.ex})))));
   const scopes=[...new Set(S.filters.map(f=>f.provider))].sort((a,b)=>a==='*'?-1:b==='*'?1:pname(a).localeCompare(pname(b)));
   if(!scopes.length){v.append(el('div',{class:'card empty'},el('b',{},'No filters'),'Add one when a provider rejects a field it does not know.'));return}
   v.append(...scopes.map(sc=>el('div',{class:'card'},
@@ -615,7 +607,7 @@ function editFilter(f){
   $('fProv').value=F.provider;
   $('fKind').replaceChildren(...Object.entries(KINDS).map(([k,d])=>el('option',{value:k,text:d.name})));
   $('fKind').value=F.kind;
-  const hint=()=>{const d=KINDS[$('fKind').value];$('fKindHint').textContent=d.hint;$('fPat').placeholder=d.ex};
+  const hint=()=>{$('fPat').placeholder=KINDS[$('fKind').value].ex};
   $('fKind').onchange=hint;hint();
   $('fPat').value=F.pattern;$('fNote').value=F.note;$('fErr').textContent='';
   openModal('fModal');
@@ -632,7 +624,7 @@ $('fForm').onsubmit=async e=>{
 function viewUsage(v){
   const days=[...new Set(S.usage.map(u=>u.day))];
   const sel=el('select',{style:'width:auto','aria-label':'Day'},el('option',{value:'',text:'All days'}),days.map(d=>el('option',{value:d,text:d})));
-  header('Usage','Token totals read from the responses that passed through.',S.usage.length?sel:null);
+  header('Usage',null,S.usage.length?sel:null);
   const today=new Date().toISOString().slice(0,10);
   if(days.includes(today))sel.value=today;
   const stats=el('div',{class:'stats'}),tb=el('tbody');

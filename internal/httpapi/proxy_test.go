@@ -200,15 +200,14 @@ func TestV1RejectsProviderWithNoAccount(t *testing.T) {
 	}
 }
 
-// A connection whose provider is class A must be refused in phase 1 rather than
-// reached with a class B code path that cannot impersonate the real tool.
+// A stored connection of a provider this build does not know is never called.
 func TestV1RefusesUnwiredProvider(t *testing.T) {
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
-	s.CreateConnection("antigravity", "class A", "token")
+	s.CreateConnection("somegateway", "imported", "token")
 
 	h := New(s, nil)
-	req := httptest.NewRequest("POST", "/v1/v1internal:generateContent", strings.NewReader(`{"model":"antigravity/m"}`))
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"somegateway/m"}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {

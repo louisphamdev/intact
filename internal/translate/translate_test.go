@@ -217,3 +217,56 @@ func TestOpenAIToResponsesAndBack(t *testing.T) {
 		}
 	}
 }
+
+type memSigs map[string]string
+
+func (m memSigs) Get(id string) string { return m[id] }
+func (m memSigs) Put(id, s string)     { m[id] = s }
+
+func TestOpenAIToGemini(t *testing.T) {
+	sigs := memSigs{"c1": "SIG1"}
+	in := `{"model":"gemini-3-flash","max_tokens":100000,"reasoning_effort":"low","messages":[{"role":"system","content":"sys"},
+	 {"role":"user","content":[{"type":"text","text":"look"},{"type":"image_url","image_url":{"url":"data:image/png;base64,QUJD"}}]},
+	 {"role":"assistant","content":"calling","tool_calls":[{"id":"c1","type":"function","function":{"name":"get weather","arguments":"{\"city\":\"HN\"}"}},{"id":"c9","type":"function","function":{"name":"f2","arguments":"{}"}}]},
+	 {"role":"tool","tool_call_id":"c1","content":"{\"t\":30}"},{"role":"tool","tool_call_id":"c9","content":"done"}],
+	 "tools":[{"type":"function","function":{"name":"get weather","parameters":{"type":"object","$schema":"x","additionalProperties":false,
+	   "properties":{"city":{"type":["string","null"],"minLength":1},"unit":{"anyOf":[{"type":"null"},{"type":"string","enum":["c","f"]}]},"n":{"const":3}},"required":["city","gone"]}}}]}`
+	out, err := OpenAIToGemini([]byte(in), sigs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, want := range []string{`"systemInstruction":{"parts":[{"text":"sys"}],"role":"user"}`, `"inlineData":{"data":"QUJD","mimeType":"image/png"}`,
+		`"thoughtSignature":"SIG1"`, `"functionResponse":{"id":"c1","name":"get weather","response":{"result":{"t":30}}}`,
+		`"maxOutputTokens":64000`, `"thinkingLevel":"low"`, `"name":"get_weather"`, `"city":{"type":"string"}`,
+		`"unit":{"enum":["c","f"],"type":"string"}`, `"n":{"enum":["3"],"type":"string"}`, `"required":["city"]`, `"mode":"VALIDATED"`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("gemini request missing %s:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "$schema") || strings.Contains(s, "additionalProperties") || strings.Contains(s, "minLength") {
+		t.Errorf("unsupported schema keys left: %s", s)
+	}
+	// The second call of the turn has no cached signature and gets none.
+	if strings.Count(s, "thoughtSignature") != 1 {
+		t.Errorf("signatures = %d, want 1", strings.Count(s, "thoughtSignature"))
+	}
+}
+
+func TestGeminiStreamToOpenAI(t *testing.T) {
+	sigs := memSigs{}
+	src := `data: {"response":{"responseId":"r1","modelVersion":"gemini-3-flash","candidates":[{"content":{"role":"model","parts":[{"text":"think","thought":true,"thoughtSignature":"S"}]}}]}}` + "\n\n" +
+		`data: {"response":{"candidates":[{"content":{"parts":[{"text":"Hi"},{"functionCall":{"id":"fc1","name":"f","args":{"a":1}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3,"thoughtsTokenCount":2}}}` + "\n\n"
+	var o buf
+	GeminiStreamToOpenAI(&o, strings.NewReader(src), sigs)
+	s := o.String()
+	for _, want := range []string{`"reasoning_content":"think"`, `"content":"Hi"`, `"arguments":"{\"a\":1}"`, `"id":"fc1"`,
+		`"finish_reason":"tool_calls"`, `"prompt_tokens":7`, `"completion_tokens":5`, "[DONE]"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("chunks missing %s:\n%s", want, s)
+		}
+	}
+	if sigs["fc1"] != "S" {
+		t.Errorf("signature not recorded for the call: %v", sigs)
+	}
+}

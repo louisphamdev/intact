@@ -55,6 +55,8 @@ func shapeFor(p provider.Provider, model string) (shape, path string) {
 		}
 	}
 	switch s := shapeOf(p); s {
+	case translate.Antigravity:
+		return s, "v1internal:streamGenerateContent?alt=sse"
 	case translate.Anthropic:
 		return s, "messages"
 	case translate.Responses:
@@ -69,7 +71,7 @@ func shapeFor(p provider.Provider, model string) (shape, path string) {
 // translatable reports whether intact can reach a provider shape from a caller.
 func translatable(shape string) bool {
 	switch shape {
-	case translate.OpenAI, translate.Anthropic, translate.Responses:
+	case translate.OpenAI, translate.Anthropic, translate.Responses, translate.Antigravity:
 		return true
 	}
 	return false
@@ -94,7 +96,9 @@ func toProvider(body []byte, client, want string) ([]byte, error) {
 }
 
 // alwaysStreams reports whether a provider shape is only ever called streaming.
-func alwaysStreams(shape string) bool { return shape == translate.Responses }
+func alwaysStreams(shape string) bool {
+	return shape == translate.Responses || shape == translate.Antigravity
+}
 
 // maxTranslatedBody bounds a whole (non-streamed) response read for translation.
 const maxTranslatedBody = 32 << 20
@@ -140,7 +144,7 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 	pr, pw := io.Pipe()
 	go func() {
 		defer pw.Close()
-		toChatChunks(pipeFlusher{pw}, resp.Body, via)
+		a.toChatChunks(pipeFlusher{pw}, resp.Body, via)
 	}()
 	tap := &respTap{headLimit: usageTapHeadLimit, tailLimit: usageTapTailLimit}
 	chunks := io.TeeReader(pr, tapWriter{tap})
@@ -172,8 +176,10 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 }
 
 // toChatChunks converts a provider's event stream to Chat Completions chunks.
-func toChatChunks(dst translate.Flusher, src io.Reader, via string) {
+func (a *api) toChatChunks(dst translate.Flusher, src io.Reader, via string) {
 	switch via {
+	case translate.Antigravity:
+		translate.GeminiStreamToOpenAI(dst, src, &a.sigs)
 	case translate.Anthropic:
 		translate.AnthropicStreamToOpenAI(dst, src)
 	case translate.Responses:

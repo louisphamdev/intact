@@ -28,6 +28,8 @@ type api struct {
 	filters filterCache
 	// copilot caches exchanged Copilot tokens per connection.
 	copilot copilotCache
+	// sigs remembers Gemini thought signatures by function call id.
+	sigs sigStore
 }
 
 // New builds the route table with no authentication (loopback use and tests).
@@ -40,7 +42,8 @@ func New(s *store.Store, baseOverride map[string]string) http.Handler {
 // present the bearer token to use a provider.
 func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.Config) http.Handler {
 	a := &api{store: s, baseOverride: baseOverride, auth: authCfg, rrNext: map[string]int{},
-		cat: catalog{m: map[string]catalogEntry{}}, copilot: copilotCache{m: map[string]copilotToken{}}}
+		cat: catalog{m: map[string]catalogEntry{}}, copilot: copilotCache{m: map[string]copilotToken{}},
+		sigs: sigStore{m: map[string]sigEntry{}}}
 	mux := http.NewServeMux()
 	// One base URL: the model in the body picks the provider and its accounts.
 	mux.HandleFunc("GET /v1/models", a.requireToken(a.models))

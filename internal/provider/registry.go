@@ -110,6 +110,17 @@ var registry = map[string]Provider{
 		Models: []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5",
 			"gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"},
 	},
+	// Antigravity: Google's Cloud Code Assist (v1internal) as the Antigravity
+	// IDE reaches it, with the Google OAuth token. The Gemini request travels
+	// inside an envelope naming the account's Cloud project.
+	"antigravity": {
+		ID:         "antigravity",
+		BaseURL:    "https://daily-cloudcode-pa.googleapis.com",
+		API:        "antigravity",
+		AuthHeader: "Authorization",
+		AuthPrefix: "Bearer ",
+		Identity:   map[string]string{"User-Agent": AntigravityUserAgent},
+	},
 	"groq": {
 		ID:         "groq",
 		BaseURL:    "https://api.groq.com/openai/v1",
@@ -189,6 +200,12 @@ const (
 	CopilotVSCodeVersion = "1.110.0"
 	CopilotChatVersion   = "0.38.0"
 	CopilotAPIVersion    = "2025-04-01"
+)
+
+// AntigravityUserAgent is the IDE identity Antigravity calls carry.
+const (
+	AntigravityVersion   = "2.11.0"
+	AntigravityUserAgent = "antigravity/ide/" + AntigravityVersion + " darwin/arm64"
 )
 
 // CodexCLIVersion is the Codex CLI version intact presents; the backend hides

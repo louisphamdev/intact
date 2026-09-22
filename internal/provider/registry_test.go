@@ -14,9 +14,6 @@ func TestLookupReturnsClassBProviders(t *testing.T) {
 		t.Errorf("auth = %q %q, want Authorization / Bearer ", p.AuthHeader, p.AuthPrefix)
 	}
 
-	if _, ok := Lookup("antigravity"); ok {
-		t.Error("antigravity must not be registered in phase 1: it is class A")
-	}
 	if _, ok := Lookup("nope"); ok {
 		t.Error("an unknown id must not resolve")
 	}

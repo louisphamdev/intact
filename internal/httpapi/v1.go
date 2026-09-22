@@ -234,7 +234,11 @@ func (a *api) providerModels(ctx context.Context, prov string) []string {
 	}
 	ids, ok := []string(nil), false
 	if conns := a.activeConnections(prov); len(conns) > 0 {
-		ids, ok = a.fetchModelIDs(ctx, conns[0])
+		if p, _ := a.providerFor(conns[0]); p.API == translate.Antigravity {
+			ids, ok = a.antigravityModels(ctx, conns[0])
+		} else {
+			ids, ok = a.fetchModelIDs(ctx, conns[0])
+		}
 	}
 	if p, known := provider.Lookup(prov); known && len(p.Models) > 0 && len(ids) == 0 {
 		ids, ok = p.Models, true
@@ -388,6 +392,24 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 				}
 				return nil
 			}
+			if want == translate.Antigravity {
+				// The envelope names the account's project, so it is built
+				// per account from the chat form of the request.
+				hub, err := toProvider(body, client, translate.OpenAI)
+				if err != nil {
+					return err
+				}
+				inner, err := translate.OpenAIToGemini(hub, &a.sigs)
+				if err != nil {
+					return err
+				}
+				env, err := a.antigravityEnvelope(r.Context(), conn, secret, model, inner)
+				if err != nil {
+					return errSkipAccount{err}
+				}
+				path, send, to, via = wantPath, env, client, want
+				return nil
+			}
 			tb, ok := translated[want]
 			if !ok {
 				var err error
@@ -400,6 +422,11 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			return nil
 		}
 		if err := prepare(); err != nil {
+			var skip errSkipAccount
+			if errors.As(err, &skip) {
+				log.Printf("connection %s: %v", conn.ID, skip.err)
+				continue
+			}
 			writeError(w, http.StatusBadRequest, "cannot translate the request: "+err.Error())
 			return
 		}
@@ -527,3 +554,9 @@ func firstNonEmpty(ss ...string) string {
 	}
 	return ""
 }
+
+// errSkipAccount is a failure of one account (not of the request), after
+// which the next account is tried.
+type errSkipAccount struct{ err error }
+
+func (e errSkipAccount) Error() string { return e.err.Error() }

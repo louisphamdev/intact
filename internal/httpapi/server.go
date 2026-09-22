@@ -42,6 +42,18 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	// One base URL: the model in the body picks the provider and its accounts.
 	mux.HandleFunc("GET /v1/models", a.requireToken(a.models))
 	mux.HandleFunc("/v1/{path...}", a.requireToken(a.v1))
+	// Management API for machines: the same token as /v1.
+	mux.HandleFunc("GET /api/providers", a.requireToken(a.apiProviders))
+	mux.HandleFunc("GET /api/accounts", a.requireToken(a.accounts))
+	mux.HandleFunc("POST /api/accounts/{id}/active", a.requireToken(a.setActive))
+	mux.HandleFunc("GET /api/usage", a.requireToken(a.usage))
+	mux.HandleFunc("GET /api/filters", a.requireToken(a.listFilters))
+	mux.HandleFunc("POST /api/filters", a.requireToken(a.saveFilter))
+	mux.HandleFunc("DELETE /api/filters/{id}", a.requireToken(a.deleteFilter))
+	mux.HandleFunc("POST /api/filters/{id}/delete", a.requireToken(a.deleteFilter))
+	// MCP (Streamable HTTP): the management API as tools for an agent.
+	mux.HandleFunc("POST /mcp", a.requireToken(a.mcp))
+	mux.HandleFunc("GET /mcp", a.requireToken(a.mcpGet))
 	mux.HandleFunc("GET /accounts", a.requireSession(a.accounts))
 	mux.HandleFunc("POST /accounts", a.requireSession(a.createAccount))
 	mux.HandleFunc("POST /accounts/{id}/delete", a.requireSession(a.deleteAccount))

@@ -1,0 +1,321 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"sort"
+	"strings"
+
+	"github.com/louisphamdev/intact/internal/filter"
+	"github.com/louisphamdev/intact/internal/provider"
+	"github.com/louisphamdev/intact/internal/store"
+)
+
+// intact serves the Model Context Protocol over Streamable HTTP at /mcp, so an
+// agent can inspect and adjust it with the same API token a client uses. Each
+// tool maps onto one of the management endpoints under /api.
+
+const mcpProtocol = "2025-06-18"
+
+type rpcRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id,omitempty"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+}
+
+type rpcError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+type mcpTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"inputSchema"`
+	run         func(a *api, args map[string]any) (any, error)
+}
+
+func schema(props map[string]any, required ...string) map[string]any {
+	s := map[string]any{"type": "object", "properties": props}
+	if len(required) > 0 {
+		s["required"] = required
+	}
+	return s
+}
+
+var (
+	pString = map[string]any{"type": "string"}
+	pBool   = map[string]any{"type": "boolean"}
+	pKind   = map[string]any{"type": "string", "enum": []string{filter.Field, filter.Schema, filter.System, filter.Header},
+		"description": "field: dot path into the body (* matches any key or item); schema: key removed at every depth of tool schemas; system: regex of system-prompt lines to remove; header: request header not sent"}
+	pProvider = map[string]any{"type": "string", "description": `provider id, or "*" for every provider`}
+)
+
+var mcpTools = []mcpTool{
+	{Name: "list_providers", Description: "List the providers intact can call and how many accounts each has.",
+		InputSchema: schema(map[string]any{}),
+		run:         func(a *api, _ map[string]any) (any, error) { return a.providerSummary(), nil }},
+	{Name: "list_accounts", Description: "List stored accounts (never their credentials), optionally for one provider.",
+		InputSchema: schema(map[string]any{"provider": pString}),
+		run: func(a *api, args map[string]any) (any, error) {
+			list, err := a.store.ListConnections()
+			if p := argStr(args, "provider"); p != "" {
+				out := []store.Connection{}
+				for _, c := range list {
+					if c.Provider == p {
+						out = append(out, c)
+					}
+				}
+				list = out
+			}
+			return list, err
+		}},
+	{Name: "set_account_active", Description: "Turn an account on or off. An inactive account is skipped by /v1.",
+		InputSchema: schema(map[string]any{"id": pString, "active": pBool}, "id", "active"),
+		run: func(a *api, args map[string]any) (any, error) {
+			active, _ := args["active"].(bool)
+			if err := a.store.SetActive(argStr(args, "id"), active); err != nil {
+				return nil, err
+			}
+			return map[string]any{"id": argStr(args, "id"), "active": active}, nil
+		}},
+	{Name: "list_models", Description: "List the models callable through /v1 as <provider>/<model>, optionally for one provider.",
+		InputSchema: schema(map[string]any{"provider": pString}),
+		run: func(a *api, args map[string]any) (any, error) {
+			out := []string{}
+			for _, p := range a.activeProviders() {
+				if want := argStr(args, "provider"); want != "" && want != p {
+					continue
+				}
+				for _, m := range a.providerModelsBg(p) {
+					out = append(out, p+"/"+m)
+				}
+			}
+			return out, nil
+		}},
+	{Name: "list_filters", Description: "List the request filters (the blacklist), optionally for one provider scope.",
+		InputSchema: schema(map[string]any{"provider": pProvider}),
+		run: func(a *api, args map[string]any) (any, error) {
+			list, err := a.store.ListFilters()
+			if p := argStr(args, "provider"); p != "" {
+				out := []store.Filter{}
+				for _, f := range list {
+					if f.Provider == p {
+						out = append(out, f)
+					}
+				}
+				list = out
+			}
+			return list, err
+		}},
+	{Name: "add_filter", Description: "Add a request filter. It applies to the next request, no restart.",
+		InputSchema: schema(map[string]any{"provider": pProvider, "kind": pKind, "pattern": pString,
+			"note": pString, "enabled": pBool}, "kind", "pattern"),
+		run: func(a *api, args map[string]any) (any, error) {
+			f := store.Filter{Provider: argStr(args, "provider"), Kind: argStr(args, "kind"),
+				Pattern: argStr(args, "pattern"), Note: argStr(args, "note"), Enabled: true}
+			if e, ok := args["enabled"].(bool); ok {
+				f.Enabled = e
+			}
+			return a.putFilter(f)
+		}},
+	{Name: "update_filter", Description: "Change a filter; fields left out keep their value.",
+		InputSchema: schema(map[string]any{"id": pString, "provider": pProvider, "kind": pKind, "pattern": pString,
+			"note": pString, "enabled": pBool}, "id"),
+		run: func(a *api, args map[string]any) (any, error) {
+			list, err := a.store.ListFilters()
+			if err != nil {
+				return nil, err
+			}
+			for _, f := range list {
+				if f.ID != argStr(args, "id") {
+					continue
+				}
+				for k, dst := range map[string]*string{"provider": &f.Provider, "kind": &f.Kind, "pattern": &f.Pattern, "note": &f.Note} {
+					if v, ok := args[k].(string); ok {
+						*dst = v
+					}
+				}
+				if e, ok := args["enabled"].(bool); ok {
+					f.Enabled = e
+				}
+				return a.putFilter(f)
+			}
+			return nil, store.ErrFilterNotFound
+		}},
+	{Name: "delete_filter", Description: "Delete a request filter.",
+		InputSchema: schema(map[string]any{"id": pString}, "id"),
+		run: func(a *api, args map[string]any) (any, error) {
+			if err := a.store.DeleteFilter(argStr(args, "id")); err != nil {
+				return nil, err
+			}
+			a.reloadFilters()
+			return map[string]any{"deleted": argStr(args, "id")}, nil
+		}},
+	{Name: "get_usage", Description: "Daily token totals per account and model, optionally for one day (YYYY-MM-DD).",
+		InputSchema: schema(map[string]any{"day": pString}),
+		run: func(a *api, args map[string]any) (any, error) {
+			rows, err := a.store.Usage()
+			if d := argStr(args, "day"); d != "" {
+				out := []store.UsageRow{}
+				for _, r := range rows {
+					if r.Day == d {
+						out = append(out, r)
+					}
+				}
+				rows = out
+			}
+			return rows, err
+		}},
+}
+
+func argStr(args map[string]any, k string) string {
+	s, _ := args[k].(string)
+	return strings.TrimSpace(s)
+}
+
+// putFilter validates and stores a filter, then applies it to the next request.
+func (a *api) putFilter(f store.Filter) (store.Filter, error) {
+	rule, err := filter.Compile(f.Kind, f.Pattern)
+	if err != nil {
+		return store.Filter{}, err
+	}
+	f.Pattern = rule.Pattern
+	saved, err := a.store.SaveFilter(f)
+	if err != nil {
+		return store.Filter{}, err
+	}
+	a.reloadFilters()
+	return saved, nil
+}
+
+// providerModelsBg reads a provider's cached model list outside a request.
+func (a *api) providerModelsBg(p string) []string {
+	return a.providerModels(context.Background(), p)
+}
+
+// providerSummary is the provider list the management API and MCP return.
+func (a *api) providerSummary() []map[string]any {
+	list, _ := a.store.ListConnections()
+	count, active := map[string]int{}, map[string]int{}
+	usable := map[string]bool{}
+	for _, c := range list {
+		count[c.Provider]++
+		if c.IsActive {
+			active[c.Provider]++
+		}
+		if _, ok := a.providerFor(c); ok {
+			usable[c.Provider] = true
+		}
+	}
+	ids := map[string]bool{}
+	for p := range count {
+		ids[p] = true
+	}
+	for _, id := range provider.IDs() {
+		ids[id] = true
+		usable[id] = usable[id] || count[id] == 0
+	}
+	out := []map[string]any{}
+	for p := range ids {
+		out = append(out, map[string]any{"id": p, "accounts": count[p], "active": active[p], "supported": usable[p]})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i]["id"].(string) < out[j]["id"].(string) })
+	return out
+}
+
+// mcp answers one JSON-RPC message of the Streamable HTTP transport.
+func (a *api) mcp(w http.ResponseWriter, r *http.Request) {
+	var req rpcRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		rpcReply(w, nil, nil, &rpcError{Code: -32700, Message: "parse error"})
+		return
+	}
+	// A notification has no id and gets no answer.
+	if len(req.ID) == 0 || string(req.ID) == "null" {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+	switch req.Method {
+	case "initialize":
+		var p struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		}
+		json.Unmarshal(req.Params, &p)
+		version := mcpProtocol
+		if p.ProtocolVersion != "" {
+			version = p.ProtocolVersion
+		}
+		rpcReply(w, req.ID, map[string]any{
+			"protocolVersion": version,
+			"capabilities":    map[string]any{"tools": map[string]any{}},
+			"serverInfo":      map[string]any{"name": "intact", "version": "1"},
+			"instructions":    "Manage intact: accounts, models, usage, and the request filters (blacklist) applied before a request reaches a provider.",
+		}, nil)
+	case "ping":
+		rpcReply(w, req.ID, map[string]any{}, nil)
+	case "tools/list":
+		rpcReply(w, req.ID, map[string]any{"tools": mcpTools}, nil)
+	case "tools/call":
+		var p struct {
+			Name      string         `json:"name"`
+			Arguments map[string]any `json:"arguments"`
+		}
+		if err := json.Unmarshal(req.Params, &p); err != nil {
+			rpcReply(w, req.ID, nil, &rpcError{Code: -32602, Message: "invalid params"})
+			return
+		}
+		for _, t := range mcpTools {
+			if t.Name != p.Name {
+				continue
+			}
+			if p.Arguments == nil {
+				p.Arguments = map[string]any{}
+			}
+			res, err := t.run(a, p.Arguments)
+			rpcReply(w, req.ID, toolResult(res, err), nil)
+			return
+		}
+		rpcReply(w, req.ID, nil, &rpcError{Code: -32602, Message: "unknown tool " + p.Name})
+	default:
+		rpcReply(w, req.ID, nil, &rpcError{Code: -32601, Message: "method not found: " + req.Method})
+	}
+}
+
+// toolResult wraps a tool's value as MCP content; an error is reported to the
+// model as a tool error, not a protocol error, so it can correct itself.
+func toolResult(v any, err error) map[string]any {
+	if err != nil {
+		msg := err.Error()
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrFilterNotFound) {
+			msg = "not found"
+		}
+		return map[string]any{"isError": true, "content": []any{map[string]any{"type": "text", "text": msg}}}
+	}
+	b, _ := json.MarshalIndent(v, "", "  ")
+	return map[string]any{"content": []any{map[string]any{"type": "text", "text": string(b)}}}
+}
+
+func rpcReply(w http.ResponseWriter, id json.RawMessage, result any, e *rpcError) {
+	msg := map[string]any{"jsonrpc": "2.0", "id": id}
+	if id == nil {
+		msg["id"] = nil
+	}
+	if e != nil {
+		msg["error"] = e
+	} else {
+		msg["result"] = result
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(msg)
+}
+
+// mcpGet refuses the server-to-client stream, which intact does not offer.
+func (a *api) mcpGet(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Allow", "POST")
+	writeError(w, http.StatusMethodNotAllowed, fmt.Sprintf("POST JSON-RPC messages to %s", r.URL.Path))
+}

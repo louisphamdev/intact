@@ -73,13 +73,11 @@ func (a *api) saveFilter(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad json")
 		return
 	}
-	rule, err := filter.Compile(f.Kind, f.Pattern)
-	if err != nil {
+	if _, err := filter.Compile(f.Kind, f.Pattern); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	f.Pattern = rule.Pattern
-	saved, err := a.store.SaveFilter(f)
+	saved, err := a.putFilter(f)
 	if errors.Is(err, store.ErrFilterNotFound) {
 		writeError(w, http.StatusNotFound, "unknown filter")
 		return
@@ -88,7 +86,6 @@ func (a *api) saveFilter(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "cannot save filter")
 		return
 	}
-	a.reloadFilters()
 	writeJSON(w, saved)
 }
 
@@ -100,4 +97,9 @@ func (a *api) deleteFilter(w http.ResponseWriter, r *http.Request) {
 	}
 	a.reloadFilters()
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// apiProviders lists the providers with their account counts for machines.
+func (a *api) apiProviders(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{"providers": a.providerSummary()})
 }

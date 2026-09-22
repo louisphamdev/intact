@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/louisphamdev/intact/internal/filter"
 	"github.com/louisphamdev/intact/internal/provider"
 	"github.com/louisphamdev/intact/internal/store"
 	"github.com/louisphamdev/intact/internal/usage"
@@ -70,6 +71,13 @@ func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, path
 	}
 	for k, v := range p.Identity {
 		out.Header.Set(k, v)
+	}
+	// Header filters run after the defaults and the identity, so they can drop
+	// one of those too; the credential itself is never dropped.
+	for _, h := range filter.Headers(a.rulesFor(providerID)) {
+		if h != http.CanonicalHeaderKey(p.AuthHeader) {
+			out.Header.Del(h)
+		}
 	}
 	if p.AuthHeader != "" {
 		out.Header.Set(p.AuthHeader, p.AuthPrefix+secret)

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/louisphamdev/intact/internal/filter"
 	"github.com/louisphamdev/intact/internal/provider"
 	"github.com/louisphamdev/intact/internal/store"
 	"github.com/louisphamdev/intact/internal/translate"
@@ -347,6 +348,8 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			}
 			path, send, to = shapePath[want], tb, client
 		}
+		// Filters run last, on the exact bytes the provider will receive.
+		send, _ = filter.Apply(send, a.rulesFor(conn.Provider))
 		tried++
 		resp, err := a.send(r, p, conn.Provider, path, secret, send)
 		if err != nil {

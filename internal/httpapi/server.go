@@ -23,6 +23,8 @@ type api struct {
 	rrNext map[string]int
 	// cat caches each provider's model list for resolving a bare model id.
 	cat catalog
+	// filters caches the compiled request filters.
+	filters filterCache
 }
 
 // New builds the route table with no authentication (loopback use and tests).
@@ -46,6 +48,9 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	mux.HandleFunc("GET /accounts/{id}/models", a.requireSession(a.modelsForAccount))
 	mux.HandleFunc("POST /accounts/{id}/active", a.requireSession(a.setActive))
 	mux.HandleFunc("GET /providers", a.requireSession(a.providers))
+	mux.HandleFunc("GET /filters", a.requireSession(a.listFilters))
+	mux.HandleFunc("POST /filters", a.requireSession(a.saveFilter))
+	mux.HandleFunc("POST /filters/{id}/delete", a.requireSession(a.deleteFilter))
 	mux.HandleFunc("GET /usage", a.requireSession(a.usage))
 	mux.HandleFunc("GET /login", a.loginForm)
 	mux.HandleFunc("POST /login", a.loginSubmit)

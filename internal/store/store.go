@@ -46,10 +46,18 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if _, err := db.Exec(filterSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply filter schema: %w", err)
+	}
 	st := &Store{DB: db}
 	if err := st.migrateOAuth(); err != nil {
 		db.Close()
 		return nil, err
+	}
+	if err := st.seedFilters(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("seed filters: %w", err)
 	}
 	return st, nil
 }

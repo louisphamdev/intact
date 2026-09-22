@@ -287,7 +287,7 @@ function avatar(id,sm){
   return el('span',{class:'av'+(sm?' sm':''),style:'background:'+pinfo(id).color,'aria-hidden':'true',text:t});
 }
 
-let S={accounts:[],usage:[],providers:[],filters:[],keys:[],envToken:false};
+let S={accounts:[],usage:[],providers:[],filters:[],keys:[]};
 const modelCache={}; // provider -> {ids:[...]} or {error:"…"}
 const setupOf=p=>(S.providers.find(x=>x.id===p)||{}).setup;
 // A provider is wired when this build registers it or a connection gives it a
@@ -334,7 +334,6 @@ async function load(){
   S.accounts=a.status==='fulfilled'?a.value.accounts||[]:[];
   S.filters=f.status==='fulfilled'?f.value.filters||[]:[];
   S.keys=k.status==='fulfilled'?k.value.keys||[]:[];
-  S.envToken=k.status==='fulfilled'&&!!k.value.envToken;
   $('ctFilter').textContent=S.filters.filter(x=>x.enabled).length||'';
   S.usage=u.status==='fulfilled'?u.value.usage||[]:[];
   S.providers=p.status==='fulfilled'?p.value.providers||[]:[];
@@ -555,9 +554,7 @@ function keysCard(){
     el('div',{class:'cardh'},el('h2',{class:'grow'},'API keys'),
       el('button',{class:'primary',type:'button',onclick:createKey},svg(ICON.plus),'Create key')),
     el('div',{style:'padding:.8rem 1.25rem',class:'muted small'},'Send a key as ',el('code',{},'Authorization: Bearer <key>'),' (or ',el('code',{},'x-api-key'),' for Anthropic clients) to /v1, /api and /mcp.'),
-    rows.length?rows:el('div',{class:'empty',style:'padding:1.25rem'},'No keys yet.'),
-    S.envToken?el('div',{class:'row'},el('div',{class:'who'},el('div',{class:'l',text:'Environment token'}),
-      el('div',{class:'meta'},el('span',{class:'faint small'},'INTACT_API_TOKEN in the server environment file also works; it is not shown here.')))):null);
+    rows.length?rows:el('div',{class:'empty',style:'padding:1.25rem'},'No keys yet.'));
 }
 function createKey(){
   $('kTitle').textContent='Create API key';

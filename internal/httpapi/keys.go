@@ -15,7 +15,7 @@ func (a *api) listKeys(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "cannot read api keys")
 		return
 	}
-	writeJSON(w, map[string]any{"keys": list, "envToken": a.auth != nil && a.auth.APIToken != ""})
+	writeJSON(w, map[string]any{"keys": list})
 }
 
 // createKey makes a key from {"name": "…"} and returns it in full once.

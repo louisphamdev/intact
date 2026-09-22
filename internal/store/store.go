@@ -50,6 +50,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply models schema: %w", err)
 	}
+	if err := (&Store{DB: db}).migrateModels(); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if _, err := db.Exec(pendingSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply pending schema: %w", err)

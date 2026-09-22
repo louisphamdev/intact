@@ -85,6 +85,17 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 			targets = append(targets, a.activeConnections(p)...)
 		}
 	}
+	// A test pinned to one account reaches that account alone, switched on or not.
+	if run, _ := r.Context().Value(modelTestKey{}).(*testRun); run != nil && run.pin != "" {
+		targets = nil
+		if list, err := a.store.ListConnections(); err == nil {
+			for _, c := range list {
+				if c.ID == run.pin && (prov == "" || c.Provider == prov) {
+					targets = []store.Connection{c}
+				}
+			}
+		}
+	}
 	if len(targets) == 0 {
 		writeError(w, http.StatusNotFound, "no active account serves this model")
 		return
@@ -249,8 +260,9 @@ func (a *api) providerModels(ctx context.Context, prov string) []string {
 }
 
 // catalogIDs returns everything a provider lists, fetching when the cache is
-// stale and recording the list in the database: a live list marks models
-// that are gone as stale, a fallback list does not.
+// stale and recording the list in the database: a live list drops the models
+// that are gone, a fallback list does not. New models start by the provider's
+// policy; under AutoTest they are tested in the background.
 func (a *api) catalogIDs(ctx context.Context, prov string) []string {
 	a.cat.mu.Lock()
 	e, hit := a.cat.m[prov]
@@ -275,7 +287,13 @@ func (a *api) catalogIDs(ctx context.Context, prov string) []string {
 		ids, ok = p.Models, true
 	}
 	if len(ids) > 0 {
-		a.store.SyncModels(prov, ids, live)
+		pol := a.modelPolicy(prov)
+		added, err := a.store.SyncModels(prov, ids, live, pol.startsOn)
+		if err != nil {
+			log.Printf("models %s: %v", prov, err)
+		} else if pol.AutoTest && len(added) > 0 && a.auto.start(prov) {
+			go a.autoTestHeld(prov, added)
+		}
 	}
 	a.cat.mu.Lock()
 	a.cat.m[prov] = catalogEntry{ids: ids, ok: ok, at: time.Now()}
@@ -411,6 +429,9 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		secret, err := a.secretFor(r.Context(), conn.ID)
 		if err != nil {
 			continue
+		}
+		if run, _ := r.Context().Value(modelTestKey{}).(*testRun); run != nil {
+			run.used = conn.ID
 		}
 		if secret, err = a.exchanged(r.Context(), p, conn.ID, secret); err != nil {
 			log.Printf("connection %s: %v", conn.ID, err)

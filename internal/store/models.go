@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -18,6 +19,8 @@ type ProviderModel struct {
 	TestOK    bool   `json:"testOk"`
 	TestMs    int64  `json:"testMs,omitempty"`
 	TestMsg   string `json:"testMsg,omitempty"`
+	// TestConn is the account that answered the last test.
+	TestConn string `json:"testConn,omitempty"`
 }
 
 const modelsSchema = `
@@ -35,35 +38,78 @@ CREATE TABLE IF NOT EXISTS provider_models (
 	PRIMARY KEY (provider, model)
 );`
 
-// SyncModels records the models a provider listed. A new model starts active.
-// With markStale, a stored model missing from the list is marked stale (kept,
-// so the operator decides whether to delete it); a listed one is fresh again.
-func (s *Store) SyncModels(provider string, ids []string, markStale bool) error {
+// migrateModels adds the columns newer than the table.
+func (s *Store) migrateModels() error {
+	if _, err := s.DB.Exec(`ALTER TABLE provider_models ADD COLUMN test_conn TEXT NOT NULL DEFAULT ''`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column") {
+		return fmt.Errorf("add column test_conn: %w", err)
+	}
+	return nil
+}
+
+// SyncModels records the models a provider listed and returns the ones seen
+// for the first time. A new model starts on when startOn says so. With live
+// (the provider answered with its list), a stored model missing from the list
+// is deleted; a fallback list deletes nothing.
+func (s *Store) SyncModels(provider string, ids []string, live bool, startOn func(model string) bool) ([]string, error) {
+	// Read before the transaction: a read that turns into a write inside one
+	// fails with SQLITE_BUSY_SNAPSHOT when another connection wrote meanwhile.
+	known := map[string]bool{}
+	rows, err := s.DB.Query(`SELECT model FROM provider_models WHERE provider = ?`, provider)
+	if err != nil {
+		return nil, fmt.Errorf("query models: %w", err)
+	}
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		known[m] = true
+	}
+	rows.Close()
 	tx, err := s.DB.Begin()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC().Format(time.RFC3339)
-	if markStale {
-		if _, err := tx.Exec(`UPDATE provider_models SET stale = 1 WHERE provider = ?`, provider); err != nil {
-			return fmt.Errorf("mark stale: %w", err)
-		}
-	}
+	listed := map[string]bool{}
+	var added []string
 	for _, id := range ids {
+		listed[id] = true
+		if known[id] {
+			if _, err := tx.Exec(`UPDATE provider_models SET stale = 0, last_seen = ? WHERE provider = ? AND model = ?`, now, provider, id); err != nil {
+				return nil, fmt.Errorf("sync model: %w", err)
+			}
+			continue
+		}
+		on := 1
+		if startOn != nil && !startOn(id) {
+			on = 0
+		}
 		if _, err := tx.Exec(`INSERT INTO provider_models (provider, model, active, stale, first_seen, last_seen)
-			VALUES (?, ?, 1, 0, ?, ?)
-			ON CONFLICT(provider, model) DO UPDATE SET stale = 0, last_seen = excluded.last_seen`,
-			provider, id, now, now); err != nil {
-			return fmt.Errorf("sync model: %w", err)
+			VALUES (?, ?, ?, 0, ?, ?) ON CONFLICT(provider, model) DO NOTHING`, provider, id, on, now, now); err != nil {
+			return nil, fmt.Errorf("sync model: %w", err)
+		}
+		known[id] = true
+		added = append(added, id)
+	}
+	if live {
+		for m := range known {
+			if !listed[m] {
+				if _, err := tx.Exec(`DELETE FROM provider_models WHERE provider = ? AND model = ?`, provider, m); err != nil {
+					return nil, fmt.Errorf("drop model: %w", err)
+				}
+			}
 		}
 	}
-	return tx.Commit()
+	return added, tx.Commit()
 }
 
 // ListModels returns a provider's stored models by name.
 func (s *Store) ListModels(provider string) ([]ProviderModel, error) {
-	rows, err := s.DB.Query(`SELECT provider, model, active, stale, first_seen, last_seen, test_at, test_ok, test_ms, test_msg
+	rows, err := s.DB.Query(`SELECT provider, model, active, stale, first_seen, last_seen, test_at, test_ok, test_ms, test_msg, test_conn
 		FROM provider_models WHERE provider = ? ORDER BY model`, provider)
 	if err != nil {
 		return nil, fmt.Errorf("query models: %w", err)
@@ -73,7 +119,7 @@ func (s *Store) ListModels(provider string) ([]ProviderModel, error) {
 	for rows.Next() {
 		var m ProviderModel
 		var active, stale, ok int
-		if err := rows.Scan(&m.Provider, &m.Model, &active, &stale, &m.FirstSeen, &m.LastSeen, &m.TestAt, &ok, &m.TestMs, &m.TestMsg); err != nil {
+		if err := rows.Scan(&m.Provider, &m.Model, &active, &stale, &m.FirstSeen, &m.LastSeen, &m.TestAt, &ok, &m.TestMs, &m.TestMsg, &m.TestConn); err != nil {
 			return nil, err
 		}
 		m.Active, m.Stale, m.TestOK = active != 0, stale != 0, ok != 0
@@ -132,7 +178,7 @@ func (s *Store) DeleteModels(provider string, models []string) (int64, error) {
 }
 
 // RecordModelTest stores the result of a test call.
-func (s *Store) RecordModelTest(provider, model string, ok bool, ms int64, msg string) error {
+func (s *Store) RecordModelTest(provider, model string, ok bool, ms int64, msg, conn string) error {
 	v := 0
 	if ok {
 		v = 1
@@ -140,7 +186,7 @@ func (s *Store) RecordModelTest(provider, model string, ok bool, ms int64, msg s
 	if len(msg) > 300 {
 		msg = msg[:300]
 	}
-	_, err := s.DB.Exec(`UPDATE provider_models SET test_at = ?, test_ok = ?, test_ms = ?, test_msg = ? WHERE provider = ? AND model = ?`,
-		time.Now().UTC().Format(time.RFC3339), v, ms, msg, provider, model)
+	_, err := s.DB.Exec(`UPDATE provider_models SET test_at = ?, test_ok = ?, test_ms = ?, test_msg = ?, test_conn = ? WHERE provider = ? AND model = ?`,
+		time.Now().UTC().Format(time.RFC3339), v, ms, msg, conn, provider, model)
 	return err
 }

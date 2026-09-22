@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>intact</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32' aria-hidden='true'%3E%3Cdefs%3E%3ClinearGradient id='lg' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%237c6cf6'/%3E%3Cstop offset='1' stop-color='%232dd4bf'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23lg)'/%3E%3Cpath d='M16 6.5 24 9.6v6.1c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V9.6Z' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linejoin='round'/%3E%3Cpath d='m12.4 16.2 2.6 2.6 4.8-5' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="icon" href="/favicon.ico" sizes="32x32"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#7c6cf6">
 <style>
   :root{color-scheme:dark;--bg:#0c1017;--side:#10151e;--card:#141a25;--card2:#1b2331;--line:#232d3d;--fg:#e4e9f1;
         --muted:#95a0b3;--faint:#657086;--accent:#8b80f9;--accent-strong:#6c5ce7;--accent-soft:rgba(139,128,249,.15);
@@ -589,7 +589,9 @@ function viewProvider(v,p){
         labelEditor(a),
         el('div',{class:'meta'},
           el('span',{class:'badge'+(a.isActive?' ok':''),text:a.isActive?'active':'off'}),
-          el('span',{class:'mono faint',title:a.id,text:short(a.id)}))),
+          el('span',{class:'mono faint',title:a.id,text:short(a.id)}),
+          acctTest(a))),
+      ok?acctTestBtn(a):null,
       el('button',{class:'danger',type:'button',onclick:()=>deleteAccount(a)},svg(ICON.trash),'Delete'),
       el('label',{class:'switch',title:a.isActive?'Active':'Off'},sw,el('span')));
   });
@@ -599,6 +601,28 @@ function viewProvider(v,p){
     list.length?rows:el('div',{class:'empty'},el('b',{},'No connections yet'),ok?'Add an API key to start using '+pname(p)+'.':null,addBtn),
     list.length&&addBtn?el('div',{style:'padding:.8rem 1.25rem;border-top:1px solid var(--line)'},addBtn):null));
   if(ok&&activeOf(p).length)v.append(modelTable(p));
+  loadAcctTests();
+}
+// Account tests: one short call on that account alone. The last result of
+// each account is loaded once per page and kept here.
+let acctTests={};const acctTestEls={};
+async function loadAcctTests(){try{acctTests=await api('/account-tests')}catch(e){acctTests={}}for(const id in acctTestEls)paintAcctTest(id)}
+function acctTest(a){const s=el('span',{class:'small'});acctTestEls[a.id]=s;paintAcctTest(a.id);return s}
+function paintAcctTest(id,busy){
+  const s=acctTestEls[id];if(!s)return;const t=acctTests[id];
+  if(busy){s.className='small faint';s.textContent='testing…';s.title='';return}
+  if(!t){s.textContent='';return}
+  s.className='small';s.style.color=t.ok?'var(--ok)':'var(--err)';
+  s.textContent=(t.ok?'✓ '+t.ms+' ms':'✗ '+(t.message||'failed').slice(0,50))+' · '+t.model;
+  s.title=(t.message||'')+'\n'+new Date(t.at).toLocaleString();
+}
+function acctTestBtn(a){
+  const b=el('button',{class:'ghost',type:'button',title:'Send a short test call through this account only'},'Test');
+  b.onclick=async()=>{b.disabled=true;paintAcctTest(a.id,true);
+    try{acctTests[a.id]=await postJSON('/accounts/'+a.id+'/test',{})}
+    catch(e){acctTests[a.id]={ok:false,message:e.message,model:'',ms:0,at:new Date().toISOString()}}
+    b.disabled=false;paintAcctTest(a.id)};
+  return b;
 }
 // labelEditor shows an account's name with a pencil that edits it in place.
 function labelEditor(a){
@@ -629,9 +653,10 @@ function nameFilter(q){
   });
   return name=>{const m=name.toLowerCase();return terms.every(f=>f(m))};
 }
-const MODEL_VIEWS=[['all','All'],['active','Active'],['inactive','Off'],['stale','Stale'],['failed','Failed'],['untested','Untested']];
+const MODEL_VIEWS=[['all','All'],['active','Active'],['inactive','Off'],['failed','Failed'],['untested','Untested']];
 function modelTable(p){
-  const st={q:'',view:'all',rows:[],ok:true,sel:new Set()};
+  const st={q:'',view:'all',rows:[],ok:true,sel:new Set(),policy:{},running:false};
+  const acctName=id=>{const a=accountsOf(p).find(a=>a.id===id);return a?(a.label||short(a.id)):''};
   const card=el('div',{class:'card'});
   const q=el('input',{placeholder:'Filter by name — free, free|mini, -preview, /regex/',autocomplete:'off',spellcheck:'false',style:'max-width:26rem'});
   const counts=el('span',{class:'faint small'});
@@ -639,7 +664,7 @@ function modelTable(p){
   const bar=el('div',{style:'display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;padding:.55rem 1.25rem;background:var(--accent-soft);border-bottom:1px solid var(--line)'});
   const body=el('tbody');
   const shown=()=>{const f=nameFilter(st.q);return st.rows.filter(r=>f(r.model)&&(
-    st.view==='all'||(st.view==='active'&&r.active)||(st.view==='inactive'&&!r.active)||(st.view==='stale'&&r.stale)||
+    st.view==='all'||(st.view==='active'&&r.active)||(st.view==='inactive'&&!r.active)||
     (st.view==='failed'&&r.testAt&&!r.testOk)||(st.view==='untested'&&!r.testAt)))};
   const selected=()=>st.rows.filter(r=>st.sel.has(r.model));
   const setActive=async(models,active)=>{
@@ -651,7 +676,7 @@ function modelTable(p){
   const test=async r=>{
     r.testing=true;render();
     try{const x=await postJSON('/providers/'+p+'/models/test',{model:r.model});
-      Object.assign(r,{testOk:x.ok,testMs:x.ms,testMsg:x.message,testAt:new Date().toISOString()})}
+      Object.assign(r,{testOk:x.ok,testMs:x.ms,testMsg:x.message,testConn:x.account||'',testAt:new Date().toISOString()})}
     catch(e){Object.assign(r,{testOk:false,testMsg:e.message,testAt:new Date().toISOString()})}
     r.testing=false;render();
   };
@@ -665,7 +690,8 @@ function modelTable(p){
     // Never act on a row the filter hides.
     const visible=new Set(list.map(r=>r.model));
     for(const m of [...st.sel])if(!visible.has(m))st.sel.delete(m);
-    const sel=selected(), staleSel=sel.filter(r=>r.stale);
+    const sel=selected();
+    paintPolicy();
     counts.textContent=on+' of '+st.rows.length+' on · '+list.length+' shown'+(st.ok?'':' · last fetch failed');
     seg.replaceChildren(...MODEL_VIEWS.map(([k,n])=>el('button',{type:'button','aria-pressed':String(st.view===k),onclick:()=>{st.view=k;render()}},n)));
     all.checked=list.length>0&&sel.length===list.length;all.indeterminate=sel.length>0&&sel.length<list.length;all.disabled=!list.length;
@@ -679,46 +705,69 @@ function modelTable(p){
         await setActive(sel.filter(r=>!r.active).map(r=>r.model),true);await setActive(off.map(r=>r.model),false);
       },{title:'Turn the selected models on and every other model of this provider off'}),
       act('Test',async()=>{let i=0;const list=sel;const next=async()=>{while(i<list.length)await test(list[i++])};await Promise.all([next(),next(),next()])}),
-      act('Delete'+(staleSel.length?' ('+staleSel.length+' stale)':''),async()=>{
-        if(!confirm('Delete '+staleSel.length+' stale model(s)?'))return;
-        const gone=staleSel.map(r=>r.model);
-        await postJSON('/providers/'+p+'/models/delete',{models:gone});
-        st.rows=st.rows.filter(r=>!gone.includes(r.model));gone.forEach(m=>st.sel.delete(m));render();
-      },{disabled:!staleSel.length,title:'Only models the provider no longer lists can be deleted'}),
       el('span',{style:'flex:1'}),
       act('Clear',()=>{st.sel.clear();render()}));
-    if(!list.length){body.replaceChildren(el('tr',{},el('td',{colspan:6,class:'empty',text:st.rows.length?'No model matches.':'No models yet.'})));return}
+    if(!list.length){body.replaceChildren(el('tr',{},el('td',{colspan:5,class:'empty',text:st.rows.length?'No model matches.':'No models yet.'})));return}
     body.replaceChildren(...list.map(r=>{
       const pick=el('input',{type:'checkbox',checked:st.sel.has(r.model),'aria-label':'Select '+r.model,style:'width:auto;min-height:0'});
       pick.onchange=()=>{pick.checked?st.sel.add(r.model):st.sel.delete(r.model);render()};
       const sw=el('input',{type:'checkbox',checked:r.active,'aria-label':'On: '+r.model});
       sw.onchange=()=>setActive([r.model],sw.checked).catch(e=>{alert(e.message);sw.checked=!sw.checked});
       const res=r.testing?el('span',{class:'faint small',text:'testing…'}):r.testAt?el('span',{class:'small',title:r.testMsg||'',style:'color:'+(r.testOk?'var(--ok)':'var(--err)')},
-        (r.testOk?'✓ ':'✗ ')+(r.testOk?(r.testMs+' ms'):(r.testMsg||'failed')).slice(0,60)):el('span',{class:'faint small',text:'—'});
+        (r.testOk?'✓ ':'✗ ')+(r.testOk?(r.testMs+' ms'):(r.testMsg||'failed')).slice(0,60)+(r.testConn?' · '+acctName(r.testConn):'')):el('span',{class:'faint small',text:'—'});
       return el('tr',{class:(r.active?'':'off')+(st.sel.has(r.model)?' selrow':'')},
         el('td',{style:'width:2.5rem'},pick),
         el('td',{style:'width:3.5rem'},el('label',{class:'switch',title:r.active?'On':'Off'},sw,el('span'))),
         el('td',{},el('button',{class:'plain mono',type:'button',title:'Copy '+p+'/'+r.model,style:'min-height:0;padding:.1rem .2rem;text-align:left',onclick:()=>copy(p+'/'+r.model)},r.model)),
-        el('td',{},r.stale?el('span',{class:'badge warn',title:'The provider no longer lists it'},'stale'):null),
         el('td',{style:'max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'},res),
         el('td',{class:'num',style:'white-space:nowrap'},
           el('button',{class:'ghost',type:'button',style:'min-height:28px;padding:.15rem .6rem;font-size:.78rem',disabled:!!r.testing,onclick:()=>test(r)},'Test')));
     }));
   };
+  // Policy: auto test and only free, stored per provider.
+  const polBox=el('div',{style:'padding:.6rem 1.25rem;display:flex;gap:1.2rem;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)'});
+  const polSw=(key,label,title)=>{
+    const i=el('input',{type:'checkbox','aria-label':label});
+    i.onchange=async()=>{
+      const next={autoTest:!!st.policy.autoTest,onlyFree:!!st.policy.onlyFree,[key]:i.checked};
+      if(next.autoTest&&!st.policy.autoTest&&!confirm('Test every '+(next.onlyFree?'free ':'')+'model of '+pname(p)+' now and keep on only those that answer? Tests use the provider\'s quota.')){i.checked=false;return}
+      try{const d=await postJSON('/providers/'+p+'/model-policy',next);st.policy=d.policy;st.running=d.running;delete modelCache[p];await load(false)}
+      catch(e){i.checked=!i.checked;alert(e.message)}
+    };
+    return {i,node:el('label',{style:'display:inline-flex;align-items:center;gap:.5rem;cursor:pointer',title},el('span',{class:'switch'},i,el('span')),el('b',{style:'font-size:.85rem'},label))};
+  };
+  const at=polSw('autoTest','Auto test','Fetch the list, test each model, keep on only those that answer; models the provider dropped are deleted. Runs again every 6 hours and for every new model.');
+  const of=polSw('onlyFree','Only free','Only models whose name contains "free" are on (and tested).');
+  const polMsg=el('span',{class:'faint small'});
+  polBox.append(at.node,of.node,polMsg);
+  const paintPolicy=()=>{
+    at.i.checked=!!st.policy.autoTest;of.i.checked=!!st.policy.onlyFree;at.i.disabled=of.i.disabled=st.running;
+    polMsg.textContent=st.running?'Testing models…':st.policy.autoTest&&st.policy.lastRun?'Last run '+new Date(st.policy.lastRun).toLocaleString()+' · '+st.policy.lastResult:
+      st.policy.autoTest?'':'New models start on'+(st.policy.onlyFree?' when free':'')+'.';
+  };
+  let poll=null;
   const load=async refresh=>{
-    body.replaceChildren(el('tr',{},el('td',{colspan:6,class:'empty',text:refresh?'Fetching…':'Loading…'})));
-    try{const d=await api('/providers/'+p+'/model-table'+(refresh?'?refresh=1':''));st.rows=d.models;st.ok=d.ok;render()}
-    catch(e){body.replaceChildren(el('tr',{},el('td',{colspan:6,class:'empty',text:e.message})))}
+    if(!st.rows.length||refresh)body.replaceChildren(el('tr',{},el('td',{colspan:5,class:'empty',text:refresh?'Fetching…':'Loading…'})));
+    try{const d=await api('/providers/'+p+'/model-table'+(refresh?'?refresh=1':''));
+      const testing=new Set(st.rows.filter(r=>r.testing).map(r=>r.model));
+      st.rows=d.models;st.ok=d.ok;st.policy=d.policy||{};st.running=d.running;
+      for(const r of st.rows)if(testing.has(r.model))r.testing=true;
+      render();
+      clearTimeout(poll);
+      if(st.running)poll=setTimeout(()=>{if(card.isConnected)load(false)},3000);
+    }
+    catch(e){body.replaceChildren(el('tr',{},el('td',{colspan:5,class:'empty',text:e.message})))}
   };
   let t=null;q.oninput=()=>{clearTimeout(t);t=setTimeout(()=>{st.q=q.value;render()},120)};
   const chip=(label,val)=>el('button',{class:'chip',type:'button',onclick:()=>{q.value=val;st.q=val;render()}},label);
   card.append(
     el('div',{class:'cardh'},el('h2',{class:'grow'},'Models'),counts,
       el('button',{class:'ghost',type:'button',style:'min-height:30px;font-size:.8rem',title:'Fetch the model list from the provider now',onclick:()=>load(true)},'Refresh list')),
+    polBox,
     el('div',{style:'padding:.8rem 1.25rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line)'},q,chip('free','free'),chip('clear',''),seg),
     bar,
     el('div',{class:'scroll'},el('table',{},
-      el('thead',{},el('tr',{},el('th',{},all),el('th',{},'On'),el('th',{},'Model'),el('th',{}),el('th',{},'Last test'),el('th',{}))),body)));
+      el('thead',{},el('tr',{},el('th',{},all),el('th',{},'On'),el('th',{},'Model'),el('th',{},'Last test'),el('th',{}))),body)));
   load(false);
   return card;
 }
@@ -1136,7 +1185,7 @@ const DOCS=[
   }},
   {id:'models',title:'Models',body:()=>[
     dt('h2','The model table'),
-    dt('p','Each provider page lists the models the provider offers. intact records every fetch of the list: a new model starts on, and a model the provider no longer lists is marked stale instead of vanishing, so you decide when to delete it.'),
+    dt('p','Each provider page lists the models the provider offers. intact records every fetch of the list: a new model starts on, and when a fetch succeeds, a model the provider no longer lists is deleted (a failed fetch deletes nothing).'),
     dt('ul',
       dt('li',dt('b','On'),' — a model switched off leaves ',dc('/v1/models'),', is not picked for a bare model id, and a request naming it is refused.'),
       dt('li',dt('b','Test'),' — sends a short chat request through the same ',dc('/v1'),' path a client uses and shows the answer time or the error. A model that is off can still be tested.'),
@@ -1148,7 +1197,8 @@ const DOCS=[
       dt('tr',dt('td',dc('free|beta')),dt('td','names containing either')),
       dt('tr',dt('td',dc('-preview')),dt('td','names without preview')),
       dt('tr',dt('td',dc('/^meta-llama\\//')),dt('td','a regular expression')))),
-    dt('p','Tick rows (the header box ticks every row shown) and act on them from the bar that appears: turn on, turn off, keep only these on, test, delete the stale ones. To keep only the free models of a provider: filter ',dc('free'),', tick the header box, then Keep only these on.'),
+    dt('p','Tick rows (the header box ticks every row shown) and act on them from the bar that appears: turn on, turn off, keep only these on, test. A test goes through any account of the provider; the result names the account that answered. The Test button of an account tests that account alone; a TypeSafe test asks System One questions whose answers are known and checks them.'),
+    dt('p',dt('b','Only free'),' switches on only the models whose name contains ',dc('free'),'; turning it off switches every model back on. ',dt('b','Auto test'),' fetches the list, tests each model (only the free ones under Only free) and keeps on only those that answer; it runs again every 6 hours, a new model is tested before it is switched on, and a model refused for rate limit keeps its switch.'),
     dt('h2','API and MCP'),
     codeBlock('curl '+location.origin+'/api/providers/openrouter/models -H "Authorization: Bearer $INTACT_KEY"\ncurl '+location.origin+'/api/providers/openrouter/models/active -H "Authorization: Bearer $INTACT_KEY" -d \'{"models":["x"],"active":false}\''),
     dt('p','MCP: ',dc('list_provider_models'),', ',dc('set_models_active'),'.'),

@@ -98,7 +98,7 @@ var mcpTools = []mcpTool{
 			}
 			return out, nil
 		}},
-	{Name: "list_provider_models", Description: "List a provider's models with their on/off switch, whether the provider still lists them (stale), and the last test.",
+	{Name: "list_provider_models", Description: "List a provider's models with their on/off switch and the last test.",
 		InputSchema: schema(map[string]any{"provider": pString}, "provider"),
 		run: func(a *api, args map[string]any) (any, error) {
 			return a.modelRows(context.Background(), argStr(args, "provider"))
@@ -115,6 +115,19 @@ var mcpTools = []mcpTool{
 			active, _ := args["active"].(bool)
 			n, err := a.store.SetModelsActive(argStr(args, "provider"), ms, active)
 			return map[string]any{"updated": n}, err
+		}},
+	{Name: "test_account", Description: "Test one account (connection id) with a short call, on model or on the provider's model that last passed. TypeSafe accounts get a System One test with known answers.",
+		InputSchema: schema(map[string]any{"id": pString, "model": pString}, "id"),
+		run: func(a *api, args map[string]any) (any, error) {
+			res, _, err := a.runAccountTest(context.Background(), argStr(args, "id"), argStr(args, "model"))
+			return res, err
+		}},
+	{Name: "set_model_policy", Description: "Set how a provider's models are switched on. autoTest: fetch the list, test every model and keep on only those that answer (re-run every 6 hours and for new models). onlyFree: only models whose name contains free are on, and only they are tested. Without autoTest, new models start on.",
+		InputSchema: schema(map[string]any{"provider": pString, "autoTest": pBool, "onlyFree": pBool}, "provider", "autoTest", "onlyFree"),
+		run: func(a *api, args map[string]any) (any, error) {
+			at, _ := args["autoTest"].(bool)
+			of, _ := args["onlyFree"].(bool)
+			return a.updatePolicy(argStr(args, "provider"), at, of)
 		}},
 	{Name: "list_filters", Description: "List the request filters (the blacklist), optionally for one provider scope.",
 		InputSchema: schema(map[string]any{"provider": pProvider}),

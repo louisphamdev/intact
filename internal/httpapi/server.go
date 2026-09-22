@@ -37,6 +37,8 @@ type api struct {
 	rate rateHeaders
 	// quota caches the quota read from each account.
 	quota quotaCache
+	// auto tracks the providers whose models are being auto-tested.
+	auto autoState
 }
 
 // New builds the route table with no authentication (loopback use and tests).
@@ -51,7 +53,9 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	a := &api{store: s, baseOverride: baseOverride, auth: authCfg, rrNext: map[string]int{},
 		cat: catalog{m: map[string]catalogEntry{}}, copilot: copilotCache{m: map[string]copilotToken{}},
 		sigs: sigStore{m: map[string]sigEntry{}}, drift: drift.New(s),
-		rate: rateHeaders{m: map[string]rateSnapshot{}}, quota: quotaCache{m: map[string]AccountQuota{}}}
+		rate: rateHeaders{m: map[string]rateSnapshot{}}, quota: quotaCache{m: map[string]AccountQuota{}},
+		auto: autoState{running: map[string]bool{}}}
+	go a.autoTestLoop()
 	mux := http.NewServeMux()
 	// One base URL: the model in the body picks the provider and its accounts.
 	mux.HandleFunc("GET /v1/models", a.requireToken(a.models))
@@ -85,17 +89,27 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 	mux.HandleFunc("GET /accounts/{id}/models", a.requireSession(a.modelsForAccount))
 	mux.HandleFunc("POST /accounts/{id}/active", a.requireSession(a.setActive))
 	mux.HandleFunc("POST /accounts/{id}/label", a.requireSession(a.setLabel))
+	mux.HandleFunc("POST /accounts/{id}/test", a.requireSession(a.testAccount))
+	mux.HandleFunc("GET /account-tests", a.requireSession(a.accountTests))
+	mux.HandleFunc("POST /api/accounts/{id}/test", a.requireToken(a.testAccount))
 	mux.HandleFunc("GET /providers", a.requireSession(a.providers))
 	mux.HandleFunc("GET /providers/{id}/models", a.requireSession(a.providerModelList))
 	mux.HandleFunc("GET /providers/{id}/model-table", a.requireSession(a.providerModelTable))
 	mux.HandleFunc("POST /providers/{id}/models/active", a.requireSession(a.setModelsActive))
 	mux.HandleFunc("POST /providers/{id}/models/delete", a.requireSession(a.deleteModels))
 	mux.HandleFunc("POST /providers/{id}/models/test", a.requireSession(a.testModel))
+	mux.HandleFunc("GET /providers/{id}/model-policy", a.requireSession(a.getModelPolicy))
+	mux.HandleFunc("POST /providers/{id}/model-policy", a.requireSession(a.setModelPolicy))
+	mux.HandleFunc("GET /api/providers/{id}/model-policy", a.requireToken(a.getModelPolicy))
+	mux.HandleFunc("POST /api/providers/{id}/model-policy", a.requireToken(a.setModelPolicy))
 	mux.HandleFunc("GET /api/providers/{id}/models", a.requireToken(a.providerModelTable))
 	mux.HandleFunc("POST /api/providers/{id}/models/active", a.requireToken(a.setModelsActive))
 	mux.HandleFunc("POST /api/providers/{id}/models/delete", a.requireToken(a.deleteModels))
 	mux.HandleFunc("POST /api/providers/{id}/models/test", a.requireToken(a.testModel))
 	mux.HandleFunc("GET /icons/{name}", a.icon)
+	mux.HandleFunc("GET /favicon.svg", a.siteIcon)
+	mux.HandleFunc("GET /favicon.ico", a.siteIcon)
+	mux.HandleFunc("GET /apple-touch-icon.png", a.siteIcon)
 	mux.HandleFunc("POST /oauth/{provider}/start", a.requireSession(a.loginStart))
 	mux.HandleFunc("POST /oauth/{provider}/finish", a.requireSession(a.loginFinish))
 	mux.HandleFunc("POST /oauth/github/poll", a.requireSession(a.githubDevicePoll))

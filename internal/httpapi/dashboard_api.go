@@ -86,6 +86,22 @@ func (a *api) icon(w http.ResponseWriter, r *http.Request) {
 	w.Write(b)
 }
 
+// siteIcons are the favicons, served without a session so the login page
+// and the browser's own /favicon.ico request get them too.
+var siteIcons = map[string]string{"favicon.svg": "image/svg+xml", "favicon.ico": "image/x-icon", "apple-touch-icon.png": "image/png"}
+
+func (a *api) siteIcon(w http.ResponseWriter, r *http.Request) {
+	name := path.Base(r.URL.Path)
+	b, err := web.Files.ReadFile(name)
+	if err != nil || siteIcons[name] == "" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", siteIcons[name])
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write(b)
+}
+
 // setLabel renames a connection from {"label":"…"}.
 func (a *api) setLabel(w http.ResponseWriter, r *http.Request) {
 	var body struct {

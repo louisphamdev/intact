@@ -11,7 +11,7 @@ import (
 	"github.com/louisphamdev/intact/internal/store"
 )
 
-func TestModelTableSwitchStaleDeleteAndTest(t *testing.T) {
+func TestModelTableSwitchDropAndTest(t *testing.T) {
 	list := `{"data":[{"id":"a"},{"id":"b"}]}`
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/models" {
@@ -48,23 +48,19 @@ func TestModelTableSwitchStaleDeleteAndTest(t *testing.T) {
 	if !res.OK || res.Message != "OK" {
 		t.Errorf("test = %+v", res)
 	}
-	// The provider drops a: after a refresh it is stale, and can be deleted.
+	// The provider drops a: a successful fetch deletes it.
 	list = `{"data":[{"id":"b"}]}`
 	b := do("GET", "/providers/groq/model-table?refresh=1", "")
 	var tbl struct{ Models []store.ProviderModel }
 	json.Unmarshal([]byte(b), &tbl)
-	stale := map[string]bool{}
+	seen := map[string]bool{}
 	for _, m := range tbl.Models {
-		stale[m.Model] = m.Stale
+		seen[m.Model] = true
 		if m.Model == "b" && (!m.TestOK || m.Active) {
 			t.Errorf("b = %+v", m)
 		}
 	}
-	if !stale["a"] || stale["b"] {
-		t.Errorf("stale = %v", stale)
-	}
-	do("POST", "/providers/groq/models/delete", `{"models":["a"]}`)
-	if b := do("GET", "/providers/groq/model-table", ""); strings.Contains(b, `"model":"a"`) {
-		t.Errorf("a not deleted: %s", b)
+	if seen["a"] || !seen["b"] {
+		t.Errorf("after the fetch: %v", seen)
 	}
 }

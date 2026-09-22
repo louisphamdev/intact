@@ -11,6 +11,7 @@ import (
 // digit. %s is the error line (a fixed internal string, never caller input).
 const loginPage = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>intact — sign in</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="icon" href="/favicon.ico" sizes="32x32"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#7c6cf6">
 <style>
 :root{color-scheme:dark;--bg:#0c1017;--card:#141a25;--line:#232d3d;--fg:#e4e9f1;--muted:#95a0b3;--accent:#8b80f9;--mint:#5eead4;--err:#fb7185}
 *{box-sizing:border-box}

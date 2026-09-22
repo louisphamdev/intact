@@ -162,14 +162,6 @@ var registry = map[string]Provider{
 			"@cf/qwen/qwq-32b", "@cf/zai-org/glm-4.7-flash",
 		},
 	},
-	// OpenCode Zen with a Zen API key. The keyless free tier is reserved for the
-	// OpenCode app itself, so intact does not offer it.
-	"opencode": {
-		ID:         "opencode",
-		BaseURL:    "https://opencode.ai/zen/v1",
-		AuthHeader: "Authorization",
-		AuthPrefix: "Bearer ",
-	},
 	"openrouter": {
 		ID:         "openrouter",
 		BaseURL:    "https://openrouter.ai/api/v1",

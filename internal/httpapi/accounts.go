@@ -29,8 +29,8 @@ var customID = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 // createAccount stores a new connection from the dashboard form, then returns
 // to the dashboard. The secret is taken by value and never echoed back.
 //
-// A registered provider may need an account id (Cloudflare) or no key at all
-// (OpenCode's free tier). Any other provider id is a custom OpenAI-compatible
+// A registered provider may need an account id (Cloudflare), no key at all, or
+// an OAuth sign-in. Any other provider id is a custom OpenAI-compatible
 // provider and must come with its base URL.
 func (a *api) createAccount(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {

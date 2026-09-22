@@ -82,16 +82,11 @@ func (s *Store) Secret(id string) (string, error) {
 	return secret, nil
 }
 
-// DeleteConnection removes one connection, its credential, and its place in
-// every group. It reports ErrNotFound when no row matched, so a caller can tell
-// a real delete from a no-op.
+// DeleteConnection removes one connection and its credential. It reports
+// ErrNotFound when no row matched, so a caller can tell a real delete from a
+// no-op.
 func (s *Store) DeleteConnection(id string) error {
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return fmt.Errorf("begin: %w", err)
-	}
-	defer tx.Rollback()
-	res, err := tx.Exec(`DELETE FROM connections WHERE id = ?`, id)
+	res, err := s.DB.Exec(`DELETE FROM connections WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete connection: %w", err)
 	}
@@ -102,14 +97,11 @@ func (s *Store) DeleteConnection(id string) error {
 	if n == 0 {
 		return ErrNotFound
 	}
-	if _, err := tx.Exec(`DELETE FROM group_members WHERE connection_id = ?`, id); err != nil {
-		return fmt.Errorf("delete memberships: %w", err)
-	}
-	return tx.Commit()
+	return nil
 }
 
 // SetActive turns a connection on or off. An inactive connection keeps its
-// credential and group memberships but is skipped by /r and /g.
+// credential but is skipped by /r.
 func (s *Store) SetActive(id string, active bool) error {
 	v := 0
 	if active {

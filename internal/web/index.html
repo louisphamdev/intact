@@ -134,9 +134,6 @@
   .switch input:checked+span{background:var(--accent-strong)}
   .switch input:checked+span::after{transform:translateX(16px)}
   .switch input:focus-visible+span{box-shadow:0 0 0 3px var(--accent-soft)}
-  .seg{display:inline-flex;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:3px;gap:2px}
-  .seg button{min-height:28px;padding:.2rem .7rem;font-size:.8rem;background:transparent;color:var(--muted);border-radius:6px}
-  .seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(3px);display:grid;place-items:center;padding:1rem;z-index:20}
   .modal{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);width:min(36rem,100%);
          max-height:90vh;display:flex;flex-direction:column}
@@ -144,19 +141,7 @@
   .mh{display:flex;justify-content:space-between;align-items:center;padding:1rem 1.25rem;border-bottom:1px solid var(--line)}
   .mh strong{font-size:1rem}
   .mb{padding:1.1rem 1.25rem;overflow:auto;display:grid;grid-template-columns:minmax(0,1fr);gap:1rem}
-  label.f>*,div.f>*{min-width:0}
   .mf{display:flex;justify-content:flex-end;gap:.5rem;padding:.85rem 1.25rem;border-top:1px solid var(--line)}
-  .mlist{border:1px solid var(--line);border-radius:10px}
-  .mlist .row{padding:.55rem .75rem;gap:.55rem}
-  .mlist select{min-height:30px;padding:.2rem .4rem;font-size:.78rem;width:auto;max-width:10rem}
-  .dash{border:1px dashed var(--line);border-radius:10px;padding:1.1rem;display:grid;place-items:center;gap:.3rem;color:var(--muted);font-weight:400}
-  button.add{width:100%;border:1px dashed var(--line);background:transparent;color:var(--accent);font-weight:600}
-  button.add:hover{border-color:var(--accent)}
-  .pick{display:grid;gap:1.1rem}
-  .pick .grp{display:grid;gap:.5rem}
-  .pick .gh{display:flex;align-items:center;gap:.5rem;font-weight:600;font-size:.85rem}
-  .pick .gh .ct{color:var(--faint);font-weight:400;font-size:.75rem}
-  .info{padding:.6rem .8rem;border-radius:9px;background:var(--accent-soft);color:var(--fg);font-size:.8rem}
   .err-msg{color:var(--err);font-size:.82rem;min-height:1.2em}
   .toast{position:fixed;bottom:1.25rem;left:50%;transform:translateX(-50%);background:var(--card2);border:1px solid var(--line);
          box-shadow:var(--shadow);padding:.55rem 1rem;border-radius:10px;font-size:.85rem;z-index:30;max-width:90vw}
@@ -175,8 +160,6 @@
     .ph{padding:1rem;flex-wrap:wrap}
     .content{padding:1rem 1rem 2.5rem}
     .row{padding:.7rem 1rem;flex-wrap:wrap}
-    .mlist .row{flex-wrap:nowrap}
-    .mlist select{max-width:7.5rem}
     .kv{grid-template-columns:1fr}
     .kv .k{margin-bottom:-.35rem}
   }
@@ -188,7 +171,6 @@
   <nav>
   <a href="#/endpoint" data-nav="endpoint"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h16M12 4v16"/><circle cx="12" cy="12" r="8"/></svg>Endpoint</a>
   <a href="#/providers" data-nav="providers"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/></svg>Providers<span class="ct" id="ctProv"></span></a>
-  <a href="#/combos" data-nav="combos"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="m3 13 9 5 9-5"/></svg>Combos<span class="ct" id="ctCombo"></span></a>
   <a href="#/usage" data-nav="usage"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Usage</a>
   </nav>
   <div class="spacer"></div>
@@ -213,42 +195,6 @@
       </div>
       <div class="mf"><button class="ghost" type="button" data-close>Cancel</button><button class="primary" type="submit">Save</button></div>
     </form>
-  </div>
-</div>
-
-<!-- combo editor -->
-<div id="cModal" class="overlay" hidden>
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="cTitle">
-    <div class="mh"><strong id="cTitle">Create combo</strong><button class="icon" type="button" data-close aria-label="Close">✕</button></div>
-    <div class="mb">
-      <label class="f">Combo name
-        <input id="cName" placeholder="my-combo" autocomplete="off" spellcheck="false">
-        <span class="hint">Lowercase letters, digits, - and _. Callers use it in the URL: <code id="cUrl">/g/…/</code></span>
-      </label>
-      <div class="f">Strategy
-        <div><span class="seg" id="cStrat"></span></div>
-        <span class="hint" id="cStratHint"></span>
-      </div>
-      <div class="f">Models
-        <div id="cList"></div>
-        <button class="add" type="button" id="cAdd">+ Add model</button>
-      </div>
-      <div class="err-msg" id="cErr"></div>
-    </div>
-    <div class="mf"><button class="ghost" type="button" data-close>Cancel</button><button class="primary" type="button" id="cSave">Save</button></div>
-  </div>
-</div>
-
-<!-- model picker -->
-<div id="pModal" class="overlay" hidden>
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pTitle">
-    <div class="mh"><strong id="pTitle">Add model to combo</strong><button class="icon" type="button" id="pDone" aria-label="Done">✕</button></div>
-    <div class="mb">
-      <div class="info">Click a model to add it, click again to remove it. A model runs on every active account of its provider, in turn.</div>
-      <div class="search" style="max-width:none"><svg class="s" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="pSearch" placeholder="Search models…" autocomplete="off"></div>
-      <div class="pick" id="pBody"></div>
-    </div>
-    <div class="mf"><button class="primary" type="button" id="pDone2">Done</button></div>
   </div>
 </div>
 
@@ -296,14 +242,13 @@ function pinfo(id){
   return {name:id,color:'#52525b'};
 }
 const pname=id=>pinfo(id).name;
-const papi=id=>pinfo(id).api||'openai';
 function avatar(id,sm){
   const n=pname(id).replace(/[^A-Za-z0-9 ]/g,'').split(' ').filter(Boolean);
   const t=(n.length>1?n[0][0]+n[1][0]:(n[0]||'?').slice(0,2)).toUpperCase();
   return el('span',{class:'av'+(sm?' sm':''),style:'background:'+pinfo(id).color,'aria-hidden':'true',text:t});
 }
 
-let S={accounts:[],groups:[],usage:[],providers:[]};
+let S={accounts:[],usage:[],providers:[]};
 const modelCache={}; // provider -> {ids:[...]} or {error:"…"}
 const wired=p=>S.providers.includes(p);
 const accountsOf=p=>S.accounts.filter(a=>a.provider===p);
@@ -332,25 +277,21 @@ function closeModal(id){$(id).hidden=true}
 for(const m of document.querySelectorAll('.overlay')){
   m.addEventListener('click',e=>{
     if(e.target!==m&&!e.target.closest('[data-close]'))return;
-    m.id==='pModal'?closePicker():closeModal(m.id);
+    closeModal(m.id);
   });
 }
 document.addEventListener('keydown',e=>{
   if(e.key!=='Escape')return;
-  // The picker sits over the combo editor, so Escape closes the top one only.
-  if(!$('pModal').hidden){closePicker();return}
   for(const m of document.querySelectorAll('.overlay'))if(!m.hidden)closeModal(m.id);
 });
 
 // ---- data
 async function load(){
-  const [a,g,u,p]=await Promise.allSettled([api('/accounts'),api('/groups'),api('/usage'),api('/providers')]);
+  const [a,u,p]=await Promise.allSettled([api('/accounts'),api('/usage'),api('/providers')]);
   S.accounts=a.status==='fulfilled'?a.value.accounts||[]:[];
-  S.groups=g.status==='fulfilled'?g.value.groups||[]:[];
   S.usage=u.status==='fulfilled'?u.value.usage||[]:[];
   S.providers=p.status==='fulfilled'?p.value.providers||[]:[];
   $('ctProv').textContent=new Set(S.accounts.map(x=>x.provider)).size||'';
-  $('ctCombo').textContent=S.groups.length||'';
   route();
 }
 // A provider's model list, fetched through its first active account.
@@ -381,7 +322,6 @@ function route(){
   }
   const v=$('view');v.replaceChildren();
   if(page==='endpoint')return viewEndpoint(v);
-  if(page==='combos')return viewCombos(v);
   if(page==='usage')return viewUsage(v);
   if(page==='providers'&&parts[1])return viewProvider(v,decodeURIComponent(parts[1]));
   if(page!=='providers'){location.hash='#/providers';return}
@@ -393,24 +333,24 @@ window.addEventListener('hashchange',route);
 function viewEndpoint(v){
   header('Endpoint','Point your client at intact; it adds the credential and forwards the request unchanged.');
   const o=location.origin;
-  const sel=el('select',{style:'width:auto','aria-label':'Combo'},S.groups.map(g=>el('option',{value:g.name,text:g.name})));
+  const provs=S.providers.filter(p=>activeOf(p).length);
+  const sel=el('select',{style:'width:auto','aria-label':'Provider'},provs.map(p=>el('option',{value:p,text:pname(p)})));
   const ex=el('pre');
-  const render=()=>{const c=sel.value||'my-combo';
-    ex.textContent='# OpenAI-compatible client\nbase_url = "'+o+'/g/'+c+'"\napi_key  = "<INTACT_API_TOKEN>"\n\n# curl\ncurl '+o+'/g/'+c+'/chat/completions \\\n  -H "Authorization: Bearer $INTACT_API_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"any","messages":[{"role":"user","content":"hi"}]}\''};
+  const render=()=>{const p=sel.value||'groq';
+    ex.textContent='# OpenAI-compatible client\nbase_url = "'+o+'/r/'+p+'"\napi_key  = "<INTACT_API_TOKEN>"\n\n# curl\ncurl '+o+'/r/'+p+'/chat/completions \\\n  -H "Authorization: Bearer $INTACT_API_TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"<model id>","messages":[{"role":"user","content":"hi"}]}\''};
   sel.onchange=render;render();
   v.append(
     el('div',{class:'card pad sec'},
       el('h2',{},'Base URL'),copyLine(o),
       el('div',{class:'kv'},
-        el('span',{class:'k'},'Combo'),copyLine(o+'/g/<combo>/'),
-        el('span',{class:'k'},'Provider'),copyLine(o+'/r/<provider>/'),
+        el('span',{class:'k'},'Round-robin'),copyLine(o+'/r/<provider>/'),
         el('span',{class:'k'},'One account'),copyLine(o+'/p/<connection-id>/')),
-      el('p',{class:'muted small',style:'margin:0'},'A combo picks a model by its strategy and fails over on 429/500/503/409. A provider route rotates its active accounts. The rest of the path goes to the provider as is (for example ',el('code',{},'/chat/completions'),').')),
+      el('p',{class:'muted small',style:'margin:0'},'The round-robin route rotates the active accounts of a provider and fails over to the next one on 429/500/503/409. The rest of the path goes to the provider as is (for example ',el('code',{},'/chat/completions'),').')),
     el('div',{class:'card pad sec'},
       el('h2',{},'Authentication'),
       el('p',{class:'muted',style:'margin:0'},'Send ',el('code',{},'Authorization: Bearer <INTACT_API_TOKEN>'),'. The token lives in the server environment file and is not shown here.')),
     el('div',{class:'card pad sec'},
-      el('div',{class:'sech'},el('h2',{class:'grow'},'Example'),S.groups.length?sel:el('span',{class:'faint small',text:'Create a combo to fill in its name'})),ex));
+      el('div',{class:'sech'},el('h2',{class:'grow'},'Example'),provs.length?sel:null),ex));
 }
 
 // ---- Providers
@@ -454,15 +394,13 @@ function viewProvider(v,p){
       try{await postJSON('/accounts/'+a.id+'/active',{active:sw.checked});a.isActive=sw.checked;delete modelCache[p];route()}
       catch(e){sw.checked=!sw.checked;alert(e.message)}
     };
-    const inCombos=S.groups.filter(g=>g.members.some(m=>m.connectionId===a.id||(!m.connectionId&&m.provider===p))).map(g=>g.name);
     return el('div',{class:'row'+(a.isActive?'':' off')},
       el('span',{class:'idx',text:'#'+(i+1)}),
       el('div',{class:'who'},
         el('div',{class:'l',text:a.label||'(no name)'}),
         el('div',{class:'meta'},
           el('span',{class:'badge'+(a.isActive?' ok':''),text:a.isActive?'active':'off'}),
-          el('span',{class:'mono faint',title:a.id,text:short(a.id)}),
-          ...inCombos.map(n=>el('a',{class:'badge accent',href:'#/combos',style:'text-decoration:none',text:n})))),
+          el('span',{class:'mono faint',title:a.id,text:short(a.id)}))),
       ok?el('button',{class:'icon',type:'button',title:'Copy this account\'s URL','aria-label':'Copy this account\'s URL',
         onclick:()=>copy(location.origin+'/p/'+a.id+'/','account URL')},svg(ICON.copy)):null,
       el('button',{class:'danger',type:'button',onclick:()=>deleteAccount(a)},svg(ICON.trash),'Delete'),
@@ -470,7 +408,7 @@ function viewProvider(v,p){
   });
   v.append(el('div',{class:'card'},
     el('div',{class:'cardh'},el('h2',{class:'grow'},'Connections'),
-      ok&&list.length?el('span',{class:'muted small'},'All active accounts'):null,
+      ok&&list.length?el('span',{class:'muted small',title:'Rotates the active accounts and fails over on 429/500/503/409'},'Round-robin'):null,
       ok&&list.length?el('span',{class:'copyline',style:'padding-block:.1rem'},el('code',{text:'/r/'+p+'/'}),copyBtn(location.origin+'/r/'+p+'/')):null),
     list.length?rows:el('div',{class:'empty'},el('b',{},'No connections yet'),ok?'Add an API key to start using '+pname(p)+'.':null,addBtn),
     list.length&&addBtn?el('div',{style:'padding:.8rem 1.25rem;border-top:1px solid var(--line)'},addBtn):null));
@@ -499,147 +437,10 @@ $('aForm').onsubmit=async e=>{
   }catch(err){$('aErr').textContent=err.message}
 };
 async function deleteAccount(a){
-  const gs=S.groups.filter(g=>g.members.some(m=>m.connectionId===a.id)).map(g=>g.name);
-  if(!confirm('Delete "'+(a.label||a.id)+'"?'+(gs.length?'\nIt is pinned in: '+gs.join(', '):'')))return;
+  if(!confirm('Delete "'+(a.label||a.id)+'"?'))return;
   const r=await fetch('/accounts/'+a.id+'/delete',{method:'POST'});
   if(!r.ok){alert('Delete failed');return}
   delete modelCache[a.provider];toast('Deleted');await load();
-}
-
-// ---- Combos
-const STRATS=[
-  ['fallback','Fallback','tries the models in order; the next one serves only when a model is busy or failing'],
-  ['round-robin','Round robin','rotates the first model on each request to spread the load'],
-];
-const memberReady=m=>wired(m.provider)&&(m.connectionId?!!(accById(m.connectionId)||{}).isActive:activeOf(m.provider).length>0);
-function viewCombos(v){
-  header('Combos','Group models under one name, then call them all through one URL.',
-    S.groups.length?el('button',{class:'primary',type:'button',onclick:()=>editCombo(null)},svg(ICON.plus),'Create combo'):null);
-  v.append(el('div',{class:'muted',style:'display:grid;gap:.2rem'},
-    ...STRATS.map(([,n,d])=>el('div',{},el('b',{style:'color:var(--fg)',text:n}),' — '+d)),
-    el('div',{},'A model runs on every active account of its provider in turn, unless you pin one account.')));
-  if(!S.groups.length){
-    v.append(el('div',{class:'card empty'},el('span',{class:'ic'},svg(ICON.layers,'i')),el('b',{},'No combos yet'),
-      'Create a combo to pool models from several providers.',
-      el('button',{class:'primary',type:'button',onclick:()=>editCombo(null)},svg(ICON.plus),'Create combo')));
-    return;
-  }
-  v.append(...S.groups.map(g=>{
-    const ready=g.members.filter(memberReady).length;
-    const apis=new Set(g.members.filter(m=>wired(m.provider)).map(m=>papi(m.provider)));
-    const seg=el('span',{class:'seg'},STRATS.map(([k,n])=>el('button',{type:'button','aria-pressed':String(g.strategy===k),
-      onclick:async()=>{if(g.strategy===k)return;
-        try{await postJSON('/groups',{...g,strategy:k});g.strategy=k;toast(g.name+': '+n);route()}catch(e){alert(e.message)}}},n)));
-    return el('div',{class:'card'},
-      el('div',{class:'cardh'},
-        el('span',{class:'av',style:'background:var(--accent-soft);color:var(--accent)'},svg(ICON.layers,'i')),
-        el('div',{class:'grow'},
-          el('div',{style:'display:flex;align-items:center;gap:.5rem;flex-wrap:wrap'},el('b',{text:g.name}),
-            el('span',{class:'badge'+(ready?' ok':' warn'),text:ready+' / '+g.members.length+' ready'})),
-          el('div',{style:'display:flex;align-items:center;gap:.15rem'},el('code',{class:'faint',text:'/g/'+g.name+'/'}),copyBtn(location.origin+'/g/'+g.name+'/'))),
-        seg,
-        el('button',{class:'ghost',type:'button',onclick:()=>editCombo(g)},svg(ICON.edit),'Edit'),
-        el('button',{class:'danger',type:'button',onclick:()=>deleteCombo(g.name)},svg(ICON.trash),'Delete')),
-      el('div',{style:'padding:.9rem 1.25rem',class:'chips'},
-        g.members.length?g.members.map((m,i)=>{
-          const a=m.connectionId&&accById(m.connectionId),ok=memberReady(m);
-          return el('span',{class:'chip',style:ok?null:'opacity:.5',title:ok?pname(m.provider):'Not ready: no active account, or the provider is not wired'},
-            el('span',{class:'faint',text:(i+1)+'.'}),avatar(m.provider,true),el('span',{class:'mono',text:m.model||'caller\'s model'}),
-            m.connectionId?el('span',{class:'badge',text:a?(a.label||short(a.id)):'deleted account'}):null);
-        }):el('span',{class:'muted',text:'No models'})),
-      apis.size>1?el('div',{class:'notice',style:'margin:0 1.25rem 1rem'},'This combo mixes APIs ('+[...apis].join(', ')+'). intact does not translate between them, so a request only works on the models of its own shape.'):null);
-  }));
-}
-async function deleteCombo(name){
-  if(!confirm('Delete combo "'+name+'"? Its accounts stay.'))return;
-  try{await api('/groups/'+encodeURIComponent(name)+'/delete',{method:'POST'});toast('Deleted '+name);await load()}
-  catch(e){alert(e.message)}
-}
-
-let C=null; // the combo being edited
-function editCombo(g){
-  C=g?{name:g.name,strategy:g.strategy,members:g.members.map(m=>({...m})),isNew:false}
-     :{name:'',strategy:'fallback',members:[],isNew:true};
-  $('cTitle').textContent=C.isNew?'Create combo':'Edit combo · '+C.name;
-  $('cName').value=C.name;$('cName').disabled=!C.isNew;$('cErr').textContent='';
-  renderCombo();openModal('cModal');
-}
-$('cName').oninput=()=>{$('cUrl').textContent='/g/'+($('cName').value.trim().toLowerCase()||'…')+'/'};
-function renderCombo(){
-  $('cUrl').textContent='/g/'+($('cName').value.trim().toLowerCase()||'…')+'/';
-  $('cStrat').replaceChildren(...STRATS.map(([k,n])=>el('button',{type:'button','aria-pressed':String(C.strategy===k),onclick:()=>{C.strategy=k;renderCombo()}},n)));
-  $('cStratHint').textContent=STRATS.find(s=>s[0]===C.strategy)[1]+' '+STRATS.find(s=>s[0]===C.strategy)[2]+'.';
-  const list=$('cList');
-  if(!C.members.length){list.replaceChildren(el('div',{class:'dash'},svg(ICON.layers,'i'),el('span',{text:'No models added yet'})));return}
-  list.replaceChildren(el('div',{class:'mlist'},C.members.map((m,i)=>{
-    const sel=el('select',{'aria-label':'Account for '+(m.model||'this model'),title:'Which account runs this model'},
-      el('option',{value:'',text:'All accounts ('+activeOf(m.provider).length+')'}),
-      accountsOf(m.provider).map(a=>el('option',{value:a.id,text:(a.label||short(a.id))+(a.isActive?'':' (off)')})));
-    sel.value=m.connectionId||'';sel.onchange=()=>{m.connectionId=sel.value};
-    const mv=d=>{const j=i+d;[C.members[i],C.members[j]]=[C.members[j],C.members[i]];renderCombo()};
-    return el('div',{class:'row'},
-      el('span',{class:'idx',text:String(i+1)}),avatar(m.provider,true),
-      el('div',{class:'who'},el('div',{class:'l mono',text:m.model||'caller\'s model'}),el('div',{class:'faint small',text:pname(m.provider)})),
-      sel,
-      el('button',{class:'icon',type:'button','aria-label':'Move up',disabled:i===0,onclick:()=>mv(-1)},svg(ICON.up)),
-      el('button',{class:'icon',type:'button','aria-label':'Move down',disabled:i===C.members.length-1,onclick:()=>mv(1)},svg(ICON.down)),
-      el('button',{class:'icon',type:'button','aria-label':'Remove',onclick:()=>{C.members.splice(i,1);renderCombo()}},svg(ICON.x)));
-  })));
-}
-$('cSave').onclick=async()=>{
-  const name=C.isNew?$('cName').value.trim().toLowerCase():C.name;
-  if(!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)){$('cErr').textContent='Name must be lowercase letters, digits, - or _.';$('cName').focus();return}
-  if(C.isNew&&S.groups.some(g=>g.name===name)){$('cErr').textContent='A combo with this name exists.';return}
-  if(!C.members.length){$('cErr').textContent='Add at least one model.';return}
-  $('cSave').disabled=true;
-  try{
-    await postJSON('/groups',{name,strategy:C.strategy,members:C.members.map(m=>({provider:m.provider,connectionId:m.connectionId||'',model:m.model||''}))});
-    closeModal('cModal');toast('Saved '+name);await load();
-  }catch(e){$('cErr').textContent=e.message}
-  finally{$('cSave').disabled=false}
-};
-
-// ---- model picker
-$('cAdd').onclick=()=>{$('pSearch').value='';renderPicker();openModal('pModal')};
-function closePicker(){closeModal('pModal');renderCombo()}
-$('pDone').onclick=closePicker;$('pDone2').onclick=closePicker;
-$('pSearch').oninput=()=>filterPicker();
-const pickIndex=(p,model)=>C.members.findIndex(m=>m.provider===p&&(m.model||'')===model&&!m.connectionId);
-function modelChip(p,model,label){
-  const b=el('button',{class:'chip'+(pickIndex(p,model)>=0?' on':''),type:'button','data-q':(model+' '+pname(p)).toLowerCase()},
-    el('span',{class:model?'mono':'',text:label||model}));
-  b.onclick=()=>{const i=pickIndex(p,model);
-    if(i>=0)C.members.splice(i,1);else C.members.push({provider:p,connectionId:'',model});
-    b.classList.toggle('on',i<0)};
-  return b;
-}
-function renderPicker(){
-  const ps=S.providers.filter(p=>activeOf(p).length).sort((a,b)=>pname(a).localeCompare(pname(b)));
-  if(!ps.length){$('pBody').replaceChildren(el('div',{class:'empty'},el('b',{},'No active accounts'),'Add a connection on the Providers page first.'));return}
-  $('pBody').replaceChildren(...ps.map(p=>{
-    const chips=el('div',{class:'chips'},el('span',{class:'muted small',text:'Loading models…'}));
-    const custom=el('input',{placeholder:'Or type a model id and press Enter',style:'min-height:32px;font-size:.8rem;max-width:20rem'});
-    custom.onkeydown=e=>{if(e.key!=='Enter')return;e.preventDefault();const m=custom.value.trim();if(!m)return;
-      if(pickIndex(p,m)<0)C.members.push({provider:p,connectionId:'',model:m});
-      custom.value='';toast('Added '+m)};
-    const grp=el('div',{class:'grp'},
-      el('div',{class:'gh'},avatar(p,true),pname(p),el('span',{class:'ct',text:activeOf(p).length+' active'})),chips,custom);
-    modelsFor(p).then(r=>{
-      const keep=modelChip(p,'','caller\'s model');keep.title='Keep the model the request sends';
-      if(r.error)chips.replaceChildren(keep,el('span',{class:'muted small',text:r.error}));
-      else chips.replaceChildren(keep,...r.ids.map(m=>modelChip(p,m)));
-      filterPicker();
-    });
-    return grp;
-  }));
-}
-function filterPicker(){
-  const s=$('pSearch').value.trim().toLowerCase();
-  for(const g of $('pBody').querySelectorAll('.grp')){
-    let any=false;
-    for(const c of g.querySelectorAll('button.chip')){c.hidden=!!s&&!c.dataset.q.includes(s);any=any||!c.hidden}
-    g.hidden=!!s&&!any;
-  }
 }
 
 // ---- Usage
@@ -657,7 +458,7 @@ function viewUsage(v){
     const sum=k=>rows.reduce((s,u)=>s+u[k],0);
     stats.replaceChildren(...[['Requests',sum('requests')],['Input tokens',sum('inputTokens')],['Output tokens',sum('outputTokens')]]
       .map(([k,n])=>el('div',{class:'stat'},el('div',{class:'k',text:k}),el('div',{class:'v',text:fmt(n)}))));
-    if(!rows.length){tb.replaceChildren(el('tr',{},el('td',{colspan:6},el('div',{class:'empty'},el('b',{},'No usage recorded yet'),'Requests through /g, /r and /p show up here.'))));return}
+    if(!rows.length){tb.replaceChildren(el('tr',{},el('td',{colspan:6},el('div',{class:'empty'},el('b',{},'No usage recorded yet'),'Requests through /r and /p show up here.'))));return}
     tb.replaceChildren(...rows.map(u=>{const a=accById(u.connectionId);
       return el('tr',{},el('td',{class:'faint',text:u.day}),
         el('td',{},a?el('span',{style:'display:inline-flex;align-items:center;gap:.45rem'},avatar(a.provider,true),a.label||short(a.id))

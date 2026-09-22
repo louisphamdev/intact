@@ -68,7 +68,7 @@ func TestDashboardIsServedFromTheBinary(t *testing.T) {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"<html", "Providers", "Combos", "/accounts", "/groups"} {
+	for _, want := range []string{"<html", "Providers", "Endpoint", "/accounts", "/usage"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dashboard is missing %q", want)
 		}

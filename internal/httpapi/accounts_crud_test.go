@@ -79,3 +79,30 @@ func TestAddConnectionNeedsSession(t *testing.T) {
 		t.Error("unauth create still added a connection")
 	}
 }
+
+func TestToggleActiveThroughDashboard(t *testing.T) {
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	c, _ := s.CreateConnection("groq", "a", "k")
+	cfg := authConfig()
+	h := NewWithAuth(s, nil, cfg)
+	ck := loginCookie(t, h, cfg)
+
+	req := httptest.NewRequest("POST", "/accounts/"+c.ID+"/active", strings.NewReader(`{"active":false}`))
+	req.AddCookie(ck)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("toggle code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	list, _ := s.ListConnections()
+	if list[0].IsActive {
+		t.Error("connection still active after toggle")
+	}
+	// An inactive account is skipped by round-robin.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/r/groq/x", strings.NewReader("{}")))
+	if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusNotFound {
+		t.Errorf("round-robin with no active account: code=%d", rec.Code)
+	}
+}

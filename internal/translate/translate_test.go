@@ -237,7 +237,7 @@ func TestOpenAIToGemini(t *testing.T) {
 	}
 	s := string(out)
 	for _, want := range []string{`"systemInstruction":{"parts":[{"text":"sys"}],"role":"user"}`, `"inlineData":{"data":"QUJD","mimeType":"image/png"}`,
-		`"thoughtSignature":"SIG1"`, `"functionResponse":{"id":"c1","name":"get weather","response":{"result":{"t":30}}}`,
+		`"thoughtSignature":"SIG1"`, `"functionResponse":{"id":"c1","name":"get_weather","response":{"result":{"t":30}}}`,
 		`"maxOutputTokens":64000`, `"thinkingLevel":"low"`, `"name":"get_weather"`, `"city":{"type":"string"}`,
 		`"unit":{"enum":["c","f"],"type":"string"}`, `"n":{"enum":["3"],"type":"string"}`, `"required":["city"]`, `"mode":"VALIDATED"`} {
 		if !strings.Contains(s, want) {

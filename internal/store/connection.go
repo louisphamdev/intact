@@ -122,23 +122,20 @@ func (s *Store) SetLabel(id, label string) error {
 	return nil
 }
 
-// SetMeta merges values into a connection's provider-specific metadata.
+// SetMeta merges values into a connection's provider-specific metadata. The
+// merge runs inside SQLite with json_patch, in one statement, so two concurrent
+// calls do not lose each other's keys through a read-modify-write race.
 func (s *Store) SetMeta(id string, kv map[string]string) error {
-	var raw string
-	if err := s.DB.QueryRow(`SELECT meta FROM connections WHERE id = ?`, id).Scan(&raw); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
-		return fmt.Errorf("read meta: %w", err)
-	}
-	m := map[string]string{}
-	json.Unmarshal([]byte(raw), &m)
-	for k, v := range kv {
-		m[k] = v
-	}
-	b, _ := json.Marshal(m)
-	if _, err := s.DB.Exec(`UPDATE connections SET meta = ? WHERE id = ?`, string(b), id); err != nil {
+	patch, _ := json.Marshal(kv)
+	res, err := s.DB.Exec(
+		`UPDATE connections
+		 SET meta = json_patch(CASE WHEN meta IS NULL OR meta = '' THEN '{}' ELSE meta END, ?)
+		 WHERE id = ?`, string(patch), id)
+	if err != nil {
 		return fmt.Errorf("set meta: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

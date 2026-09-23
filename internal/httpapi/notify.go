@@ -9,6 +9,7 @@ import (
 	"html"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -134,7 +135,30 @@ func sendTelegram(ctx context.Context, cfg map[string]string, m notifyMsg) error
 	return nil
 }
 
+// blockedHost reports a webhook target that must not be reached: a loopback,
+// private, or link-local address (including the cloud metadata endpoint
+// 169.254.169.254), so a webhook cannot be turned into a request against an
+// internal service.
+func blockedHost(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return true
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || strings.HasSuffix(host, ".local") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+			ip.IsLinkLocalMulticast() || ip.IsUnspecified()
+	}
+	return false
+}
+
 func sendWebhook(ctx context.Context, cfg map[string]string, m notifyMsg) error {
+	if blockedHost(cfg["url"]) {
+		return errors.New("webhook target is a private or loopback address")
+	}
 	body, _ := json.Marshal(m)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg["url"], bytes.NewReader(body))
 	if err != nil {
@@ -280,10 +304,24 @@ func (a *api) saveChannel(c store.NotifyChannel) (store.NotifyChannel, error) {
 		}
 		c.Created = old.Created
 	}
+	// A secret is bound to the destination it is sent to. When any destination
+	// field changes (a webhook url, a telegram chat id), do not carry the stored
+	// secret to the new target: a caller could otherwise redirect the operator's
+	// bot token or bearer to their own address. A changed destination forces the
+	// secret to be entered again.
+	destChanged := false
+	for _, f := range t.Fields {
+		if f.Secret || f.ID == linkField.ID {
+			continue
+		}
+		if strings.TrimSpace(c.Config[f.ID]) != old.Config[f.ID] {
+			destChanged = true
+		}
+	}
 	cfg := map[string]string{}
 	for _, f := range t.Fields {
 		v := strings.TrimSpace(c.Config[f.ID])
-		if f.Secret && (v == "" || strings.HasPrefix(v, "••••")) && old.Type == c.Type {
+		if f.Secret && (v == "" || strings.HasPrefix(v, "••••")) && old.Type == c.Type && !destChanged {
 			v = old.Config[f.ID]
 		}
 		switch {
@@ -296,6 +334,10 @@ func (a *api) saveChannel(c store.NotifyChannel) (store.NotifyChannel, error) {
 		case v != "" && f.Pattern == "url":
 			if u, err := url.Parse(v); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 				return c, fmt.Errorf("%s: an http(s) address", f.Label)
+			}
+			// A webhook posts to this address, so it must not point inside the host.
+			if f.ID != linkField.ID && blockedHost(v) {
+				return c, fmt.Errorf("%s: a public address, not a private or loopback one", f.Label)
 			}
 		}
 		if v != "" {

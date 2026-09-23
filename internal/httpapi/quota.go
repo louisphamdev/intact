@@ -78,7 +78,6 @@ func (a *api) quotaFor(ctx context.Context, c store.Connection, refresh bool) Ac
 		if snap, ok := a.rate.get(c.ID); ok {
 			q.Windows = windowsFromHeaders(snap.Headers)
 			q.Source = "headers"
-			q.FetchedAt = snap.At.Format(time.RFC3339)
 			if len(q.Windows) > 0 {
 				q.Error = ""
 			}
@@ -183,8 +182,15 @@ func windowsFromHeaders(h map[string]string) []QuotaWindow {
 		if vals["ent"] == "-1" {
 			qw.Unlimited = true
 		}
+		// ent is the entitlement (the window's total), rem the remaining count,
+		// so used percent is (ent-rem)/ent. rem is a count, not a percent: on a
+		// 500-unit window with 450 left, 100-rem would read -350.
 		if rem, err := strconv.ParseFloat(vals["rem"], 64); err == nil && !qw.Unlimited {
-			qw.UsedPct = 100 - rem
+			qw.Limit = vals["ent"]
+			if ent, err := strconv.ParseFloat(vals["ent"], 64); err == nil && ent > 0 {
+				qw.UsedPct = 100 * (ent - rem) / ent
+				qw.Used = strconv.FormatFloat(ent-rem, 'f', -1, 64)
+			}
 		}
 		if rst := vals["rst"]; rst != "" {
 			qw.ResetAt = rst

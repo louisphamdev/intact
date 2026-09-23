@@ -28,7 +28,7 @@ func TestFiltersApplyToTheOutgoingRequest(t *testing.T) {
 		`{"provider":"claude","kind":"field","pattern":"context_management","enabled":true}`,
 		`{"provider":"*","kind":"header","pattern":"anthropic-beta","enabled":true}`,
 		`{"provider":"*","kind":"header","pattern":"authorization","enabled":true}`,
-		`{"provider":"groq","kind":"field","pattern":"model","enabled":true}`,
+		`{"provider":"groq","kind":"field","pattern":"temperature","enabled":true}`,
 	} {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest("POST", "/filters", strings.NewReader(f)))
@@ -38,11 +38,12 @@ func TestFiltersApplyToTheOutgoingRequest(t *testing.T) {
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/messages",
-		strings.NewReader(`{"model":"claude/x","context_management":{"a":1},"messages":[]}`)))
+		strings.NewReader(`{"model":"claude/x","context_management":{"a":1},"temperature":0.5,"messages":[]}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if strings.Contains(gotBody, "context_management") || !strings.Contains(gotBody, `"model":"x"`) {
+	if strings.Contains(gotBody, "context_management") || !strings.Contains(gotBody, `"temperature"`) ||
+		!strings.Contains(gotBody, `"model":"x"`) {
 		t.Errorf("body = %s, want the field gone and groq's rule not applied", gotBody)
 	}
 	if gotBeta != "" {
@@ -56,6 +57,29 @@ func TestFiltersApplyToTheOutgoingRequest(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest("POST", "/filters", strings.NewReader(`{"kind":"system","pattern":"("}`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("bad regex accepted: code=%d", rec.Code)
+	}
+}
+
+// A field rule that strips the whole body or an essential field is refused, so a
+// caller cannot install one that breaks every request.
+func TestFilterRejectsBodyWipingPatterns(t *testing.T) {
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	h := New(s, nil)
+	for _, pat := range []string{"*", "messages", "model", "input"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("POST", "/filters",
+			strings.NewReader(`{"provider":"*","kind":"field","pattern":"`+pat+`","enabled":true}`)))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("pattern %q accepted: code=%d", pat, rec.Code)
+		}
+	}
+	// A deeper, non-essential path is still allowed.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/filters",
+		strings.NewReader(`{"provider":"*","kind":"field","pattern":"messages.*.cache_control","enabled":true}`)))
+	if rec.Code != http.StatusOK {
+		t.Errorf("safe deep path refused: code=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

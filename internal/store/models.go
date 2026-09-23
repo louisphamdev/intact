@@ -50,7 +50,9 @@ func (s *Store) migrateModels() error {
 // SyncModels records the models a provider listed and returns the ones seen
 // for the first time. A new model starts on when startOn says so. With live
 // (the provider answered with its list), a stored model missing from the list
-// is deleted; a fallback list deletes nothing.
+// is marked stale, not deleted, so the operator's on/off choice and the model's
+// test history survive a provider that drops it for a while; a fallback list
+// changes nothing. A model that reappears is un-marked on the next sync.
 func (s *Store) SyncModels(provider string, ids []string, live bool, startOn func(model string) bool) ([]string, error) {
 	// Read before the transaction: a read that turns into a write inside one
 	// fails with SQLITE_BUSY_SNAPSHOT when another connection wrote meanwhile.
@@ -98,8 +100,8 @@ func (s *Store) SyncModels(provider string, ids []string, live bool, startOn fun
 	if live {
 		for m := range known {
 			if !listed[m] {
-				if _, err := tx.Exec(`DELETE FROM provider_models WHERE provider = ? AND model = ?`, provider, m); err != nil {
-					return nil, fmt.Errorf("drop model: %w", err)
+				if _, err := tx.Exec(`UPDATE provider_models SET stale = 1 WHERE provider = ? AND model = ?`, provider, m); err != nil {
+					return nil, fmt.Errorf("mark model stale: %w", err)
 				}
 			}
 		}

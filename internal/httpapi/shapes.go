@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"regexp"
@@ -169,20 +170,41 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 		translate.OpenAIStreamToAnthropic(out, chunks)
 	default:
 		whole := translate.CollectOpenAIStream(chunks)
+		status := resp.StatusCode
+		// A provider can stream an error event inside an HTTP 200. The collected
+		// body is then an error, not an answer, so the caller must not see 200.
+		if status < 400 && isErrorBody(whole) {
+			status = http.StatusBadGateway
+		}
 		if to == translate.Anthropic {
 			if b, err := translate.OpenAIResponseToAnthropic(whole); err == nil {
 				whole = b
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(resp.StatusCode)
+		w.WriteHeader(status)
 		w.Write(whole)
 	}
-	io.Copy(io.Discard, pr)
+	// Close the read end rather than drain it. On a normal finish the reader is
+	// already at EOF; on a client disconnect a drain would block on the producer
+	// still reading a slow upstream, so close it and let the deferred
+	// resp.Body.Close release that goroutine.
+	pr.Close()
 	a.recordUsage(connID, tap.bytes(), "")
 	if resp.StatusCode < 300 && watched(provider) {
 		a.drift.Observe(drift.Response, provider, path, raw.bytes(), true)
 	}
+}
+
+// isErrorBody reports whether a JSON body is an error envelope: a top-level
+// "error" key, which a provider streams instead of a completion when it fails.
+func isErrorBody(b []byte) bool {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(b, &m) != nil {
+		return false
+	}
+	_, ok := m["error"]
+	return ok
 }
 
 // toChatChunks converts a provider's event stream to Chat Completions chunks.

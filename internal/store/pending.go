@@ -47,12 +47,14 @@ func (s *Store) PutPendingLogin(p PendingLogin) error {
 func (s *Store) TakePendingLogin(state string) (PendingLogin, bool) {
 	var p PendingLogin
 	var created string
-	err := s.DB.QueryRow(`SELECT state, provider, verifier, label, created_at FROM oauth_pending WHERE state = ?`, state).
+	// Delete and read in one statement so two requests that race on the same
+	// pasted code cannot both consume it: SQLite serializes the writes, so the
+	// second finds no row.
+	err := s.DB.QueryRow(`DELETE FROM oauth_pending WHERE state = ? RETURNING state, provider, verifier, label, created_at`, state).
 		Scan(&p.State, &p.Provider, &p.Verifier, &p.Label, &created)
 	if errors.Is(err, sql.ErrNoRows) || err != nil {
 		return PendingLogin{}, false
 	}
-	s.DB.Exec(`DELETE FROM oauth_pending WHERE state = ?`, state)
 	p.Created, _ = time.Parse(time.RFC3339, created)
 	if time.Since(p.Created) > PendingLoginTTL {
 		return PendingLogin{}, false

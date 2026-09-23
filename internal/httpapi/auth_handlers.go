@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -57,7 +58,8 @@ p{color:var(--muted);font-size:.85rem;margin:0 0 1.5rem}
 // The language is the dashboard's choice, kept in this browser.
 (()=>{
   const VI={'Enter the 6-digit code from your authenticator':'Nhập mã 6 số từ ứng dụng xác thực',
-    'Wrong or expired code. Try again.':'Mã sai hoặc đã hết hạn. Thử lại.','intact — sign in':'intact — đăng nhập'};
+    'Wrong or expired code. Try again.':'Mã sai hoặc đã hết hạn. Thử lại.','intact — sign in':'intact — đăng nhập',
+    'Too many attempts. Wait a few minutes.':'Quá nhiều lần thử. Đợi vài phút.'};
   let lang='en';try{lang=localStorage.getItem('intact-lang')||((navigator.language||'').toLowerCase().startsWith('vi')?'vi':'en')}catch(e){}
   if(lang==='vi'){document.documentElement.lang='vi';
     for(const id of ['prompt','msg']){const e=document.getElementById(id);if(VI[e.textContent])e.textContent=VI[e.textContent]}
@@ -96,12 +98,22 @@ func (a *api) loginSubmit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad form")
 		return
 	}
+	ip := clientIP(r)
+	if ok, wait := a.login.allow(ip, time.Now()); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(renderLogin("Too many attempts. Wait a few minutes.")))
+		return
+	}
 	if !a.auth.CheckCode(r.PostFormValue("totp")) {
+		a.login.fail(ip, time.Now())
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(renderLogin("Wrong or expired code. Try again.")))
 		return
 	}
+	a.login.succeed(ip)
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    a.auth.IssueSession(),

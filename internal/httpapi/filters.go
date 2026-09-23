@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/louisphamdev/intact/internal/filter"
@@ -44,6 +45,11 @@ func (a *api) reloadFilters() {
 		if !f.Enabled {
 			continue
 		}
+		// A body-wiping rule stored before the guard existed must not apply now.
+		if riskyFieldPattern(f.Kind, f.Pattern) {
+			log.Printf("skip unsafe filter %s (%s %q): would strip an essential field", f.ID, f.Kind, f.Pattern)
+			continue
+		}
 		r, err := filter.Compile(f.Kind, f.Pattern)
 		if err != nil {
 			log.Printf("skip filter %s: %v", f.ID, err)
@@ -77,6 +83,10 @@ func (a *api) saveFilter(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if riskyFieldPattern(f.Kind, f.Pattern) {
+		writeError(w, http.StatusBadRequest, "this pattern would strip an essential field from every request; narrow it")
+		return
+	}
 	saved, err := a.putFilter(f)
 	if errors.Is(err, store.ErrFilterNotFound) {
 		writeError(w, http.StatusNotFound, "unknown filter")
@@ -97,6 +107,21 @@ func (a *api) deleteFilter(w http.ResponseWriter, r *http.Request) {
 	}
 	a.reloadFilters()
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// riskyFieldPattern reports a field rule that would break every request: a bare
+// "*" clears the whole body, and a single essential top-level key drops the
+// content or the routing model. A deeper path (messages.*.cache_control) is
+// fine; only these top-level strips are refused.
+func riskyFieldPattern(kind, pattern string) bool {
+	if kind != filter.Field {
+		return false
+	}
+	switch strings.TrimSpace(pattern) {
+	case "*", "messages", "model", "input", "contents", "prompt", "request":
+		return true
+	}
+	return false
 }
 
 // apiProviders lists the providers with their account counts for machines.

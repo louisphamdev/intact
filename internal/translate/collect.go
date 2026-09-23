@@ -18,8 +18,10 @@ func CollectOpenAIStream(src io.Reader) []byte {
 	finish := ""
 	var usage obj
 	var errObj obj
-	sseEvents(src, func(_, data string) bool {
+	sawDone := false
+	streamErr := sseEvents(src, func(_, data string) bool {
 		if strings.TrimSpace(data) == "[DONE]" {
+			sawDone = true
 			return false
 		}
 		ch, err := decode([]byte(data))
@@ -68,6 +70,13 @@ func CollectOpenAIStream(src io.Reader) []byte {
 	})
 	if errObj != nil {
 		b, _ := json.Marshal(obj{"error": errObj})
+		return b
+	}
+	// A cut-short stream (a read error, and neither [DONE] nor a finish_reason
+	// arrived) is not a finished answer: return an error envelope so relayVia
+	// answers non-200 instead of presenting partial text as complete.
+	if streamErr != nil && !sawDone && finish == "" {
+		b, _ := json.Marshal(obj{"error": obj{"message": "upstream stream ended early: " + streamErr.Error(), "type": "api_error"}})
 		return b
 	}
 	msg := obj{"role": "assistant", "content": text.String()}

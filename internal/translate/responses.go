@@ -204,7 +204,7 @@ func ResponsesStreamToOpenAI(dst Flusher, src io.Reader) {
 		dst.Flush()
 		done = true
 	}
-	sseEvents(src, func(event, data string) bool {
+	streamErr := sseEvents(src, func(event, data string) bool {
 		ev, err := decode([]byte(data))
 		if err != nil {
 			return true
@@ -271,6 +271,12 @@ func ResponsesStreamToOpenAI(dst Flusher, src io.Reader) {
 		return true
 	})
 	if !done {
+		if streamErr != nil {
+			b, _ := json.Marshal(obj{"error": obj{"message": "upstream stream ended early: " + streamErr.Error(), "type": "api_error"}})
+			io.WriteString(dst, "data: "+string(b)+"\n\n")
+			dst.Flush()
+			return
+		}
 		finish(obj{})
 	}
 }

@@ -296,6 +296,27 @@ func cleanSystem(m map[string]any, re *regexp.Regexp) bool {
 		// Gemini systemInstruction, also inside Antigravity's envelope.
 		if si, ok := b["systemInstruction"].(map[string]any); ok {
 			si["parts"] = cleanContent(si["parts"])
+			// A rule that empties the system text leaves a blank part, which
+			// Gemini rejects; drop blank parts, and the whole instruction when
+			// none survive.
+			if parts, ok := si["parts"].([]any); ok {
+				kept := parts[:0]
+				for _, p := range parts {
+					if pm, ok := p.(map[string]any); ok {
+						if t, ok := pm["text"].(string); ok && strings.TrimSpace(t) == "" {
+							changed = true
+							continue
+						}
+					}
+					kept = append(kept, p)
+				}
+				if len(kept) == 0 {
+					delete(b, "systemInstruction")
+					changed = true
+				} else {
+					si["parts"] = kept
+				}
+			}
 		}
 	}
 	return changed

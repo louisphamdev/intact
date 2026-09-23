@@ -75,7 +75,12 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 	prov, upstreamModel := a.splitModel(model)
 	var targets []store.Connection
 	if prov != "" {
-		if a.store.InactiveModels(prov)[a.variantBase(prov, upstreamModel)] && r.Context().Value(modelTestKey{}) == nil {
+		// Check the off switch against the model and its variant base. Using
+		// splitVariant (not the catalog) means a variant of a switched-off base
+		// is still refused on a cold cache, with no model-list fetch per request.
+		off := a.store.InactiveModels(prov)
+		vbase, _ := splitVariant(upstreamModel)
+		if (off[upstreamModel] || off[vbase]) && r.Context().Value(modelTestKey{}) == nil {
 			writeError(w, http.StatusForbidden, "this model is switched off in intact")
 			return
 		}
@@ -577,6 +582,15 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		}
 		if resp.StatusCode == http.StatusUnauthorized && a.isOAuth(conn.ID) {
 			if fresh, ok := a.forceRefresh(r.Context(), conn.ID); ok {
+				// For a provider that exchanges its token (Copilot), the upstream
+				// wants the exchanged bearer, not the renewed OAuth token; send the
+				// raw one and it answers 401 again.
+				if p.Exchange != "" {
+					a.dropExchanged(conn.ID)
+					if ex, eerr := a.exchanged(r.Context(), p, conn.ID, fresh); eerr == nil {
+						fresh = ex
+					}
+				}
 				resp.Body.Close()
 				if resp, err = a.sendLogged(r, p, conn, path, fresh, send, model); err != nil {
 					continue

@@ -58,6 +58,19 @@ var (
 	pProvider = map[string]any{"type": "string", "description": `provider id, or "*" for every provider`}
 )
 
+// mcpAdminTools are the tools a dashboard inference key may not run through
+// /mcp: config changes, credential moves, and reads of another client's stored
+// bodies. Only the master token, or the open loopback server, may.
+var mcpAdminTools = map[string]bool{
+	"set_account_active": true, "set_models_active": true, "test_account": true,
+	"set_model_policy":   true,
+	"put_provider_def":   true, "delete_provider_def": true,
+	"add_filter":         true, "update_filter": true, "delete_filter": true,
+	"ack_drift_changes":  true, "drift_review": true, "error_review": true,
+	"put_notify_channel": true, "test_notify_channel": true, "delete_notify_channel": true,
+	"get_error":          true,
+}
+
 var mcpTools = []mcpTool{
 	{Name: "list_providers", Description: "List the providers intact can call and how many accounts each has.",
 		InputSchema: schema(map[string]any{}),
@@ -390,6 +403,11 @@ func (a *api) putFilter(f store.Filter) (store.Filter, error) {
 	if err != nil {
 		return store.Filter{}, err
 	}
+	// Shared by the HTTP and the MCP entry points: neither may install a rule
+	// that strips an essential field from every request.
+	if riskyFieldPattern(f.Kind, f.Pattern) {
+		return store.Filter{}, errors.New("this pattern would strip an essential field from every request; narrow it")
+	}
 	f.Pattern = rule.Pattern
 	saved, err := a.store.SaveFilter(f)
 	if err != nil {
@@ -475,9 +493,21 @@ func (a *api) mcp(w http.ResponseWriter, r *http.Request) {
 			rpcReply(w, req.ID, nil, &rpcError{Code: -32602, Message: "invalid params"})
 			return
 		}
+		// The dashboard key that reaches /mcp is a machine's inference key, not
+		// the operator. A tool that changes a provider's URL, installs a filter,
+		// moves a credential, or reads another client's stored bodies needs the
+		// master token (or the open loopback server), the same bar the /api
+		// routes hold. callHandler runs a handler with no request identity, so
+		// the gate has to live here.
+		caller := clientOf(r)
+		admin := caller == "env" || caller == "internal"
 		for _, t := range mcpTools {
 			if t.Name != p.Name {
 				continue
+			}
+			if mcpAdminTools[t.Name] && !admin {
+				rpcReply(w, req.ID, toolResult(nil, errors.New("this tool needs the master token, not a dashboard key")), nil)
+				return
 			}
 			if p.Arguments == nil {
 				p.Arguments = map[string]any{}

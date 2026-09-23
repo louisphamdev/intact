@@ -151,8 +151,8 @@ func TestAutoTestSwitchesByResult(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/providers/groq/model-table?refresh=1", nil))
 	waitIdle(t, h, "groq")
 	m = tableOf(t, h, "groq")
-	if _, ok := m["bad"]; ok {
-		t.Errorf("a dropped model stays: %+v", m)
+	if b, ok := m["bad"]; !ok || !b.Stale {
+		t.Errorf("a dropped model should be kept as stale, not deleted: %+v", m)
 	}
 	if n := m["new:free"]; n.Active || n.TestAt == "" {
 		t.Errorf("new model: %+v", n)

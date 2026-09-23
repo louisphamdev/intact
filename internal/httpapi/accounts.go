@@ -97,6 +97,11 @@ func (a *api) createAccount(w http.ResponseWriter, r *http.Request) {
 		err = a.store.SetMeta(c.ID, map[string]string{"accountId": accountID})
 	}
 	if err != nil {
+		// A base URL or account id that did not store leaves a connection that
+		// routes to a broken target. Roll the row back rather than keep it.
+		if c.ID != "" {
+			a.store.DeleteConnection(c.ID)
+		}
 		writeError(w, http.StatusInternalServerError, "cannot create connection")
 		return
 	}

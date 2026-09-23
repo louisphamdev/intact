@@ -128,6 +128,15 @@ func OpenAIResponseToAnthropic(body []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// An error payload is not a message with no content: convert it to an
+	// Anthropic error so the caller sees the failure, not an empty success.
+	if e := asObj(in["error"]); e != nil {
+		etype := str(e["type"])
+		if etype == "" {
+			etype = "api_error"
+		}
+		return json.Marshal(obj{"type": "error", "error": obj{"type": etype, "message": str(e["message"])}})
+	}
 	var content []any
 	stop := "end_turn"
 	if ch := asObj(firstOf(in["choices"])); ch != nil {
@@ -182,7 +191,12 @@ type Flusher interface {
 
 // sseReader yields the data payloads of a Server-Sent-Events stream, with the
 // event name when the stream sets one.
-func sseEvents(r io.Reader, each func(event, data string) bool) {
+// sseEvents returns nil when the stream ended cleanly (EOF, or the callback
+// signalled a stop by returning false) and the scanner's error when the stream
+// was cut short (io.ErrUnexpectedEOF, a read timeout, or a line past the
+// buffer). A caller must not synthesize a clean finish on a non-nil error: a
+// truncated stream is not a completed one.
+func sseEvents(r io.Reader, each func(event, data string) bool) error {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 64<<10), 16<<20)
 	var event string
@@ -192,7 +206,7 @@ func sseEvents(r io.Reader, each func(event, data string) bool) {
 		switch {
 		case line == "":
 			if len(data) > 0 && !each(event, strings.Join(data, "\n")) {
-				return
+				return nil
 			}
 			event, data = "", nil
 		case strings.HasPrefix(line, "event:"):
@@ -204,6 +218,7 @@ func sseEvents(r io.Reader, each func(event, data string) bool) {
 	if len(data) > 0 {
 		each(event, strings.Join(data, "\n"))
 	}
+	return sc.Err()
 }
 
 // AnthropicStreamToOpenAI reads a Messages event stream and writes the
@@ -224,7 +239,7 @@ func AnthropicStreamToOpenAI(dst Flusher, src io.Reader) {
 		io.WriteString(dst, "data: "+string(b)+"\n\n")
 		dst.Flush()
 	}
-	sseEvents(src, func(_, data string) bool {
+	err := sseEvents(src, func(_, data string) bool {
 		ev, err := decode([]byte(data))
 		if err != nil {
 			return true
@@ -286,6 +301,11 @@ func AnthropicStreamToOpenAI(dst Flusher, src io.Reader) {
 		}
 		return true
 	})
+	if err != nil {
+		b, _ := json.Marshal(obj{"error": obj{"type": "api_error", "message": "upstream stream ended early: " + err.Error()}})
+		io.WriteString(dst, "data: "+string(b)+"\n\n")
+		dst.Flush()
+	}
 }
 
 // OpenAIStreamToAnthropic reads Chat Completions chunks and writes the
@@ -299,7 +319,13 @@ func OpenAIStreamToAnthropic(dst Flusher, src io.Reader) {
 	started := false
 	block := -1     // index of the open content block, -1 when none
 	blockKind := "" // "text" or "tool"
-	toolBlock := map[int64]int{}
+	// Tool calls are buffered by their OpenAI index and emitted as whole blocks
+	// at the end. Anthropic allows only one open content block at a time, so
+	// streaming a second tool call would close the first and drop the argument
+	// deltas that still arrive for it.
+	type toolAcc struct{ id, name, args string }
+	tools := map[int64]*toolAcc{}
+	var toolOrder []int64
 	stop := ""
 	var usage obj
 	start := func(id, model string) {
@@ -327,6 +353,14 @@ func OpenAIStreamToAnthropic(dst Flusher, src io.Reader) {
 	}
 	finish := func() {
 		start(newID("chatcmpl-"), "")
+		for _, ti := range toolOrder {
+			ta := tools[ti]
+			open("tool", obj{"type": "tool_use", "id": ta.id, "name": ta.name, "input": obj{}})
+			if ta.args != "" {
+				send("content_block_delta", obj{"type": "content_block_delta", "index": block,
+					"delta": obj{"type": "input_json_delta", "partial_json": ta.args}})
+			}
+		}
 		closeBlock()
 		block = -1
 		if stop == "" {
@@ -340,7 +374,7 @@ func OpenAIStreamToAnthropic(dst Flusher, src io.Reader) {
 		send("message_stop", obj{"type": "message_stop"})
 	}
 	done := false
-	sseEvents(src, func(_, data string) bool {
+	err := sseEvents(src, func(_, data string) bool {
 		if strings.TrimSpace(data) == "[DONE]" {
 			finish()
 			done = true
@@ -374,16 +408,20 @@ func OpenAIStreamToAnthropic(dst Flusher, src io.Reader) {
 		for _, raw := range list(d["tool_calls"]) {
 			tc := asObj(raw)
 			ti := num(tc["index"])
+			ta := tools[ti]
+			if ta == nil {
+				ta = &toolAcc{}
+				tools[ti] = ta
+				toolOrder = append(toolOrder, ti)
+			}
 			fn := asObj(tc["function"])
-			bi, seen := toolBlock[ti]
-			if !seen {
-				bi = open("tool", obj{"type": "tool_use", "id": tc["id"], "name": fn["name"], "input": obj{}})
-				toolBlock[ti] = bi
+			if id := str(tc["id"]); id != "" {
+				ta.id = id
 			}
-			if a := str(fn["arguments"]); a != "" && bi == block {
-				send("content_block_delta", obj{"type": "content_block_delta", "index": bi,
-					"delta": obj{"type": "input_json_delta", "partial_json": a}})
+			if n := str(fn["name"]); n != "" {
+				ta.name = n
 			}
+			ta.args += str(fn["arguments"])
 		}
 		if s := openaiStop[str(c["finish_reason"])]; s != "" {
 			stop = s
@@ -391,6 +429,15 @@ func OpenAIStreamToAnthropic(dst Flusher, src io.Reader) {
 		return true
 	})
 	if !done {
+		if err != nil {
+			// A cut-short stream is not a completed message: signal the error
+			// instead of a clean stop, so the caller does not treat truncated
+			// text or a half-streamed tool call as a finished answer.
+			start(newID("chatcmpl-"), "")
+			send("error", obj{"type": "error", "error": obj{"type": "api_error",
+				"message": "upstream stream ended early: " + err.Error()}})
+			return
+		}
 		finish()
 	}
 }

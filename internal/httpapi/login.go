@@ -308,11 +308,19 @@ func (a *api) saveOAuthAccount(prov, label string, t tokenAnswer, tokenURL, clie
 	if t.RefreshToken != "" || tokenURL != "" {
 		if err := a.store.SetOAuth(c.ID, store.OAuthCreds{RefreshToken: t.RefreshToken, TokenURL: tokenURL,
 			ClientID: clientID, ClientSecret: secret, ExpiresAt: exp}); err != nil {
-			return c, err
+			// Without its refresh config the account cannot renew its token, so
+			// it is worse than no account. Roll the row back.
+			a.store.DeleteConnection(c.ID)
+			return store.Connection{}, err
 		}
 	}
 	if len(meta) > 0 {
-		a.store.SetMeta(c.ID, meta)
+		if err := a.store.SetMeta(c.ID, meta); err != nil {
+			// Without its account id (Codex chatgptAccountId) the connection
+			// routes wrong; do not return it as a success.
+			a.store.DeleteConnection(c.ID)
+			return store.Connection{}, err
+		}
 	}
 	return c, nil
 }

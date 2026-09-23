@@ -48,19 +48,27 @@ func TestModelTableSwitchDropAndTest(t *testing.T) {
 	if !res.OK || res.Message != "OK" {
 		t.Errorf("test = %+v", res)
 	}
-	// The provider drops a: a successful fetch deletes it.
+	// The provider drops a: a successful fetch marks it stale but keeps its row,
+	// so the operator's on/off choice and its test history are not lost.
 	list = `{"data":[{"id":"b"}]}`
 	b := do("GET", "/providers/groq/model-table?refresh=1", "")
 	var tbl struct{ Models []store.ProviderModel }
 	json.Unmarshal([]byte(b), &tbl)
 	seen := map[string]bool{}
+	aStale := false
 	for _, m := range tbl.Models {
 		seen[m.Model] = true
 		if m.Model == "b" && (!m.TestOK || m.Active) {
 			t.Errorf("b = %+v", m)
 		}
+		if m.Model == "a" {
+			aStale = m.Stale
+		}
 	}
-	if seen["a"] || !seen["b"] {
+	if !seen["a"] || !seen["b"] {
 		t.Errorf("after the fetch: %v", seen)
+	}
+	if !aStale {
+		t.Error("dropped model a should be kept as stale, not deleted")
 	}
 }

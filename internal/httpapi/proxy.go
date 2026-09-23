@@ -166,7 +166,7 @@ func (a *api) recordUsage(connID string, body []byte, contentEncoding string) {
 	if !c.Found {
 		return
 	}
-	day := time.Now().UTC().Format("2006-01-02")
+	day := usageDay(time.Now())
 	// A failure must not affect the request the caller already has; the counter
 	// is a convenience, not part of the proxy contract. Log it so a store fault
 	// (a lock, a full disk) is visible instead of losing counts in silence.

@@ -4,4 +4,5 @@
 /*.db-shm
 /*.db-wal
 /intact-linux
+/intact-local.exe
 temp/

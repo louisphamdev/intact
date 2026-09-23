@@ -48,6 +48,10 @@ type api struct {
 	// notes throttles alerts; errReview is the error review's state.
 	notes     notifier
 	errReview reviewState
+	// login caps failed sign-in attempts so the TOTP code cannot be brute forced.
+	login *loginGuard
+	// refresh serializes OAuth token refreshes per connection.
+	refresh refreshLocks
 }
 
 // New builds the route table with no authentication (loopback use and tests).
@@ -69,7 +73,7 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 		cat: catalog{m: map[string]catalogEntry{}}, copilot: copilotCache{m: map[string]copilotToken{}},
 		sigs: sigStore{m: map[string]sigEntry{}}, drift: drift.New(s),
 		rate: rateHeaders{m: map[string]rateSnapshot{}}, quota: quotaCache{m: map[string]AccountQuota{}},
-		auto: autoState{running: map[string]*autoRun{}}}
+		auto: autoState{running: map[string]*autoRun{}}, login: newLoginGuard()}
 	go a.autoTestLoop()
 	a.loadDefs()
 	a.migrateCustomEndpoints()
@@ -91,22 +95,25 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	mux.HandleFunc("GET /ui-settings/{key}", a.requireSession(a.getUISetting))
 	mux.HandleFunc("POST /ui-settings/{key}", a.requireSession(a.setUISetting))
 	mux.HandleFunc("GET /api/drift/changes", a.requireToken(a.driftChanges))
-	mux.HandleFunc("POST /api/drift/ack", a.requireToken(a.driftAck))
+	mux.HandleFunc("POST /api/drift/ack", a.requireAdmin(a.driftAck))
 	mux.HandleFunc("GET /api/drift/fields", a.requireToken(a.driftFields))
-	mux.HandleFunc("POST /api/drift/seed", a.requireToken(a.driftSeed))
+	mux.HandleFunc("POST /api/drift/seed", a.requireAdmin(a.driftSeed))
 	for _, pre := range []string{"", "/api"} {
-		wrap := a.requireSession
+		// read: the dashboard session, or any machine token. write: the session
+		// or the master token only, so a shared inference key cannot redirect an
+		// alert channel or trigger a review.
+		read, write := a.requireSession, a.requireSession
 		if pre != "" {
-			wrap = a.requireToken
+			read, write = a.requireToken, a.requireAdmin
 		}
-		mux.HandleFunc("GET "+pre+"/notify", wrap(a.notifyInfo))
-		mux.HandleFunc("POST "+pre+"/notify/channels", wrap(a.putChannel))
-		mux.HandleFunc("PUT "+pre+"/notify/channels/{id}", wrap(a.putChannel))
-		mux.HandleFunc("DELETE "+pre+"/notify/channels/{id}", wrap(a.deleteChannel))
-		mux.HandleFunc("POST "+pre+"/notify/channels/{id}/test", wrap(a.testChannel))
-		mux.HandleFunc("GET "+pre+"/errors/review", wrap(a.errorReview))
-		mux.HandleFunc("POST "+pre+"/errors/review", wrap(a.errorReview))
-		mux.HandleFunc("GET "+pre+"/errors/verdicts", wrap(a.errorVerdicts))
+		mux.HandleFunc("GET "+pre+"/notify", read(a.notifyInfo))
+		mux.HandleFunc("POST "+pre+"/notify/channels", write(a.putChannel))
+		mux.HandleFunc("PUT "+pre+"/notify/channels/{id}", write(a.putChannel))
+		mux.HandleFunc("DELETE "+pre+"/notify/channels/{id}", write(a.deleteChannel))
+		mux.HandleFunc("POST "+pre+"/notify/channels/{id}/test", write(a.testChannel))
+		mux.HandleFunc("GET "+pre+"/errors/review", read(a.errorReview))
+		mux.HandleFunc("POST "+pre+"/errors/review", write(a.errorReview))
+		mux.HandleFunc("GET "+pre+"/errors/verdicts", read(a.errorVerdicts))
 	}
 	mux.HandleFunc("GET /errors", a.requireSession(a.errorsList))
 	mux.HandleFunc("GET /errors/stats", a.requireSession(a.errorStats))
@@ -118,13 +125,13 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	mux.HandleFunc("GET /drift/review", a.requireSession(a.driftReview))
 	mux.HandleFunc("POST /drift/review", a.requireSession(a.driftReview))
 	mux.HandleFunc("GET /api/drift/review", a.requireToken(a.driftReview))
-	mux.HandleFunc("POST /api/drift/review", a.requireToken(a.driftReview))
+	mux.HandleFunc("POST /api/drift/review", a.requireAdmin(a.driftReview))
 	mux.HandleFunc("POST /drift/ack", a.requireSession(a.driftAck))
 	mux.HandleFunc("GET /drift/fields", a.requireSession(a.driftFields))
 	mux.HandleFunc("GET /api/filters", a.requireToken(a.listFilters))
-	mux.HandleFunc("POST /api/filters", a.requireToken(a.saveFilter))
-	mux.HandleFunc("DELETE /api/filters/{id}", a.requireToken(a.deleteFilter))
-	mux.HandleFunc("POST /api/filters/{id}/delete", a.requireToken(a.deleteFilter))
+	mux.HandleFunc("POST /api/filters", a.requireAdmin(a.saveFilter))
+	mux.HandleFunc("DELETE /api/filters/{id}", a.requireAdmin(a.deleteFilter))
+	mux.HandleFunc("POST /api/filters/{id}/delete", a.requireAdmin(a.deleteFilter))
 	// MCP (Streamable HTTP): the management API as tools for an agent.
 	mux.HandleFunc("POST /mcp", a.requireToken(a.mcp))
 	mux.HandleFunc("GET /mcp", a.requireToken(a.mcpGet))
@@ -155,8 +162,8 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	mux.HandleFunc("GET /api/providers/{id}/models/raw", a.requireToken(a.providerModelsRaw))
 	mux.HandleFunc("GET /api/provider-defs", a.requireToken(a.listDefs))
 	mux.HandleFunc("GET /api/provider-defs/{id}", a.requireToken(a.getDef))
-	mux.HandleFunc("POST /api/provider-defs", a.requireToken(a.putDef))
-	mux.HandleFunc("DELETE /api/provider-defs/{id}", a.requireToken(a.deleteDef))
+	mux.HandleFunc("POST /api/provider-defs", a.requireAdmin(a.putDef))
+	mux.HandleFunc("DELETE /api/provider-defs/{id}", a.requireAdmin(a.deleteDef))
 	mux.HandleFunc("GET /provider-defs", a.requireSession(a.listDefs))
 	mux.HandleFunc("GET /provider-defs/{id}", a.requireSession(a.getDef))
 	mux.HandleFunc("POST /provider-defs", a.requireSession(a.putDef))
@@ -218,10 +225,7 @@ func (a *api) requireSession(next http.HandlerFunc) http.HandlerFunc {
 // which Anthropic clients send. Otherwise it answers 401 for the machine caller.
 func (a *api) requireToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tok := r.Header.Get("X-Api-Key")
-		if b, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
-			tok = b
-		}
+		tok := bearerToken(r)
 		// The caller's name (its key's, or "env" for the environment token)
 		// travels with the request, so drift can learn each client apart.
 		if tok != "" && a.auth != nil && a.auth.CheckAPIToken("Bearer "+tok) {
@@ -238,6 +242,39 @@ func (a *api) requireToken(next http.HandlerFunc) http.HandlerFunc {
 		}
 		writeError(w, http.StatusUnauthorized, "missing or invalid bearer token")
 	}
+}
+
+// requireAdmin gates management that can redirect a stored credential or wipe a
+// request: a valid session, or the environment's master token. A key made in
+// the dashboard (handed to a machine for /v1) is refused here, so such a key
+// cannot change a provider's URL, install a body filter, or read another
+// client's stored data.
+func (a *api) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if a.auth == nil {
+			next(w, r)
+			return
+		}
+		if ck, err := r.Cookie(sessionCookie); err == nil && a.auth.ValidSession(ck.Value) {
+			next(w, r)
+			return
+		}
+		if tok := bearerToken(r); tok != "" && a.auth.CheckAPIToken("Bearer "+tok) {
+			next(w, r.WithContext(context.WithValue(r.Context(), clientKey{}, "env")))
+			return
+		}
+		writeError(w, http.StatusForbidden, "this action needs the dashboard session or the master token")
+	}
+}
+
+// bearerToken reads the caller's token from Authorization: Bearer, or from
+// x-api-key, which Anthropic clients send.
+func bearerToken(r *http.Request) string {
+	tok := r.Header.Get("X-Api-Key")
+	if b, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+		tok = b
+	}
+	return tok
 }
 
 // dashboard serves the page embedded in the binary.

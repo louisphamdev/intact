@@ -8,17 +8,17 @@
 <script>try{const t=localStorage.getItem('intact-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
 <style>
   :root{color-scheme:dark;--bg:#0c1017;--side:#10151e;--card:#141a25;--card2:#1b2331;--line:#232d3d;--fg:#e4e9f1;
-        --muted:#95a0b3;--faint:#657086;--accent:#8b80f9;--accent-strong:#6c5ce7;--accent-soft:rgba(139,128,249,.15);
+        --muted:#95a0b3;--faint:#8b94a7;--accent:#8b80f9;--accent-strong:#6c5ce7;--accent-soft:rgba(139,128,249,.15);
         --accent-fg:#fff;--mint:#5eead4;--ok:#4ade80;--ok-soft:rgba(74,222,128,.12);--warn:#fbbf24;--warn-soft:rgba(251,191,36,.1);
         --err:#fb7185;--err-soft:rgba(251,113,133,.12);--code:#5eead4;--shadow:0 20px 50px rgba(0,0,0,.55)}
   /* Light colours: when the system asks for them, unless the user chose dark;
      and always when the user chose light. */
   @media (prefers-color-scheme:light){:root:not([data-theme=dark]){color-scheme:light;--bg:#f3f5f9;--side:#fff;--card:#fff;--card2:#eef1f6;
-        --line:#dfe4ec;--fg:#141a25;--muted:#526076;--faint:#8591a5;--accent:#5b4bdb;--accent-strong:#5b4bdb;
+        --line:#dfe4ec;--fg:#141a25;--muted:#526076;--faint:#5f6b7d;--accent:#5b4bdb;--accent-strong:#5b4bdb;
         --accent-soft:rgba(91,75,219,.1);--mint:#0f9488;--ok:#15803d;--ok-soft:rgba(21,128,61,.1);--warn:#b45309;
         --warn-soft:rgba(180,83,9,.08);--err:#e11d48;--err-soft:rgba(225,29,72,.08);--code:#0f766e;--shadow:0 20px 50px rgba(20,26,37,.14)}}
   :root[data-theme=light]{color-scheme:light;--bg:#f3f5f9;--side:#fff;--card:#fff;--card2:#eef1f6;
-        --line:#dfe4ec;--fg:#141a25;--muted:#526076;--faint:#8591a5;--accent:#5b4bdb;--accent-strong:#5b4bdb;
+        --line:#dfe4ec;--fg:#141a25;--muted:#526076;--faint:#5f6b7d;--accent:#5b4bdb;--accent-strong:#5b4bdb;
         --accent-soft:rgba(91,75,219,.1);--mint:#0f9488;--ok:#15803d;--ok-soft:rgba(21,128,61,.1);--warn:#b45309;
         --warn-soft:rgba(180,83,9,.08);--err:#e11d48;--err-soft:rgba(225,29,72,.08);--code:#0f766e;--shadow:0 20px 50px rgba(20,26,37,.14)}
   :root[data-theme=dark]{color-scheme:dark}
@@ -31,8 +31,7 @@
   .brand{display:flex;align-items:center;gap:.7rem;padding:.35rem .5rem 1.25rem;margin-bottom:.5rem;border-bottom:1px solid var(--line);text-decoration:none}
   .logo{width:40px;height:40px;flex:none;filter:drop-shadow(0 4px 14px rgba(124,108,246,.45))}
   .logo svg{width:100%;height:100%;display:block}
-  .brand b{display:block;font-size:1.45rem;font-weight:800;letter-spacing:-.03em;line-height:1.1;
-          background:linear-gradient(90deg,var(--fg) 20%,var(--mint));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .brand b{display:block;font-size:1.45rem;font-weight:800;letter-spacing:-.03em;line-height:1.1;color:var(--fg)}
   .brand small{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.02em}
   aside a{display:flex;align-items:center;gap:.65rem;padding:.5rem .7rem;border-radius:8px;color:var(--muted);
           text-decoration:none;font-size:.88rem}
@@ -805,7 +804,7 @@ function chooseProvider(title,ids,onPick){
   openModal('chModal');
 }
 function viewProviders(v){
-  const q=el('input',{placeholder:'Search providers…',autocomplete:'off','aria-label':'Search providers'});
+  const q=el('input',{name:'provider-search',placeholder:'Search providers…',autocomplete:'off','aria-label':'Search providers'});
   header('Providers',null,el('div',{class:'search'},svg(ICON.search),q));
   const ids=[...new Set([...S.providers.map(x=>x.id),...S.accounts.map(a=>a.provider)])];
   const byName=(a,b)=>pname(a).localeCompare(pname(b));

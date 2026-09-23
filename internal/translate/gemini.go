@@ -70,7 +70,10 @@ func OpenAIToGemini(body []byte, sigs Signatures) ([]byte, error) {
 			for i, tc := range list(m["tool_calls"]) {
 				t := asObj(tc)
 				fn := asObj(t["function"])
-				id, name := str(t["id"]), str(fn["name"])
+				// The name must match the sanitized declaration name, or Gemini
+				// rejects the call: a function named "get weather" is declared as
+				// "get_weather", so the call and its response use that form too.
+				id, name := str(t["id"]), geminiName(str(fn["name"]))
 				names[id] = name
 				part := obj{"functionCall": obj{"id": id, "name": name, "args": parseArgs(str(fn["arguments"]))}}
 				// The first call of a turn carries the turn's signature.
@@ -291,7 +294,10 @@ func cleanSchema(s obj) obj {
 					e = append(e, stringify(x))
 				}
 			}
-			out["enum"] = e
+			// An empty enum must not become "enum": null, which Gemini rejects.
+			if len(e) > 0 {
+				out["enum"] = e
+			}
 		case k == "type":
 			if l := list(val); l != nil {
 				for _, t := range l {
@@ -415,7 +421,7 @@ func GeminiStreamToOpenAI(dst Flusher, src io.Reader, sigs Signatures) {
 		io.WriteString(dst, "data: "+string(b)+"\n\n")
 		dst.Flush()
 	}
-	sseEvents(src, func(_, data string) bool {
+	streamErr := sseEvents(src, func(_, data string) bool {
 		ev, err := decode([]byte(data))
 		if err != nil {
 			return true
@@ -491,6 +497,13 @@ func GeminiStreamToOpenAI(dst Flusher, src io.Reader, sigs Signatures) {
 		}
 		return true
 	})
+	if streamErr != nil {
+		// A truncated stream must not close as a clean answer.
+		b, _ := json.Marshal(obj{"error": obj{"message": "upstream stream ended early: " + streamErr.Error(), "type": "api_error"}})
+		io.WriteString(dst, "data: "+string(b)+"\n\n")
+		dst.Flush()
+		return
+	}
 	if !started {
 		emit(obj{"role": "assistant", "content": ""}, nil, nil)
 	}

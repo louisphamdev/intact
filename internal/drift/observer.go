@@ -242,16 +242,20 @@ func (o *Observer) Flush() {
 	o.mu.Lock()
 	counts := map[string]int64{}
 	var fields []store.ShapeField
+	var clearedKeys []string
+	var clearedFields [][2]string
 	for k, kk := range o.keys {
 		if kk.dirty {
 			counts[k] = kk.obs
 			kk.dirty = false
+			clearedKeys = append(clearedKeys, k)
 		}
 		for p, f := range kk.fields {
 			if f.dirty {
 				fields = append(fields, store.ShapeField{Key: k, Path: p, Type: f.typ, Seen: f.seen,
 					FirstObs: f.firstObs, LastObs: f.lastObs, Gone: f.gone, LastAt: f.lastAt})
 				f.dirty = false
+				clearedFields = append(clearedFields, [2]string{k, p})
 			}
 		}
 	}
@@ -261,6 +265,22 @@ func (o *Observer) Flush() {
 	}
 	if err := o.store.SaveShapes(counts, fields); err != nil {
 		log.Printf("drift: save: %v", err)
+		// The write failed, so restore the dirty marks: the next flush retries
+		// these observations instead of losing them.
+		o.mu.Lock()
+		for _, k := range clearedKeys {
+			if kk := o.keys[k]; kk != nil {
+				kk.dirty = true
+			}
+		}
+		for _, kp := range clearedFields {
+			if kk := o.keys[kp[0]]; kk != nil {
+				if f := kk.fields[kp[1]]; f != nil {
+					f.dirty = true
+				}
+			}
+		}
+		o.mu.Unlock()
 	}
 }
 

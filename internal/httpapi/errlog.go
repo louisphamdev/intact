@@ -231,10 +231,17 @@ func (a *api) errorsList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "cannot read errors")
 		return
 	}
+	for i := range list {
+		if !ownsError(r, list[i]) {
+			list[i].ReqBody, list[i].RespBody = "", ""
+		}
+	}
 	writeJSON(w, map[string]any{"errors": list})
 }
 
-// errorGet serves one error with its bodies.
+// errorGet serves one error with its bodies. The request and response bodies
+// can hold another client's prompt, so they are shown only to the owner (the
+// dashboard session or the master token) or to the client that caused the error.
 func (a *api) errorGet(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	e, err := a.store.GetUpstreamError(id)
@@ -242,7 +249,18 @@ func (a *api) errorGet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such error")
 		return
 	}
+	if !ownsError(r, e) {
+		e.ReqBody, e.RespBody = "", ""
+	}
 	writeJSON(w, e)
+}
+
+// ownsError reports whether the caller may read an error's stored bodies: the
+// dashboard session ("internal") and the master token ("env") may read every
+// error; a dashboard key may read only the errors its own requests caused.
+func ownsError(r *http.Request, e store.UpstreamError) bool {
+	who := clientOf(r)
+	return who == "internal" || who == "env" || who == e.Client
 }
 
 // ErrorGroup is the errors of one signature.

@@ -30,7 +30,25 @@ On the page:
   lets you tick the ones to show for each provider. The choice is stored on the
   server (the `quota-view` setting).
 
-API: `GET /api/quota?provider=&refresh=1`. MCP: `get_quota`.
+API: `GET /api/quota?provider=&connection=`. MCP: `get_quota`.
+
+### Resets
+
+Some accounts include manual resets:
+- **Claude:** weekly resets (`juniper_tide`) and promotional grants (`cedar_ember`).
+- **Codex:** rate-limit reset credits.
+
+intact never claims a reset automatically. You must claim each reset manually from the dashboard.
+Each reset row shows:
+- The title, kind, and available units (`left / total`).
+- The rate-limit windows that the reset refills.
+- Validity dates, expiration, or next available time.
+- Current status and blocked reason if unavailable.
+
+To claim a reset, click **Claim** on its row in the dashboard and confirm the dialog.
+A claim spends a limited resource and cannot be undone.
+
+API: `POST /quota/{connectionId}/reset` (requires a dashboard session). Machine tokens and MCP callers cannot claim resets.
 
 ## Usage
 

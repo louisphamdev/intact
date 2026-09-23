@@ -20,6 +20,7 @@ import (
 // Quota endpoints, as the tools read them. Variables so a test can redirect.
 var (
 	codexUsageURL       = "https://chatgpt.com/backend-api/wham/usage"
+	codexCreditsURL     = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
 	claudeUsageURL      = "https://api.anthropic.com/api/oauth/usage"
 	copilotUserURL      = "https://api.github.com/copilot_internal/user"
 	openrouterKeyURL    = "https://openrouter.ai/api/v1/key"
@@ -127,10 +128,16 @@ func quotaCodex(a *api, ctx context.Context, c store.Connection, token string) (
 	if id := chatgptAccountID(token); id != "" {
 		h["ChatGPT-Account-ID"] = id
 	}
-	if _, err := fetchJSON(ctx, "GET", codexUsageURL, h, nil, &d); err != nil {
+	u := codexUsageURL
+	cu := codexCreditsURL
+	if over, ok := a.baseOverride["codex"]; ok {
+		u = over + "/backend-api/wham/usage"
+		cu = over + "/backend-api/wham/rate-limit-reset-credits"
+	}
+	if _, err := fetchJSON(ctx, "GET", u, h, nil, &d); err != nil {
 		return AccountQuota{}, err
 	}
-	q := AccountQuota{}
+	q := AccountQuota{Windows: []QuotaWindow{}, Resets: []QuotaReset{}}
 	if s, ok := d["plan_type"].(string); ok {
 		q.Plan = s
 	}
@@ -187,17 +194,49 @@ func quotaCodex(a *api, ctx context.Context, c store.Connection, token string) (
 			window(name, m)
 		}
 	}
+
+	availCount, _ := jnum(jobj(d["rate_limit_reset_credits"])["available_count"])
+	if availCount > 0 {
+		var cd map[string]any
+		if _, err := fetchJSON(ctx, "GET", cu, h, nil, &cd); err != nil {
+			q.ResetsError = err.Error()
+		} else {
+			var rollingWindows []string
+			for _, w := range q.Windows {
+				if !strings.Contains(w.Name, " ") {
+					rollingWindows = append(rollingWindows, w.Name)
+				}
+			}
+			q.Resets = codexResetRows(cd, time.Now().UTC(), rollingWindows)
+		}
+	}
+	if q.Resets == nil {
+		q.Resets = []QuotaReset{}
+	}
 	return q, nil
 }
 
 // quotaClaude reads the Claude plan's 5-hour and weekly utilization.
 func quotaClaude(a *api, ctx context.Context, c store.Connection, token string) (AccountQuota, error) {
+	h := map[string]string{
+		"Authorization":     "Bearer " + token,
+		"Anthropic-Beta":    "oauth-2025-04-20",
+		"Anthropic-Version": "2023-06-01",
+	}
+	if p, ok := provider.Lookup("claude"); ok {
+		for k, v := range p.Identity {
+			h[k] = v
+		}
+	}
+	u := claudeUsageURL + "?at_wall=1&skip_spend=1"
+	if over, ok := a.baseOverride["claude"]; ok {
+		u = over + "/api/oauth/usage?at_wall=1&skip_spend=1"
+	}
 	var d map[string]any
-	if _, err := fetchJSON(ctx, "GET", claudeUsageURL, map[string]string{"Authorization": "Bearer " + token,
-		"Anthropic-Beta": "oauth-2025-04-20", "Anthropic-Version": "2023-06-01"}, nil, &d); err != nil {
+	if _, err := fetchJSON(ctx, "GET", u, h, nil, &d); err != nil {
 		return AccountQuota{}, err
 	}
-	q := AccountQuota{}
+	q := AccountQuota{Windows: []QuotaWindow{}, Resets: []QuotaReset{}}
 	add := func(name string, w map[string]any) {
 		if w == nil {
 			return
@@ -219,6 +258,12 @@ func quotaClaude(a *api, ctx context.Context, c store.Connection, token string) 
 	sort.Strings(keys)
 	for _, k := range keys {
 		add("7d "+strings.TrimPrefix(k, "seven_day_"), jobj(d[k]))
+	}
+	q.HasJuniperTide = jobj(d["juniper_tide"]) != nil
+	q.HasCedarEmber = jobj(d["cedar_ember"]) != nil
+	q.Resets = claudeResetRows(d, time.Now().UTC())
+	if q.Resets == nil {
+		q.Resets = []QuotaReset{}
 	}
 	return q, nil
 }

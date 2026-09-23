@@ -398,19 +398,18 @@ var mcpTools = []mcpTool{
 		run: func(a *api, args map[string]any) (any, error) {
 			return a.drift.Fields(argStr(args, "direction"), argStr(args, "provider"), argStr(args, "endpoint")), nil
 		}},
-	{Name: "get_quota", Description: "Read each active account's quota (rolling windows, weekly and monthly pools, per-model shares) from the provider, or from the rate-limit headers of its last answer.",
+	{Name: "get_quota", Description: "Read each active account's quota (rolling windows, resets, weekly and monthly pools, per-model shares) from the provider, or from the rate-limit headers of its last answer. The refresh parameter is ignored.",
 		InputSchema: schema(map[string]any{"provider": pString, "refresh": pBool}),
 		run: func(a *api, args map[string]any) (any, error) {
 			conns, err := a.store.ListConnections()
 			if err != nil {
 				return nil, err
 			}
-			refresh, _ := args["refresh"].(bool)
 			out := []AccountQuota{}
 			for _, c := range conns {
 				if _, ok := a.providerFor(c); ok && c.IsActive && (argStr(args, "provider") == "" || c.Provider == argStr(args, "provider")) {
 					ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-					out = append(out, a.quotaFor(ctx, c, refresh))
+					out = append(out, a.quotaFor(ctx, c, false))
 					cancel()
 				}
 			}

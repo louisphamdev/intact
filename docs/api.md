@@ -131,7 +131,8 @@ its `scores` per board: `rating`, `rank`, `votes`, `tier`) and `arenaMeta`.
 
 | Method and path | Purpose |
 | --- | --- |
-| `GET /api/quota` | `?provider=&refresh=1`: every active account's quota. |
+| `GET /api/quota` | `?provider=&connection=`: every active account's quota. Machine callers cannot bypass the cache; `refresh=1` is ignored. |
+| `POST /quota/{id}/reset` (session) | `{"resetId":"…","requestId":"…"}`: claim one manual quota reset for an account. |
 | `GET /api/usage` | Daily token totals per account and model. |
 
 ## MCP (token)

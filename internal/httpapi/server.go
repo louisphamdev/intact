@@ -51,6 +51,10 @@ type api struct {
 	login *loginGuard
 	// refresh serializes OAuth token refreshes per connection.
 	refresh refreshLocks
+	// claimLocks serializes manual quota reset claims per connection.
+	claimLocks refreshLocks
+	// claims tracks unknown, hold, and done claim states across connections.
+	claims claimTables
 }
 
 // New builds the route table with no authentication (loopback use and tests).
@@ -72,8 +76,10 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 		cat:     catalog{m: map[string]catalogEntry{}, inflight: map[string]*catalogFetch{}},
 		copilot: copilotCache{m: map[string]copilotToken{}},
 		sigs:    sigStore{m: map[string]sigEntry{}}, drift: drift.New(s),
-		rate: rateHeaders{m: map[string]rateSnapshot{}}, quota: quotaCache{m: map[string]AccountQuota{}},
-		auto: autoState{running: map[string]*autoRun{}}, login: newLoginGuard()}
+		rate: rateHeaders{m: map[string]rateSnapshot{}}, quota: quotaCache{m: map[string]AccountQuota{}, highWater: map[string]uint64{}, flights: map[string]*quotaFlight{}},
+		auto: autoState{running: map[string]*autoRun{}}, login: newLoginGuard(),
+		claims: claimTables{unknown: map[string]claimUnknownEntry{}, hold: map[string]claimHoldEntry{}, done: map[string]claimDoneEntry{}},
+	}
 	go a.autoTestLoop()
 	a.loadDefs()
 	a.migrateCustomEndpoints()
@@ -90,8 +96,9 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	mux.HandleFunc("GET /api/accounts", a.requireToken(a.accounts))
 	mux.HandleFunc("POST /api/accounts/{id}/active", a.requireAdmin(a.setActive))
 	mux.HandleFunc("GET /api/usage", a.requireToken(a.usage))
-	mux.HandleFunc("GET /api/quota", a.requireToken(a.quotaList))
-	mux.HandleFunc("GET /quota", a.requireSession(a.quotaList))
+	mux.HandleFunc("GET /api/quota", a.requireToken(a.quotaList(false)))
+	mux.HandleFunc("GET /quota", a.requireSession(a.quotaList(true)))
+	mux.HandleFunc("POST /quota/{id}/reset", a.requireSession(a.claimReset))
 	mux.HandleFunc("GET /ui-settings/{key}", a.requireSession(a.getUISetting))
 	mux.HandleFunc("POST /ui-settings/{key}", a.requireSession(a.setUISetting))
 	mux.HandleFunc("GET /api/drift/changes", a.requireToken(a.driftChanges))

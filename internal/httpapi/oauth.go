@@ -43,6 +43,23 @@ func (r *refreshLocks) lock(id string) *sync.Mutex {
 	return l
 }
 
+func (r *refreshLocks) tryLock(id string) (*sync.Mutex, bool) {
+	r.mu.Lock()
+	if r.m == nil {
+		r.m = map[string]*sync.Mutex{}
+	}
+	l := r.m[id]
+	if l == nil {
+		l = &sync.Mutex{}
+		r.m[id] = l
+	}
+	r.mu.Unlock()
+	if !l.TryLock() {
+		return nil, false
+	}
+	return l, true
+}
+
 func (r *refreshLocks) getOverride(id string) (tokenOverride, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

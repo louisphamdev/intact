@@ -66,8 +66,8 @@ tools) and wants to use them all from any client.
 - **Alerts.** intact tells the channels you declare what it fixed on its own
   and what it could not fix: a Telegram chat or topic, or a webhook.
   [Alerts](docs/alerts.md)
-- **Quota and usage.** Quota is read from each provider (rolling windows, weekly
-  pools, per-model shares). Token usage is counted per account, model and day.
+- **Quota and usage.** Quota is read from each provider (rolling windows, resets, weekly
+  pools, per-model shares). Manual resets can be claimed from the dashboard. Token usage is counted per account, model and day.
   [Quota and usage](docs/quota-and-usage.md)
 - **Management API and MCP.** Every dashboard action has a route under `/api/*`,
   and a tool on the MCP server at `/mcp`. The routes that change intact need the

@@ -202,7 +202,7 @@
   .seg{display:inline-flex;background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:3px;gap:2px}
   .seg button{min-height:28px;padding:.2rem .7rem;font-size:.8rem;background:transparent;color:var(--muted);border-radius:6px}
   .seg button[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);font-weight:600}
-  .qgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(22rem,1fr));gap:1rem}
+  .qgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(22rem,100%),1fr));gap:1rem}
   .qbar{height:8px;border-radius:99px;background:var(--card2);overflow:hidden}
   .qbar>span{display:block;height:100%;border-radius:99px}
   .qwin{display:grid;gap:.3rem}
@@ -426,6 +426,14 @@ const VI={
 'resets in {0}':'reset sau {0}','resetting':'đang reset','{0}% used':'đã dùng {0}%','Reading quota…':'Đang đọc hạn mức…','No quota data to choose from.':'Không có dữ liệu hạn mức để chọn.',
 'Nothing to show. Use Edit to choose what to show.':'Không có gì để hiện. Bấm Sửa để chọn mục cần hiện.','From the rate-limit headers of the last answer, {0}':'Từ header rate-limit của response gần nhất, {0}',
 'last answer':'response gần nhất','Main only':'Chỉ mục chính','applies to every {0} account':'áp dụng cho mọi tài khoản {0}','Per model':'Theo model',
+'Resets':'Lượt reset','Claim':'Nhận','Claim reset':'Nhận lượt reset','Confirm':'Xác nhận','Result unknown':'Kết quả chưa rõ','Check again':'Kiểm tra lại','Try again':'Thử lại',
+'Claiming…':'Đang nhận…','Reset claimed':'Đã nhận reset',
+'Claiming this reset cannot be undone. Are you sure you want to proceed?':'Lượt nhận này không thể hoàn tác. Bạn có chắc chắn muốn tiếp tục không?',
+'The provider shows fewer resets than before. The earlier claim probably went through.':'Nhà cung cấp hiển thị ít lượt reset hơn trước. Lần nhận trước có thể đã thành công.',
+'Weekly reset':'Reset hàng tuần','Full reset':'Reset toàn bộ','weekly':'hàng tuần','grant':'khoản cấp','credit':'tín dụng',
+'not_at_limit':'chưa đạt giới hạn','paused':'tạm dừng','used':'đã dùng','expired':'hết hạn','not_started':'chưa bắt đầu','cooldown':'đang chờ (cooldown)','in_progress':'đang xử lý','unknown_status':'trạng thái không xác định','bad_id':'id không hợp lệ','not_found':'không tìm thấy','just_reset':'vừa mới reset',
+'available':'khả dụng','redeeming':'đang đổi','redeemed':'đã đổi',
+'reset':'đã reset','not_needed':'không cần thiết','spent':'đã dùng hết','not_allowed':'không được phép',
 // usage
 'No usage recorded yet':'Chưa ghi nhận lượt dùng nào','Requests through /v1 show up here.':'Các request qua /v1 sẽ hiện ở đây.','(deleted)':'(đã xoá)',
 // data tables
@@ -655,7 +663,12 @@ async function api(path,opts){
   const r=await fetch(path,opts);
   checkSession(r);
   const d=(r.headers.get('content-type')||'').includes('json')?await r.json():null;
-  if(!r.ok)throw new Error((d&&d.error)||('HTTP '+r.status));
+  if(!r.ok){
+    const err=new Error((d&&d.error)||('HTTP '+r.status));
+    err.status=r.status;
+    err.body=d;
+    throw err;
+  }
   return d;
 }
 const postJSON=(path,body)=>api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -2014,6 +2027,210 @@ const shownWindows=(q,view)=>{
   const sel=view[q.provider];
   return q.windows.filter(w=>sel?sel.includes(w.name):!w.name.startsWith('model '));
 };
+// Module-level claim state and quota request ordering
+const claimState=new Map(); // key: connID + ':' + resetId -> {phase, requestId, outcome, message, left, resetAt}
+let quotaRequestCounter=0;
+const accountLastQuotaRequest=new Map(); // connID -> last quotaRequestCounter
+let activeQuotaRender=null;
+let activeQuotaUpdateAccount=null;
+
+function quotaFormatDate(iso){
+  if(!iso)return '';
+  const d=new Date(iso);
+  if(isNaN(d.getTime()))return iso;
+  return d.toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+
+function showConfirmClaimDialog(conn,r,onConfirm){
+  const close=()=>ov.remove();
+  const clearsText=r.clears&&r.clears.length?r.clears.join(', '):'—';
+  const ov=el('div',{class:'overlay',onclick:e=>{if(e.target===ov)close()}},
+    el('div',{class:'modal sm',role:'dialog','aria-modal':'true'},
+      el('div',{class:'mh'},
+        el('strong',{},t('Claim reset')),
+        el('button',{class:'icon',type:'button','aria-label':'Close',onclick:close},'✕')),
+      el('div',{class:'mb',style:'display:grid;gap:.75rem'},
+        el('div',{},el('span',{class:'faint small',text:t('Account')+': '}),el('b',{text:(conn.label||conn.provider)+' ('+pname(conn.provider)+')'})),
+        el('div',{},el('span',{class:'faint small',text:t('Reset')+': '}),el('b',{text:r.title||r.id})),
+        el('div',{},el('span',{class:'faint small',text:t('Refills')+': '}),el('span',{class:'badge',text:clearsText})),
+        el('p',{class:'faint small',style:'margin-top:.5rem',text:t('Claiming this reset cannot be undone. Are you sure you want to proceed?')})),
+      el('div',{class:'mf'},
+        el('button',{class:'ghost',type:'button',onclick:close},t('Cancel')),
+        el('button',{class:'primary',type:'button',onclick:()=>{close();onConfirm();}},t('Confirm')))));
+  document.body.append(ov);
+}
+
+function quotaResetRow(conn,r,onRequestQuota){
+  const key=conn.connectionId+':'+r.id;
+  const cs=claimState.get(key);
+
+  const title=el('b',{text:r.title||r.id});
+  const kind=el('span',{class:'badge',style:'margin-left:.4rem',text:t(r.kind||'')});
+  const leftTotal=el('span',{class:'muted small',style:'margin-left:auto',text:r.left+' / '+r.total});
+
+  const headerRow=el('div',{style:'display:flex;align-items:center;gap:.3rem'},title,kind,leftTotal);
+
+  const details=[];
+  if(r.clears&&r.clears.length){
+    details.push(el('div',{class:'faint small'},t('Refills')+': '+r.clears.join(', ')));
+  }
+  if(r.validFrom){
+    details.push(el('div',{class:'faint small'},t('Valid from')+': '+quotaFormatDate(r.validFrom)));
+  }
+  if(r.expiresAt){
+    details.push(el('div',{class:'faint small',title:r.expiresAt},t('Expires')+': '+untilText(r.expiresAt)));
+  }
+  if(r.nextAt&&!r.usable){
+    details.push(el('div',{class:'faint small',title:r.nextAt},t('Next available')+': '+untilText(r.nextAt)));
+  }
+  if(r.status){
+    details.push(el('div',{class:'faint small'},t('Status')+': '+t(r.status)));
+  }
+  if(r.description){
+    details.push(el('div',{class:'faint small',style:'margin-top:.2rem'},r.description));
+  }
+
+  // Hold check after reset: button stays disabled until quota read shows lower Left or 60s pass
+  let holdActive=false;
+  if(cs&&cs.outcome==='reset'&&cs.resetAt){
+    if(Date.now()-cs.resetAt<60000&&r.left>=cs.left){
+      holdActive=true;
+    }
+  }
+
+  const claimBtn=el('button',{class:'primary',type:'button',style:'min-height:28px;font-size:.8rem;padding:.2rem .75rem'},t('Claim'));
+  const isUsable=r.usable&&!holdActive&&(cs?cs.phase!=='sending':true);
+  claimBtn.disabled=!isUsable;
+
+  const triggerClaim=async(reqId)=>{
+    const rid=reqId||(crypto.randomUUID?crypto.randomUUID():('req-'+Date.now()+'-'+Math.random().toString(36).slice(2)));
+    claimState.set(key,{
+      phase:'sending',
+      requestId:rid,
+      left:r.left,
+    });
+    if(activeQuotaRender)activeQuotaRender();
+
+    try{
+      const res=await api('/quota/'+encodeURIComponent(conn.connectionId)+'/reset',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({resetId:r.id,requestId:rid}),
+      });
+
+      // Claim answer arrived: record per account the number of the last /quota request already sent
+      accountLastQuotaRequest.set(conn.connectionId,quotaRequestCounter);
+
+      claimState.set(key,{
+        phase:'done',
+        requestId:rid,
+        outcome:res.outcome,
+        message:res.message,
+        left:r.left,
+        resetAt:res.outcome==='reset'?Date.now():undefined,
+      });
+
+      if(res.quota&&activeQuotaUpdateAccount){
+        activeQuotaUpdateAccount(res.quota);
+      }
+    }catch(err){
+      if(err.status===409&&err.body&&(err.body.error==='unknown_pending'||err.body.requestId)){
+        const pendingRid=err.body.requestId||rid;
+        claimState.set(key,{
+          phase:'done',
+          requestId:pendingRid,
+          outcome:'unknown',
+          message:err.body.error||err.message,
+          left:r.left,
+        });
+      }else if(!err.status||!err.body){
+        claimState.set(key,{
+          phase:'done',
+          requestId:rid,
+          outcome:'unknown',
+          message:err.message||'network error',
+          left:r.left,
+        });
+      }else{
+        const errText=(err.body&&(err.body.error||err.body.message))||err.message;
+        claimState.set(key,{
+          phase:'done',
+          requestId:rid,
+          outcome:errText,
+          message:'',
+          left:r.left,
+        });
+      }
+    }finally{
+      if(activeQuotaRender)activeQuotaRender();
+    }
+  };
+
+  claimBtn.onclick=()=>{
+    showConfirmClaimDialog(conn,r,()=>triggerClaim());
+  };
+
+  const actionBox=el('div',{style:'display:flex;align-items:center;gap:.5rem;margin-top:.4rem;flex-wrap:wrap'});
+  actionBox.append(claimBtn);
+
+  if(!r.usable){
+    if(!cs||cs.phase!=='done'||!cs.outcome){
+      const blockedReason=r.blocked?t(r.blocked):t('Not available');
+      actionBox.append(el('span',{class:'faint small',text:blockedReason}));
+    }
+  }else if(holdActive){
+    actionBox.append(el('span',{class:'faint small',text:t('just_reset')}));
+  }
+
+  // Outcome display
+  if(cs&&cs.phase==='sending'){
+    actionBox.append(el('span',{class:'faint small',text:t('Claiming…')}));
+  }else if(cs&&cs.phase==='done'){
+    if(cs.outcome==='reset'){
+      actionBox.append(el('span',{style:'color:var(--ok);font-size:.82rem',text:t('Reset claimed')}));
+    }else if(cs.outcome==='likely_spent'){
+      actionBox.append(el('div',{class:'faint small',style:'width:100%;margin-top:.25rem',text:t('The provider shows fewer resets than before. The earlier claim probably went through.')}));
+    }else if(cs.outcome==='unknown'){
+      const unknownBox=el('div',{style:'display:flex;align-items:center;gap:.4rem;width:100%;margin-top:.25rem;flex-wrap:wrap'});
+      unknownBox.append(el('span',{style:'color:var(--warn);font-size:.82rem',text:t('Result unknown')}));
+      const checkBtn=el('button',{class:'ghost',type:'button',style:'min-height:24px;font-size:.75rem'},t('Check again'));
+      checkBtn.onclick=()=>onRequestQuota(true);
+      const tryBtn=el('button',{class:'ghost',type:'button',style:'min-height:24px;font-size:.75rem'},t('Try again'));
+      tryBtn.onclick=()=>triggerClaim(cs.requestId);
+      unknownBox.append(checkBtn,tryBtn);
+      actionBox.append(unknownBox);
+    }else if(cs.outcome){
+      actionBox.append(el('span',{class:'faint small',text:t(cs.outcome)+(cs.message?' ('+cs.message+')':'')}));
+    }
+  }
+
+  return el('div',{class:'qreset-row',style:'padding:.6rem 0;border-top:1px solid var(--border);display:grid;gap:.25rem'},
+    headerRow,
+    ...details,
+    actionBox);
+}
+
+function quotaResetsBlock(conn,onRequestQuota){
+  const resets=conn.resets||[];
+  const prefix=conn.connectionId+':';
+  const claimEntries=[...claimState.entries()].filter(([k])=>k.startsWith(prefix));
+  if(!resets.length){
+    if(!claimEntries.length)return null;
+    return el('div',{style:'margin-top:.9rem;padding-top:.7rem;border-top:1px solid var(--border)'},
+      el('div',{style:'font-weight:600;font-size:.88rem;margin-bottom:.4rem',text:t('Resets')}),
+      claimEntries.map(([key,cs])=>{
+        const rid=key.slice(prefix.length);
+        const kind=rid==='weekly'?'weekly':(rid.startsWith('grant:')?'grant':'credit');
+        const title=rid==='weekly'?'Weekly reset':rid;
+        const r={id:rid,kind,title,usable:false,left:cs.left||0,total:cs.left||0};
+        return quotaResetRow(conn,r,onRequestQuota);
+      }));
+  }
+  return el('div',{style:'margin-top:.9rem;padding-top:.7rem;border-top:1px solid var(--border)'},
+    el('div',{style:'font-weight:600;font-size:.88rem;margin-bottom:.4rem',text:t('Resets')}),
+    resets.map(r=>quotaResetRow(conn,r,onRequestQuota)));
+}
+
 async function viewQuota(v,prov){
   const provs=[...new Set(S.accounts.filter(a=>a.isActive).map(a=>a.provider))].filter(wired).sort((a,b)=>pname(a).localeCompare(pname(b)));
   const sel=el('select',{style:'width:auto','aria-label':'Provider'},el('option',{value:'',text:'All providers'}),provs.map(p=>el('option',{value:p,text:pname(p)})));
@@ -2027,15 +2244,27 @@ async function viewQuota(v,prov){
   let accounts=[],editing=false,draft=null;
   const render=()=>{
     const view=editing?draft:quotaView;
-    // Only accounts with quota data; in edit mode every window is offered.
-    const list=accounts.filter(q=>q.windows.length&&(editing||shownWindows(q,view).length));
+    // Only accounts matching the predicate: windows (shown in view or editing), resets, or active claim
+    const list=accounts.filter(q=>{
+      const wins=q.windows||[];
+      const rsts=q.resets||[];
+      const prefix=q.connectionId+':';
+      const hasClaim=[...claimState.keys()].some(k=>k.startsWith(prefix));
+      return (wins.length&&(editing||shownWindows(q,view).length))||rsts.length||hasClaim;
+    });
     if(!list.length){grid.replaceChildren(el('div',{class:'card empty',text:editing?'No quota data to choose from.':'Nothing to show. Use Edit to choose what to show.'}));return}
     grid.replaceChildren(...list.map(q=>{
+      q.windows=q.windows||[];
+      q.resets=q.resets||[];
       const head=el('div',{class:'cardh'},avatar(q.provider,true),
         el('div',{class:'grow',style:'min-width:0'},el('div',{style:'font-weight:600',text:pname(q.provider)}),
           el('div',{class:'faint small',style:'overflow:hidden;text-overflow:ellipsis;white-space:nowrap',text:(q.label||'')+(q.plan?' · '+q.plan:'')})),
         q.source==='headers'?el('span',{class:'badge',title:t('From the rate-limit headers of the last answer, {0}',q.fetchedAt)},'last answer'):null);
-      if(!editing)return el('div',{class:'card'},head,el('div',{style:'padding:1rem 1.25rem;display:grid;gap:.9rem'},shownWindows(q,view).map(w=>quotaWindow({...w,name:w.name.replace(/^model /,'')}))));
+      if(!editing){
+        const winsBox=shownWindows(q,view).map(w=>quotaWindow({...w,name:w.name.replace(/^model /,'')}));
+        const resetsBox=quotaResetsBlock(q,force=>load(force,q.connectionId));
+        return el('div',{class:'card'},head,el('div',{style:'padding:1rem 1.25rem;display:grid;gap:.9rem'},winsBox,resetsBox));
+      }
       // Edit: tick the windows to show for this provider.
       const cur=new Set(shownWindows(q,view).map(w=>w.name));
       const set=names=>{draft[q.provider]=names;render()};
@@ -2058,11 +2287,48 @@ async function viewQuota(v,prov){
         models.length?el('div',{style:'display:grid;gap:.35rem'},models.map(box)):null));
     }));
   };
-  const load=async force=>{
+  activeQuotaRender=render;
+  activeQuotaUpdateAccount=(acc)=>{
+    const idx=accounts.findIndex(a=>a.connectionId===acc.connectionId);
+    if(idx>=0)accounts[idx]=acc;
+    else accounts.push(acc);
+  };
+
+  const load=async(force,onlyConn)=>{
     refresh.disabled=true;
+    const reqNum=++quotaRequestCounter;
     try{
-      const d=await api('/quota?'+(prov?'provider='+encodeURIComponent(prov)+'&':'')+(force?'refresh=1':''));
-      accounts=d.accounts;render();
+      let url='/quota?';
+      if(onlyConn)url+='connection='+encodeURIComponent(onlyConn)+'&';
+      else if(prov)url+='provider='+encodeURIComponent(prov)+'&';
+      if(force)url+='refresh=1';
+
+      const d=await api(url);
+      const incoming=d.accounts||[];
+
+      if(onlyConn){
+        // Single connection update
+        const acc=incoming.find(a=>a.connectionId===onlyConn);
+        if(acc){
+          const lastReq=accountLastQuotaRequest.get(onlyConn)||0;
+          if(reqNum>lastReq){
+            const idx=accounts.findIndex(a=>a.connectionId===onlyConn);
+            if(idx>=0)accounts[idx]=acc;
+            else accounts.push(acc);
+          }
+        }
+      }else{
+        // Multi accounts update: filter each by its accountLastQuotaRequest
+        incoming.forEach(acc=>{
+          const lastReq=accountLastQuotaRequest.get(acc.connectionId)||0;
+          if(reqNum>lastReq){
+            const idx=accounts.findIndex(a=>a.connectionId===acc.connectionId);
+            if(idx>=0)accounts[idx]=acc;
+            else accounts.push(acc);
+          }
+        });
+      }
+      render();
     }catch(e){grid.replaceChildren(el('div',{class:'card empty',text:e.message}))}
     finally{refresh.disabled=false}
   };

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -182,6 +183,9 @@ type tokenAnswer struct {
 	Account      struct {
 		Email string `json:"email_address"`
 	} `json:"account"`
+	Organization struct {
+		UUID string `json:"uuid"`
+	} `json:"organization"`
 	Error     string `json:"error"`
 	ErrorDesc string `json:"error_description"`
 }
@@ -279,7 +283,16 @@ func (a *api) exchangeLogin(ctx context.Context, p store.PendingLogin, code stri
 	if p.Label != "" {
 		label = p.Label
 	}
-	return a.saveOAuthAccount(p.Provider, label, t, spec.tokenURL, spec.clientID, secret, meta)
+	c, err := a.saveOAuthAccount(p.Provider, label, t, spec.tokenURL, spec.clientID, secret, meta)
+	if err != nil {
+		return store.Connection{}, err
+	}
+	if p.Provider == "claude" && isUUID(t.Organization.UUID) {
+		if err := a.store.SetMeta(c.ID, map[string]string{"claudeOrgId": t.Organization.UUID}); err != nil {
+			log.Printf("store claudeOrgId for %s: %v", c.ID, err)
+		}
+	}
+	return c, nil
 }
 
 func doToken(req *http.Request) (tokenAnswer, error) {

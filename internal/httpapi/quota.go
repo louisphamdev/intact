@@ -2,11 +2,13 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/louisphamdev/intact/internal/store"
@@ -31,15 +33,30 @@ type AccountQuota struct {
 	Plan         string        `json:"plan,omitempty"`
 	Source       string        `json:"source"` // "api": read from the provider; "headers": from the last answer
 	Windows      []QuotaWindow `json:"windows"`
+	Resets       []QuotaReset  `json:"resets"`
+	ResetsError  string        `json:"resetsError,omitempty"`
 	Error        string        `json:"error,omitempty"`
 	FetchedAt    string        `json:"fetchedAt"`
+
+	// Block-present flags for Claude fresh read validation in claimReset.
+	HasJuniperTide bool `json:"-"`
+	HasCedarEmber  bool `json:"-"`
 }
 
 const quotaTTL = time.Minute
 
+type quotaFlight struct {
+	seq  uint64
+	done chan struct{}
+	res  AccountQuota
+}
+
 type quotaCache struct {
-	mu sync.Mutex
-	m  map[string]AccountQuota
+	mu        sync.Mutex
+	seq       atomic.Uint64
+	m         map[string]AccountQuota
+	highWater map[string]uint64
+	flights   map[string]*quotaFlight
 }
 
 // quotaFetchers read an account's quota from the provider's own endpoint.
@@ -49,81 +66,251 @@ var quotaFetchers = map[string]func(a *api, ctx context.Context, c store.Connect
 // endpoint, otherwise from the rate-limit headers of its last answer.
 func (a *api) quotaFor(ctx context.Context, c store.Connection, refresh bool) AccountQuota {
 	a.quota.mu.Lock()
+	if a.quota.m == nil {
+		a.quota.m = map[string]AccountQuota{}
+	}
+	if a.quota.highWater == nil {
+		a.quota.highWater = map[string]uint64{}
+	}
+	if a.quota.flights == nil {
+		a.quota.flights = map[string]*quotaFlight{}
+	}
+
 	q, hit := a.quota.m[c.ID]
-	a.quota.mu.Unlock()
 	if hit && !refresh {
 		if t, err := time.Parse(time.RFC3339, q.FetchedAt); err == nil && time.Since(t) < quotaTTL {
+			a.quota.mu.Unlock()
 			return q
 		}
 	}
-	q = AccountQuota{ConnectionID: c.ID, Provider: c.Provider, Label: c.Label, Windows: []QuotaWindow{},
-		FetchedAt: time.Now().UTC().Format(time.RFC3339)}
-	if fetch, ok := quotaFetchers[c.Provider]; ok {
-		token, err := a.secretFor(ctx, c.ID)
-		if err == nil {
-			var got AccountQuota
-			if got, err = fetch(a, ctx, c, token); err == nil {
-				got.ConnectionID, got.Provider, got.Label, got.Source, got.FetchedAt = c.ID, c.Provider, c.Label, "api", q.FetchedAt
-				if got.Windows == nil {
-					got.Windows = []QuotaWindow{}
+
+	hw := a.quota.highWater[c.ID]
+	if !refresh {
+		if f := a.quota.flights[c.ID]; f != nil && f.seq > hw {
+			done := f.done
+			a.quota.mu.Unlock()
+			select {
+			case <-done:
+				a.quota.mu.Lock()
+				cached, ok := a.quota.m[c.ID]
+				a.quota.mu.Unlock()
+				if ok {
+					return cached
 				}
-				q = got
+				return f.res
+			case <-ctx.Done():
+				return AccountQuota{
+					ConnectionID: c.ID, Provider: c.Provider, Label: c.Label,
+					Windows: []QuotaWindow{}, Resets: []QuotaReset{},
+					Error:     ctx.Err().Error(),
+					FetchedAt: time.Now().UTC().Format(time.RFC3339),
+				}
 			}
-		}
-		if err != nil {
-			q.Error = err.Error()
 		}
 	}
-	if len(q.Windows) == 0 {
-		if snap, ok := a.rate.get(c.ID); ok {
-			q.Windows = windowsFromHeaders(snap.Headers)
-			q.Source = "headers"
-			if len(q.Windows) > 0 {
-				q.Error = ""
+
+	seq := a.quota.seq.Add(1)
+	var myFlight *quotaFlight
+	if !refresh {
+		myFlight = &quotaFlight{seq: seq, done: make(chan struct{})}
+		a.quota.flights[c.ID] = myFlight
+	}
+	a.quota.mu.Unlock()
+
+	doFetch := func() AccountQuota {
+		res := AccountQuota{
+			ConnectionID: c.ID, Provider: c.Provider, Label: c.Label,
+			Windows: []QuotaWindow{}, Resets: []QuotaReset{},
+			FetchedAt: time.Now().UTC().Format(time.RFC3339),
+		}
+		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+		defer cancel()
+		if fetch, ok := quotaFetchers[c.Provider]; ok {
+			token, err := a.secretFor(fctx, c.ID)
+			if err == nil {
+				var got AccountQuota
+				if got, err = fetch(a, fctx, c, token); err == nil {
+					got.ConnectionID, got.Provider, got.Label, got.Source, got.FetchedAt = c.ID, c.Provider, c.Label, "api", res.FetchedAt
+					if got.Windows == nil {
+						got.Windows = []QuotaWindow{}
+					}
+					if got.Resets == nil {
+						got.Resets = []QuotaReset{}
+					}
+					res = got
+				}
+			}
+			if err != nil {
+				res.Error = err.Error()
 			}
 		}
+		if len(res.Windows) == 0 {
+			if snap, ok := a.rate.get(c.ID); ok {
+				res.Windows = windowsFromHeaders(snap.Headers)
+				res.Source = "headers"
+				if len(res.Windows) > 0 {
+					res.Error = ""
+				}
+			}
+		}
+		if res.Windows == nil {
+			res.Windows = []QuotaWindow{}
+		}
+		if res.Resets == nil {
+			res.Resets = []QuotaReset{}
+		}
+		return res
+	}
+
+	if refresh {
+		res := doFetch()
+		a.quota.mu.Lock()
+		if seq > a.quota.highWater[c.ID] {
+			a.quota.highWater[c.ID] = seq
+			a.quota.m[c.ID] = res
+		}
+		a.quota.mu.Unlock()
+		return res
+	}
+
+	go func() {
+		res := doFetch()
+		a.quota.mu.Lock()
+		if seq > a.quota.highWater[c.ID] {
+			a.quota.highWater[c.ID] = seq
+			a.quota.m[c.ID] = res
+		}
+		myFlight.res = res
+		close(myFlight.done)
+		if a.quota.flights[c.ID] == myFlight {
+			delete(a.quota.flights, c.ID)
+		}
+		a.quota.mu.Unlock()
+	}()
+
+	select {
+	case <-myFlight.done:
+		a.quota.mu.Lock()
+		cached, ok := a.quota.m[c.ID]
+		a.quota.mu.Unlock()
+		if ok {
+			return cached
+		}
+		return myFlight.res
+	case <-ctx.Done():
+		return AccountQuota{
+			ConnectionID: c.ID, Provider: c.Provider, Label: c.Label,
+			Windows: []QuotaWindow{}, Resets: []QuotaReset{},
+			Error:     ctx.Err().Error(),
+			FetchedAt: time.Now().UTC().Format(time.RFC3339),
+		}
+	}
+}
+
+// freshQuota calls the fetcher directly, no header fallback, no flight,
+// stores through the sequence rule, fills the same fields as quotaFor,
+// 20-second timeout on context.WithoutCancel.
+func (a *api) freshQuota(ctx context.Context, c store.Connection) (AccountQuota, error) {
+	fetch, ok := quotaFetchers[c.Provider]
+	if !ok {
+		return AccountQuota{}, fmt.Errorf("no quota fetcher for provider %q", c.Provider)
+	}
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+	defer cancel()
+	token, err := a.secretFor(fctx, c.ID)
+	if err != nil {
+		return AccountQuota{}, err
+	}
+	seq := a.quota.seq.Add(1)
+	got, err := fetch(a, fctx, c, token)
+	if err != nil {
+		return AccountQuota{}, err
+	}
+	got.ConnectionID = c.ID
+	got.Provider = c.Provider
+	got.Label = c.Label
+	got.Source = "api"
+	got.FetchedAt = time.Now().UTC().Format(time.RFC3339)
+	if got.Windows == nil {
+		got.Windows = []QuotaWindow{}
+	}
+	if got.Resets == nil {
+		got.Resets = []QuotaReset{}
 	}
 	a.quota.mu.Lock()
-	a.quota.m[c.ID] = q
+	if a.quota.m == nil {
+		a.quota.m = map[string]AccountQuota{}
+	}
+	if a.quota.highWater == nil {
+		a.quota.highWater = map[string]uint64{}
+	}
+	if seq > a.quota.highWater[c.ID] {
+		a.quota.highWater[c.ID] = seq
+		a.quota.m[c.ID] = got
+	}
 	a.quota.mu.Unlock()
-	return q
+	return got, nil
+}
+
+// invalidateQuota clears an account's quota cache entry and raises the high-water mark.
+func (a *api) invalidateQuota(connID string) {
+	a.quota.mu.Lock()
+	if a.quota.m != nil {
+		delete(a.quota.m, connID)
+	}
+	if a.quota.highWater == nil {
+		a.quota.highWater = map[string]uint64{}
+	}
+	a.quota.highWater[connID] = a.quota.seq.Add(1)
+	a.quota.mu.Unlock()
 }
 
 // quotaList serves every active account's quota, read in parallel.
-// Query: provider, refresh=1.
-func (a *api) quotaList(w http.ResponseWriter, r *http.Request) {
-	conns, err := a.store.ListConnections()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "cannot read connections")
-		return
-	}
-	want := r.URL.Query().Get("provider")
-	refresh := r.URL.Query().Get("refresh") == "1"
-	var list []store.Connection
-	for _, c := range conns {
-		if _, ok := a.providerFor(c); ok && c.IsActive && (want == "" || c.Provider == want) {
-			list = append(list, c)
+// Query: provider, connection, refresh=1.
+func (a *api) quotaList(allowRefresh bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		conns, err := a.store.ListConnections()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot read connections")
+			return
 		}
-	}
-	out := make([]AccountQuota, len(list))
-	var wg sync.WaitGroup
-	for i, c := range list {
-		wg.Add(1)
-		go func(i int, c store.Connection) {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
-			defer cancel()
-			out[i] = a.quotaFor(ctx, c, refresh)
-		}(i, c)
-	}
-	wg.Wait()
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Provider != out[j].Provider {
-			return out[i].Provider < out[j].Provider
+		wantProvider := r.URL.Query().Get("provider")
+		wantConn := r.URL.Query().Get("connection")
+		refresh := false
+		if allowRefresh && r.URL.Query().Get("refresh") == "1" {
+			sfs := r.Header.Get("Sec-Fetch-Site")
+			if sfs == "" || sfs == "same-origin" {
+				refresh = true
+			}
 		}
-		return out[i].Label < out[j].Label
-	})
-	writeJSON(w, map[string]any{"accounts": out})
+		var list []store.Connection
+		for _, c := range conns {
+			if _, ok := a.providerFor(c); ok && c.IsActive &&
+				(wantProvider == "" || c.Provider == wantProvider) &&
+				(wantConn == "" || c.ID == wantConn) {
+				list = append(list, c)
+			}
+		}
+		out := make([]AccountQuota, len(list))
+		var wg sync.WaitGroup
+		for i, c := range list {
+			wg.Add(1)
+			go func(i int, c store.Connection) {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+				defer cancel()
+				out[i] = a.quotaFor(ctx, c, refresh)
+			}(i, c)
+		}
+		wg.Wait()
+		sort.SliceStable(out, func(i, j int) bool {
+			if out[i].Provider != out[j].Provider {
+				return out[i].Provider < out[j].Provider
+			}
+			return out[i].Label < out[j].Label
+		})
+		writeJSON(w, map[string]any{"accounts": out})
+	}
 }
 
 // windowsFromHeaders reads the rate-limit headers providers send with each

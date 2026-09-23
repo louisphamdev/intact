@@ -6,6 +6,7 @@
 | --- | --- |
 | **token** | An API key or `INTACT_API_TOKEN`, as `Authorization: Bearer <key>` or `x-api-key: <key>` |
 | **admin** | `INTACT_API_TOKEN` or the dashboard session cookie. An API key gets 403. |
+| **trusted** | The session, `INTACT_API_TOKEN`, or an API key marked as trusted. An untrusted key gets 404. |
 | **session** | The dashboard's session cookie, from the TOTP sign-in |
 | **open** | none |
 
@@ -127,6 +128,22 @@ its `scores` per board: `rating`, `rank`, `votes`, `tier`) and `arenaMeta`.
 | `DELETE /api/notify/channels/{id}` (admin) | Delete. |
 | `POST /api/notify/channels/{id}/test` (admin) | Send a test alert. |
 
+### Contracts (token, some trusted)
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/contracts/policy` | Sampling rates per model and the count of changed models and tools. |
+| `GET /api/contracts` | Index per model: contract version hash, last sample time, and open finding count. |
+| `GET /api/contracts/models/{model}` | Learned contract and golden tool contracts. Omits hash and string length. |
+| `GET /api/contracts/traces/{id}` | Status of one trace. Visible to opener or trusted callers. |
+| `POST /api/contracts/traces/{id}/half` | Upload client half. Visible to opener. Second upload returns 409. |
+| `GET /api/contracts/findings` (trusted) | Open or updated findings with evidence. Supports `?status=` and `?since=`. |
+| `GET /api/contracts/fixtures/{traceId}` (trusted) | Reduced halves of one trace with lengths and delta counts. Omits hash. |
+| `POST /api/contracts/findings/{id}/resolve` (trusted) | Resolve a finding with `{"status":"fixed"\|"wontfix","note":"…"}`. |
+| `GET /api/contracts/traces` (trusted) | List recent traces of the day and total dropped trace count. |
+| `GET /api/contracts/signatures` (trusted) | List judged signatures. Supports `?state=proposed`. |
+| `POST /api/contracts/signatures/verdict` (session) | Approve or reject a proposed signature verdict. |
+
 ### Quota and usage
 
 | Method and path | Purpose |
@@ -163,6 +180,8 @@ claude mcp add --transport http intact https://intact.example/mcp \
 | `error_review`, `list_error_verdicts` | The [error review](errors.md#automatic-review). |
 | `list_notify_channels`, `put_notify_channel`, `test_notify_channel`, `delete_notify_channel` | [Alerts](alerts.md). |
 | `drift_review` | The automatic review: state, models, switch, run now. |
+| `list_contracts`, `get_contract` | Learned contracts and index. `get_contract` omits hash and string length. |
+| `list_contract_findings` (trusted) | Open findings and evidence. Untrusted callers get an error. |
 | `get_quota` | Quota of every active account. |
 | `get_usage` | Daily token totals, optionally for one day. |
 
@@ -183,7 +202,7 @@ The dashboard calls these routes. They mirror the management API.
 | `POST /oauth/{provider}/start` | `{"label":"…"}`. Returns the authorize URL and state, or a device code for GitHub. |
 | `POST /oauth/{provider}/finish` | `{"state":"…","input":"<redirect URL, code#state or code>","label":"…"}`. |
 | `POST /oauth/github/poll` | Poll the device flow. |
-| `GET/POST /keys`, `POST /keys/{id}/reveal`, `/active`, `/delete` | API keys. |
+| `GET/POST /keys`, `POST /keys/{id}/reveal`, `/active`, `/trusted`, `/delete` | API keys. `/trusted` sets the trusted caller flag. |
 | `GET/POST /filters`, `POST /filters/{id}/delete` | The blacklist. |
 | `GET /drift/changes`, `POST /drift/ack`, `GET /drift/fields` | Drift. |
 | `GET /errors`, `GET /errors/stats`, `GET /errors/{id}`, `/errors/review`, `/errors/verdicts` | Errors. |

@@ -102,14 +102,26 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply api key schema: %w", err)
 	}
+	if _, err := db.Exec(contractSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply contract schema: %w", err)
+	}
 	if _, err := db.Exec(filterSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply filter schema: %w", err)
 	}
 	st := &Store{DB: db}
+	if err := st.migrateAPIKeys(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate api keys: %w", err)
+	}
 	if err := st.migrateOAuth(); err != nil {
 		db.Close()
 		return nil, err
+	}
+	if err := st.MigrateContract(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate contract: %w", err)
 	}
 	if err := st.seedFilters(); err != nil {
 		db.Close()

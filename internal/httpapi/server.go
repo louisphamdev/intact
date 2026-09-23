@@ -2,11 +2,13 @@
 package httpapi
 
 import (
+	"log"
 	"net/http"
 	"strings"
 	"sync"
 
 	"github.com/louisphamdev/intact/internal/auth"
+	"github.com/louisphamdev/intact/internal/contract"
 	"github.com/louisphamdev/intact/internal/drift"
 	"github.com/louisphamdev/intact/internal/store"
 	"github.com/louisphamdev/intact/internal/web"
@@ -55,6 +57,10 @@ type api struct {
 	claimLocks refreshLocks
 	// claims tracks unknown, hold, and done claim states across connections.
 	claims claimTables
+	// contractMgr manages trace capture and half processing.
+	contractMgr *contract.CaptureManager
+	// consumer processes queued traces for diff, judge, learning and change detection.
+	consumer *contract.Consumer
 }
 
 // New builds the route table with no authentication (loopback use and tests).
@@ -72,14 +78,28 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 
 // newServer builds the api and its routes; tests reach the api through it.
 func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Config) (*api, http.Handler) {
+	contractKey, _ := s.GetContractKey()
+	contractMgr := contract.NewCaptureManager(s, contractKey)
+	judgeAdapter := &contractJudgeAdapter{}
+	judgeMgr := contract.NewJudgeManager(s, judgeAdapter)
+	consumer := contract.NewConsumer(s, judgeMgr, func(model, tool, text string) {
+		log.Printf("contract change alert: model=%s tool=%s %s", model, tool, text)
+	})
+	contractMgr.SetEnqueue(func(traceID string) { consumer.Enqueue(traceID) })
+	consumer.SetReleaseQueueSlot(contractMgr.ReleaseQueueSlot)
+	_ = consumer.StartupRecovery()
 	a := &api{store: s, baseOverride: baseOverride, auth: authCfg, rrNext: map[string]rrCursor{},
 		cat:     catalog{m: map[string]catalogEntry{}, inflight: map[string]*catalogFetch{}},
 		copilot: copilotCache{m: map[string]copilotToken{}},
 		sigs:    sigStore{m: map[string]sigEntry{}}, drift: drift.New(s),
 		rate: rateHeaders{m: map[string]rateSnapshot{}}, quota: quotaCache{m: map[string]AccountQuota{}, highWater: map[string]uint64{}, flights: map[string]*quotaFlight{}},
 		auto: autoState{running: map[string]*autoRun{}}, login: newLoginGuard(),
-		claims: claimTables{unknown: map[string]claimUnknownEntry{}, hold: map[string]claimHoldEntry{}, done: map[string]claimDoneEntry{}},
+		claims:      claimTables{unknown: map[string]claimUnknownEntry{}, hold: map[string]claimHoldEntry{}, done: map[string]claimDoneEntry{}},
+		contractMgr: contractMgr,
+		consumer:    consumer,
 	}
+	judgeAdapter.a = a
+	consumer.Start()
 	go a.autoTestLoop()
 	a.loadDefs()
 	a.migrateCustomEndpoints()
@@ -87,6 +107,7 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	go a.arenaLoop()
 	go a.reviewLoop()
 	go a.errorReviewLoop()
+	go a.contractPruneLoop()
 	mux := http.NewServeMux()
 	// One base URL: the model in the body picks the provider and its accounts.
 	mux.HandleFunc("GET /v1/models", a.requireToken(a.models))
@@ -197,6 +218,7 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	mux.HandleFunc("POST /keys", a.requireSession(a.createKey))
 	mux.HandleFunc("POST /keys/{id}/reveal", a.requireSession(a.revealKey))
 	mux.HandleFunc("POST /keys/{id}/active", a.requireSession(a.setKeyActive))
+	mux.HandleFunc("POST /keys/{id}/trusted", a.requireSession(a.setKeyTrusted))
 	mux.HandleFunc("POST /keys/{id}/delete", a.requireSession(a.deleteKey))
 	mux.HandleFunc("GET /filters", a.requireSession(a.listFilters))
 	mux.HandleFunc("POST /filters", a.requireSession(a.saveFilter))
@@ -205,10 +227,37 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	mux.HandleFunc("GET /login", a.loginForm)
 	mux.HandleFunc("POST /login", a.loginSubmit)
 	mux.HandleFunc("POST /logout", a.logout)
+	// Contract Lab routes
+	mux.HandleFunc("POST /api/contracts/traces/{id}/half", a.requireToken(a.contractTraceHalf))
+	mux.HandleFunc("GET /api/contracts/traces/{id}", a.requireToken(a.contractTraceStatus))
+	mux.HandleFunc("GET /api/contracts/policy", a.requireToken(a.contractPolicy))
+	mux.HandleFunc("GET /api/contracts", a.requireToken(a.contractIndex))
+	mux.HandleFunc("GET /api/contracts/models/{model}", a.requireToken(a.contractModelDetails))
+	mux.HandleFunc("GET /api/contracts/findings", a.requireToken(a.contractFindings))
+	mux.HandleFunc("GET /api/contracts/fixtures/{traceId}", a.requireToken(a.contractFixture))
+	mux.HandleFunc("POST /api/contracts/findings/{id}/resolve", a.requireToken(a.contractResolveFinding))
+	mux.HandleFunc("GET /api/contracts/traces", a.requireToken(a.contractTracesList))
+	mux.HandleFunc("GET /api/contracts/findings/{id}/history", a.requireToken(a.contractFindingHistory))
+	mux.HandleFunc("GET /api/contracts/signatures", a.requireToken(a.contractSignaturesList))
+	mux.HandleFunc("POST /api/contracts/signatures/verdict", a.requireAdmin(a.contractReviewSignature))
 	// "{$}" matches the root and nothing else. A bare "/" would be a catch-all
 	// and would answer every mistyped path with the dashboard.
 	mux.HandleFunc("GET /{$}", a.requireSession(a.dashboard))
 	return a, a.guardRequest(mux)
+}
+
+// isCallerTrusted determines whether the request principal is trusted for contract writes/read gates.
+func (a *api) isCallerTrusted(p principal) bool {
+	if p.name == "intact-review" {
+		return false
+	}
+	if p.admin {
+		return true
+	}
+	if p.keyID != "" {
+		return a.store.IsKeyTrusted(p.keyID)
+	}
+	return false
 }
 
 // requireSession lets a request through when auth is off or the session cookie
@@ -243,6 +292,10 @@ func (a *api) requireToken(next http.HandlerFunc) http.HandlerFunc {
 		}
 		if id, name, ok := a.store.APIKeyByToken(tok); ok {
 			next(w, withPrincipal(r, principal{keyID: id, name: name}))
+			return
+		}
+		if ck, err := r.Cookie(sessionCookie); err == nil && a.auth != nil && a.auth.ValidSession(ck.Value) {
+			next(w, withPrincipal(r, principal{admin: true, name: "session"}))
 			return
 		}
 		if a.auth == nil {

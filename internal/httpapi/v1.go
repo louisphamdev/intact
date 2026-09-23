@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/louisphamdev/intact/internal/contract"
 	"github.com/louisphamdev/intact/internal/drift"
 	"github.com/louisphamdev/intact/internal/filter"
 	"github.com/louisphamdev/intact/internal/provider"
@@ -92,6 +93,38 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prov, upstreamModel := a.splitModel(model)
+
+	traceHeader := r.Header.Get("X-Intact-Trace")
+	r.Header.Del("X-Intact-Trace")
+
+	p := principalOf(r)
+	var cap *contract.Capture
+	if p.name != "intact-review" && a.contractMgr != nil && (p.admin || p.keyID != "") {
+		isTrusted := a.isCallerTrusted(p)
+		if traceHeader != "" {
+			if contract.IsValidTraceID(traceHeader) && contract.IsValidModelID(model) {
+				if c, ok := a.contractMgr.ClaimTraced(traceHeader, p.keyID, isTrusted, model, prov, r.PathValue("path")); ok {
+					cap = c
+					cap.WriteReq(original)
+				}
+			}
+		} else if isTrusted {
+			userAgent := r.Header.Get("User-Agent")
+			if c, ok := a.contractMgr.ClaimGolden(p.keyID, isTrusted, prov, userAgent, r.PathValue("path")); ok {
+				cap = c
+				cap.WriteReq(original)
+			}
+		}
+	}
+	if cap != nil {
+		defer func() {
+			if rec := recover(); rec != nil {
+				cap.ReleaseOnPanic()
+				panic(rec)
+			}
+		}()
+	}
+
 	var targets []store.Connection
 	if prov != "" {
 		// Check the off switch against the model and its variant base. Using
@@ -100,12 +133,18 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		off := a.store.InactiveModels(prov)
 		vbase, _ := splitVariant(upstreamModel)
 		if (off[upstreamModel] || off[vbase]) && r.Context().Value(modelTestKey{}) == nil {
+			if cap != nil {
+				cap.ReleaseOnAbort()
+			}
 			writeError(w, http.StatusForbidden, "this model is switched off in intact")
 			return
 		}
 		targets = a.activeConnections(prov)
 		if upstreamModel != model {
 			if body, ok = setModel(body, upstreamModel); !ok {
+				if cap != nil {
+					cap.ReleaseOnAbort()
+				}
 				writeError(w, http.StatusBadRequest, "cannot rewrite the model")
 				return
 			}
@@ -127,6 +166,9 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(targets) == 0 {
+		if cap != nil {
+			cap.ReleaseOnAbort()
+		}
 		writeError(w, http.StatusNotFound, "no active account serves this model")
 		return
 	}
@@ -136,11 +178,14 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		a.drift.ObserveFrom(drift.Request, targets[0].Provider, clientOf(r), r.PathValue("path"), original, false)
 	}
 	if r.PathValue("path") == "messages/count_tokens" && !a.anyAnthropic(targets) {
+		if cap != nil {
+			cap.ReleaseOnAbort()
+		}
 		countTokensEstimate(w, body)
 		return
 	}
 	targets, start := a.startFor(model, targets)
-	a.failover(w, r, body, targets, start)
+	a.failover(w, r, body, targets, start, cap)
 }
 
 // splitModel reads a "<provider>/<model>" prefix. It reports the provider only
@@ -530,7 +575,7 @@ func bodyModel(body []byte) (string, bool) {
 // relayed whatever it is, so the caller sees the real upstream error. An OAuth
 // account that answers 401 is refreshed and retried once, which recovers a token
 // the provider revoked before its recorded expiry.
-func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targets []store.Connection, start int) {
+func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targets []store.Connection, start int, cap *contract.Capture) {
 	client := clientShape(r.PathValue("path"))
 	stream := translate.Stream(body)
 	translated := map[string][]byte{}
@@ -609,6 +654,9 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 				log.Printf("connection %s: %v", conn.ID, skip.err)
 				continue
 			}
+			if cap != nil {
+				cap.ReleaseOnAbort()
+			}
 			writeError(w, http.StatusBadRequest, "cannot translate the request: "+err.Error())
 			return
 		}
@@ -675,11 +723,14 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			w.Header().Set("X-Intact-Model", at.model)
 		}
 		if to != "" {
-			a.relayVia(w, resp, conn.ID, to, via, stream, conn.Provider, path)
+			a.relayVia(w, resp, conn.ID, to, via, stream, conn.Provider, path, cap)
 		} else {
-			a.relayObserved(w, resp, conn.ID, conn.Provider, path)
+			a.relayObserved(w, resp, conn.ID, conn.Provider, path, cap)
 		}
 		return
+	}
+	if cap != nil {
+		cap.ReleaseOnAbort()
 	}
 	if tried == 0 {
 		writeError(w, http.StatusInternalServerError, "no usable account")

@@ -90,9 +90,24 @@ Keys are created under **Endpoint → API keys**:
 - A key looks like `sk-intact-…`.
 - It is shown in full once. After that, **Reveal** shows it again.
 - It can be switched off or deleted at any time.
+- A key has a `trusted` flag (default false). Only the session can change this flag.
 
 `INTACT_API_TOKEN` in the environment is the master token. It is not shown in
 the dashboard, and it reaches every route.
+
+## Contract Lab storage and trust
+
+intact never stores raw prompt text or answer text.
+Every payload is reduced to structural shape records.
+Strings keep only their byte length and a 12-byte HMAC-SHA256 hash.
+The server generates the HMAC secret on first start and keeps it in the database.
+Known enum values on an allowlist keep their string value.
+Object keys that contain special characters become `{*}`.
+
+Public routes and untrusted callers cannot read hashes or string lengths.
+Only trusted traces can write shared learned contracts, trigger judge evaluations, or open findings.
+A trusted caller is the session, the master token, or an API key marked as trusted.
+When an operator disables the trusted flag on a key, all open traces for that key move to `revoked`.
 
 ## What a dashboard key cannot do
 

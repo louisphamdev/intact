@@ -20,22 +20,26 @@ const (
 	maxPaths = 1500
 )
 
-// dynamicParents hold keys that are names chosen by a client or a provider
+// DynamicParents hold keys that are names chosen by a client or a provider
 // (tool parameters, question names, message ids), not fields of the API.
-var dynamicParents = map[string]bool{
+var DynamicParents = map[string]bool{
 	"properties": true, "patternProperties": true, "$defs": true, "definitions": true,
 	"answers": true, "criteria": true, "legend": true, "probabilities": true,
 }
 
-// dataParents hold values chosen by a user or a tool (a tool call's
+var dynamicParents = DynamicParents
+
+// DataParents hold values chosen by a user or a tool (a tool call's
 // arguments, metadata), not structure of the API: their keys collapse to "{*}"
 // and nothing under them is learned but each value's type. A tool schema's
 // "properties" is not one of them: schema keywords under it are what the
 // blacklist acts on.
-var dataParents = map[string]bool{
+var DataParents = map[string]bool{
 	"args": true, "arguments": true, "metadata": true, "client_metadata": true,
 	"extra_body": true, "headers": true,
 }
+
+var dataParents = DataParents
 
 // A generated id is a hex blob, a name with three or more digits, or the
 // "prefix_random" shape. The last one also describes ordinary API field names
@@ -54,6 +58,16 @@ func generatedID(k string) bool {
 		return true
 	}
 	return idPrefixed.MatchString(k) && !realFieldName(k)
+}
+
+// IDLike reports whether an object key is a generated identifier or dynamic name.
+func IDLike(k string) bool {
+	return generatedID(k)
+}
+
+// WideObject reports whether an object is wider than the API threshold (96 keys).
+func WideObject(n int) bool {
+	return n > 96
 }
 
 // realFieldName reports whether a key reads as a documented snake_case field:
@@ -151,7 +165,7 @@ func walk(v any, path, parentKey string, depth int, out map[string]string) {
 		}
 		// A very wide object is a map of names, not a record of fields (a
 		// Responses object has about 40 fields, so the bar sits well above).
-		dynamic := dynamicParents[parentKey] || len(n) > 96
+		dynamic := dynamicParents[parentKey] || WideObject(len(n))
 		for k, c := range n {
 			seg := k
 			if dynamic || generatedID(k) {

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/louisphamdev/intact/internal/contract"
 	"github.com/louisphamdev/intact/internal/drift"
 	"github.com/louisphamdev/intact/internal/filter"
 	"github.com/louisphamdev/intact/internal/provider"
@@ -63,7 +64,7 @@ func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, path
 	for k, vs := range r.Header {
 		// Authorization and X-Api-Key carry intact's own token, which must never
 		// reach a provider; the account's credential replaces them below.
-		if hopByHop[k] || k == "Authorization" || k == "X-Api-Key" || k == "Host" || k == "Accept-Encoding" {
+		if hopByHop[k] || k == "Authorization" || k == "X-Api-Key" || k == "Host" || k == "Accept-Encoding" || strings.EqualFold(k, "X-Intact-Trace") {
 			continue
 		}
 		for _, v := range vs {
@@ -104,7 +105,7 @@ func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, path
 }
 
 // relayObserved relays a passthrough answer and shows it to the drift observer.
-func (a *api) relayObserved(w http.ResponseWriter, resp *http.Response, connID, provider, path string) {
+func (a *api) relayObserved(w http.ResponseWriter, resp *http.Response, connID, provider, path string, cap *contract.Capture) {
 	a.rate.capture(connID, resp.Header)
 	for k, vs := range resp.Header {
 		if hopByHop[k] {
@@ -115,7 +116,12 @@ func (a *api) relayObserved(w http.ResponseWriter, resp *http.Response, connID, 
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	tapped := streamBody(w, resp)
+	tapped, clientErr, upstreamErr := streamBody(w, resp, cap)
+	if cap != nil {
+		close(cap.ProducerDone)
+		isSSE := isEventStream(resp, tapped)
+		_ = cap.Seal(isSSE, clientErr, upstreamErr)
+	}
 	a.recordUsage(connID, tapped, resp.Header.Get("Content-Encoding"))
 	if resp.StatusCode < 300 && resp.Header.Get("Content-Encoding") == "" && watched(provider) {
 		a.drift.Observe(drift.Response, provider, path, tapped, isEventStream(resp, tapped))
@@ -177,15 +183,20 @@ func gunzip(b []byte) ([]byte, error) {
 // It returns a bounded copy of the body so the usage counter can be read without
 // a second upstream call. The tap only reads; the caller's bytes are written
 // first and are never altered by it.
-func streamBody(w http.ResponseWriter, resp *http.Response) []byte {
+func streamBody(w http.ResponseWriter, resp *http.Response, cap *contract.Capture) ([]byte, error, error) {
 	rc := http.NewResponseController(w)
 	tap := &respTap{headLimit: usageTapHeadLimit, tailLimit: usageTapTailLimit}
 	buf := make([]byte, 32*1024)
+	var clientErr, upstreamErr error
 	for {
 		n, readErr := resp.Body.Read(buf)
 		if n > 0 {
+			if cap != nil {
+				cap.WriteResp(buf[:n])
+			}
 			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-				return tap.bytes()
+				clientErr = writeErr
+				return tap.bytes(), clientErr, upstreamErr
 			}
 			tap.write(buf[:n])
 			// A flush failure only means this writer cannot flush; keep copying.
@@ -195,9 +206,10 @@ func streamBody(w http.ResponseWriter, resp *http.Response) []byte {
 			if !errors.Is(readErr, io.EOF) {
 				// A stream cut in the middle still reaches the caller as a 200
 				// with a short body, so only this line says why it stopped.
+				upstreamErr = readErr
 				log.Printf("upstream stream ended early: %v", readErr)
 			}
-			return tap.bytes()
+			return tap.bytes(), clientErr, upstreamErr
 		}
 	}
 }

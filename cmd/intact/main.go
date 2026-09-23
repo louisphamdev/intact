@@ -16,7 +16,41 @@ import (
 	"github.com/louisphamdev/intact/internal/store"
 )
 
+func runContractReset(args []string) error {
+	resetFlags := flag.NewFlagSet("contract-reset", flag.ContinueOnError)
+	dbPath := resetFlags.String("db", "intact.db", "path to the database file")
+	keyID := resetFlags.String("key", "", "key id to reset")
+	reducerVer := resetFlags.Int("reducer", 0, "reducer version to reset")
+	if err := resetFlags.Parse(args); err != nil {
+		return err
+	}
+	if *keyID != "" && *reducerVer > 0 {
+		return errors.New("cannot specify both --key and --reducer")
+	}
+	if *keyID == "" && *reducerVer <= 0 {
+		return errors.New("must specify either --key or --reducer")
+	}
+	s, err := store.Open(*dbPath)
+	if err != nil {
+		return fmt.Errorf("open store: %w", err)
+	}
+	defer s.Close()
+
+	if err := s.ResetContract(*keyID, *reducerVer); err != nil {
+		return fmt.Errorf("contract-reset: %w", err)
+	}
+	fmt.Printf("contract-reset complete (key=%q reducer=%d)\n", *keyID, *reducerVer)
+	return nil
+}
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "contract-reset" {
+		if err := runContractReset(os.Args[2:]); err != nil {
+			log.Fatalf("contract-reset: %v", err)
+		}
+		return
+	}
+
 	addr := flag.String("addr", "127.0.0.1:20130", "listen address")
 	dbPath := flag.String("db", "intact.db", "path to the database file")
 	enroll := flag.Bool("enroll", false, "print a new TOTP secret and otpauth URI, then exit")

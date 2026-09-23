@@ -268,6 +268,7 @@
   <a href="#/providers" data-nav="providers"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/></svg>Providers<span class="ct" id="ctProv"></span></a>
   <a href="#/blacklist" data-nav="blacklist"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>Blacklist<span class="ct" id="ctFilter"></span></a>
   <a href="#/drift" data-nav="drift"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Drift<span class="ct" id="ctDrift"></span></a>
+  <a href="#/contracts" data-nav="contracts"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="m9 15 2 2 4-4"/></svg>Contracts<span class="ct" id="ctContracts"></span></a>
   <a href="#/errors" data-nav="errors"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 2.5 20h19z"/><path d="M12 10v4M12 17.2v.3"/></svg>Errors</a>
   <a href="#/alerts" data-nav="alerts"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg>Alerts</a>
   <a href="#/docs" data-nav="docs"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h7"/></svg>Docs</a>
@@ -332,6 +333,15 @@
     <div class="mh"><strong id="kTitle">Create API key</strong><button class="icon" type="button" data-close aria-label="Close">✕</button></div>
     <div class="mb" id="kBody"></div>
     <div class="mf" id="kFoot"></div>
+  </div>
+</div>
+
+<!-- resolve finding -->
+<div id="cModal" class="overlay" hidden>
+  <div class="modal sm" role="dialog" aria-modal="true" aria-labelledby="cTitle">
+    <div class="mh"><strong id="cTitle">Resolve finding</strong><button class="icon" type="button" data-close aria-label="Close">✕</button></div>
+    <div class="mb" id="cBody"></div>
+    <div class="mf" id="cFoot"></div>
   </div>
 </div>
 
@@ -693,7 +703,7 @@ document.addEventListener('keydown',e=>{
 
 // ---- data
 async function load(){
-  const [a,u,p,f,k,d]=await Promise.allSettled([api('/accounts'),api('/usage'),api('/providers'),api('/filters'),api('/keys'),api('/drift/changes?limit=500')]);
+  const [a,u,p,f,k,d,co]=await Promise.allSettled([api('/accounts'),api('/usage'),api('/providers'),api('/filters'),api('/keys'),api('/drift/changes?limit=500'),api('/api/contracts')]);
   S.drift=d.status==='fulfilled'?d.value.changes||[]:[];
   const unacked=d.status==='fulfilled'?d.value.unacked:0;
   $('ctDrift').textContent=unacked||'';$('ctDrift').style.color=unacked?'var(--warn)':'';
@@ -704,6 +714,8 @@ async function load(){
   S.usage=u.status==='fulfilled'?u.value.usage||[]:[];
   S.providers=p.status==='fulfilled'?p.value.providers||[]:[];
   $('ctProv').textContent=new Set(S.accounts.map(x=>x.provider)).size||'';
+  const openFindings=co.status==='fulfilled'&&Array.isArray(co.value)?co.value.reduce((acc,c)=>acc+(c.openFindings||0),0):0;
+  if($('ctContracts')){$('ctContracts').textContent=openFindings||'';$('ctContracts').style.color=openFindings?'var(--warn)':'';}
   route();
 }
 // A provider's model list, fetched through its first active account.
@@ -733,6 +745,7 @@ function route(){
   if(page==='blacklist')return viewBlacklist(v,parts[1]);
   if(page==='docs')return viewDocs(v,parts[1]);
   if(page==='drift')return viewDrift(v,parts[1]);
+  if(page==='contracts')return viewContracts(v,parts[1],parts[2]);
   if(page==='errors')return viewErrors(v,parts[1]);
   if(page==='alerts')return viewAlerts(v);
   if(page==='quota')return viewQuota(v,parts[1]);
@@ -1368,6 +1381,8 @@ function keysCard(){
     const code=el('code',{class:'mono',text:k.masked});
     const sw=el('input',{type:'checkbox',checked:k.enabled,'aria-label':t('Enabled: {0}',k.name)});
     sw.onchange=async()=>{try{await postJSON('/keys/'+k.id+'/active',{active:sw.checked});k.enabled=sw.checked;route()}catch(e){sw.checked=!sw.checked;alert(e.message)}};
+    const trSw=el('input',{type:'checkbox',checked:!!k.trusted,'aria-label':t('Trusted: {0}',k.name)});
+    trSw.onchange=async()=>{try{await postJSON('/keys/'+k.id+'/trusted',{trusted:trSw.checked});k.trusted=trSw.checked;route()}catch(e){trSw.checked=!trSw.checked;alert(e.message)}};
     const reveal=async()=>{try{const r=await api('/keys/'+k.id+'/reveal',{method:'POST'});return r.key}catch(e){alert(e.message)}};
     return el('div',{class:'row'+(k.enabled?'':' off')},
       el('div',{class:'who'},el('div',{class:'l',text:k.name}),
@@ -1377,7 +1392,8 @@ function keysCard(){
       el('button',{class:'icon',type:'button',title:'Copy','aria-label':t('Copy {0}',k.name),onclick:async()=>{const f=await reveal();if(f)copy(f,k.name)}},svg(ICON.copy)),
       el('button',{class:'danger',type:'button',onclick:async()=>{if(!confirm(t('Delete key "{0}"? Clients using it stop working.',k.name)))return;
         try{await api('/keys/'+k.id+'/delete',{method:'POST'});toast('Deleted');await load()}catch(e){alert(e.message)}}},svg(ICON.trash),'Delete'),
-      el('label',{class:'switch'},sw,el('span')));
+      el('div',{style:'display:flex;align-items:center;gap:.35rem'},el('label',{class:'switch',title:t('Trusted')},trSw,el('span')),el('span',{class:'small faint',text:t('Trusted')})),
+      el('div',{style:'display:flex;align-items:center;gap:.35rem'},el('label',{class:'switch',title:t('Enabled')},sw,el('span')),el('span',{class:'small faint',text:t('Enabled')})));
   });
   return el('div',{class:'card'},
     el('div',{class:'cardh'},el('h2',{class:'grow'},'API keys'),
@@ -1689,6 +1705,209 @@ function viewDrift(v,tab){
       c.sample?el('details',{},el('summary',{class:'faint small'},'Sample'),el('pre',{text:c.sample})):null);
   })));
 }
+
+// ---- Contracts
+const CONTRACT_TABS=[['index','Index'],['findings','Findings'],['proposed','Proposed verdicts'],['traces','Traces of the day']];
+
+async function viewContracts(v,tab,sub){
+  if(!CONTRACT_TABS.some(t=>t[0]===tab))tab='index';
+  header('Contracts');
+  v.append(el('div',{class:'tabs',role:'tablist'},CONTRACT_TABS.map(([k,n])=>
+    el('a',{role:'tab',href:'#/contracts/'+k,'aria-selected':String(k===tab),class:k===tab?'on':''},n))));
+
+  if(tab==='index'){
+    if(sub){
+      try{
+        const data=await api('/api/contracts/models/'+encodeURIComponent(sub));
+        const head=el('div',{class:'cardh'},
+          el('button',{class:'ghost',type:'button',onclick:()=>{location.hash='#/contracts/index'}},svg(ICON.back),'Back to index'),
+          el('h2',{class:'grow',style:'margin-left:.5rem',text:sub}));
+
+        const learnedRows=(data.learned||[]).map(l=>{
+          return el('tr',{},
+            el('td',{},el('code',{class:'mono',text:l.path})),
+            el('td',{},el('span',{class:'badge',text:l.type})),
+            el('td',{text:l.direction||'—'}),
+            el('td',{text:l.format||'—'}),
+            el('td',{text:l.event||'—'}),
+            el('td',{class:'num',text:String(l.seen||0)}));
+        });
+        const learnedTable=el('table',{},
+          el('thead',{},el('tr',{},el('th',{},'Path'),el('th',{},'Type'),el('th',{},'Direction'),el('th',{},'Format'),el('th',{},'Event'),el('th',{class:'num'},'Seen'))),
+          el('tbody',{},learnedRows.length?learnedRows:el('tr',{},el('td',{colspan:'6',class:'faint'},'No learned paths'))));
+
+        const goldenRows=(data.golden||[]).map(g=>{
+          return el('tr',{},
+            el('td',{},el('span',{class:'badge',text:g.tool})),
+            el('td',{},el('code',{class:'mono',text:g.path})),
+            el('td',{},el('span',{class:'badge',text:g.type})),
+            el('td',{text:g.direction||'—'}),
+            el('td',{class:'num',text:String(g.seen||0)}));
+        });
+        const goldenTable=el('table',{},
+          el('thead',{},el('tr',{},el('th',{},'Tool'),el('th',{},'Path'),el('th',{},'Type'),el('th',{},'Direction'),el('th',{class:'num'},'Seen'))),
+          el('tbody',{},goldenRows.length?goldenRows:el('tr',{},el('td',{colspan:'5',class:'faint'},'No golden paths'))));
+
+        v.append(el('div',{class:'card'},head),
+          el('div',{class:'card'},el('div',{class:'cardh'},el('h3',{},'Learned contract')),el('div',{class:'scroll'},learnedTable)),
+          el('div',{class:'card'},el('div',{class:'cardh'},el('h3',{},'Golden tool contracts')),el('div',{class:'scroll'},goldenTable)));
+      }catch(e){v.append(el('div',{class:'card empty'},el('b',{},e.message)))}
+      return;
+    }
+
+    try{
+      const list=await api('/api/contracts')||[];
+      if(!list.length){v.append(el('div',{class:'card empty'},el('b',{},'No contracts recorded yet')));return}
+      const rows=list.map(c=>{
+        return el('tr',{},
+          el('td',{},el('a',{href:'#/contracts/index/'+encodeURIComponent(c.model),style:'font-weight:600',text:c.model})),
+          el('td',{},el('code',{class:'mono',text:c.contractVersion||'—'})),
+          el('td',{class:'num',text:c.lastSample?new Date(c.lastSample).toLocaleString():'—'}),
+          el('td',{class:'num'},c.openFindings?el('span',{class:'badge err',text:String(c.openFindings)}):el('span',{class:'faint',text:'0'})),
+          el('td',{},el('a',{class:'ghost',href:'#/contracts/index/'+encodeURIComponent(c.model)},'View')));
+      });
+      const tbl=el('table',{},
+        el('thead',{},el('tr',{},el('th',{},'Model'),el('th',{},'Contract version'),el('th',{class:'num'},'Last sample'),el('th',{class:'num'},'Open findings'),el('th',{},''))),
+        el('tbody',{},rows));
+      v.append(el('div',{class:'card scroll'},tbl));
+    }catch(e){v.append(el('div',{class:'card empty'},el('b',{},e.message)))}
+  }
+
+  if(tab==='findings'){
+    try{
+      const findings=await api('/api/contracts/findings')||[];
+      if(!findings.length){v.append(el('div',{class:'card empty'},el('b',{},'No findings recorded')));return}
+      const rows=findings.map(f=>{
+        const isClosed=f.status==='fixed'||f.status==='wontfix';
+        const stCls=f.status==='fixed'?'badge ok':(f.status==='wontfix'?'badge':'badge err');
+        const histBtn=el('button',{class:'ghost',type:'button',onclick:()=>showFindingHistory(f.id)},'History');
+        const resBtn=isClosed?null:el('button',{class:'primary',type:'button',onclick:()=>resolveFindingModal(f)},'Resolve');
+        return el('tr',{},
+          el('td',{},el('code',{class:'mono small',text:f.id})),
+          el('td',{text:f.model}),
+          el('td',{},el('span',{class:'badge',text:f.direction})),
+          el('td',{},el('span',{class:'badge',text:f.class})),
+          el('td',{},el('code',{class:'mono',text:f.path})),
+          el('td',{},el('span',{class:stCls,text:f.status})),
+          el('td',{},el('code',{class:'mono small',text:f.fixed_in||f.fixedIn||'—'})),
+          el('td',{class:'num',text:String(f.clean_traces||f.cleanTraces||0)}),
+          el('td',{class:'num faint small',text:f.created_at?new Date(f.created_at).toLocaleString():'—'}),
+          el('td',{style:'display:flex;gap:.35rem'},histBtn,resBtn));
+      });
+      const tbl=el('table',{},
+        el('thead',{},el('tr',{},el('th',{},'ID'),el('th',{},'Model'),el('th',{},'Direction'),el('th',{},'Class'),el('th',{},'Path'),el('th',{},'Status'),el('th',{},'Fixed in'),el('th',{class:'num'},'Clean traces'),el('th',{class:'num'},'Created'),el('th',{},'Actions'))),
+        el('tbody',{},rows));
+      v.append(el('div',{class:'card scroll'},tbl));
+    }catch(e){v.append(el('div',{class:'card empty'},el('b',{},e.message)))}
+  }
+
+  if(tab==='proposed'){
+    try{
+      const sigs=await api('/api/contracts/signatures?state=proposed')||[];
+      if(!sigs.length){v.append(el('div',{class:'card empty'},el('b',{},'No proposed verdicts pending review')));return}
+      const rows=sigs.map(s=>{
+        const appr=el('button',{class:'primary',type:'button',onclick:async()=>{
+          try{
+            await postJSON('/api/contracts/signatures/verdict',{model:s.model,clientFormat:s.client_format||s.clientFormat,direction:s.direction,path:s.path,type:s.type,action:'approve'});
+            toast('Approved proposed verdict');
+            route();
+          }catch(e){alert(e.message)}
+        }},'Approve');
+        const rej=el('button',{class:'danger',type:'button',onclick:async()=>{
+          try{
+            await postJSON('/api/contracts/signatures/verdict',{model:s.model,clientFormat:s.client_format||s.clientFormat,direction:s.direction,path:s.path,type:s.type,action:'reject'});
+            toast('Rejected (marked lost)');
+            route();
+          }catch(e){alert(e.message)}
+        }},'Reject');
+        return el('tr',{},
+          el('td',{text:s.model}),
+          el('td',{},el('span',{class:'badge',text:s.direction})),
+          el('td',{},el('code',{class:'mono',text:s.path})),
+          el('td',{},el('span',{class:'badge',text:s.type})),
+          el('td',{},el('span',{class:'badge warn',text:s.verdict})),
+          el('td',{class:'num faint small',text:s.judged_at?new Date(s.judged_at).toLocaleString():'—'}),
+          el('td',{style:'display:flex;gap:.35rem'},appr,rej));
+      });
+      const tbl=el('table',{},
+        el('thead',{},el('tr',{},el('th',{},'Model'),el('th',{},'Direction'),el('th',{},'Path'),el('th',{},'Type'),el('th',{},'Proposed verdict'),el('th',{class:'num'},'Judged'),el('th',{},'Actions'))),
+        el('tbody',{},rows));
+      v.append(el('div',{class:'card scroll'},tbl));
+    }catch(e){v.append(el('div',{class:'card empty'},el('b',{},e.message)))}
+  }
+
+  if(tab==='traces'){
+    try{
+      const data=await api('/api/contracts/traces')||{traces:[],dropped:0};
+      const stats=el('div',{class:'stats',style:'margin-bottom:1rem'},
+        el('div',{class:'card stat'},el('div',{class:'faint small',text:'Dropped traces'}),el('div',{class:'v',text:String(data.dropped||0)})));
+      const traces=data.traces||[];
+      const rows=traces.map(t=>{
+        const stCls=t.status==='done'?'badge ok':(t.status==='failed'||t.status==='lost'||t.status==='dropped'||t.status==='revoked'?'badge err':'badge');
+        return el('tr',{},
+          el('td',{},el('code',{class:'mono small',text:t.id})),
+          el('td',{text:t.model||'—'}),
+          el('td',{text:t.tool||'—'}),
+          el('td',{},el('code',{class:'mono small',text:t.toolVersion||t.tool_version||'—'})),
+          el('td',{},el('code',{class:'mono small',text:t.switcherVersion||t.switcher_version||'—'})),
+          el('td',{},el('span',{class:stCls,text:t.status})),
+          el('td',{},t.trusted?el('span',{class:'badge ok',text:'trusted'}):el('span',{class:'faint small',text:'untrusted'})),
+          el('td',{class:'num faint small',text:t.created?new Date(t.created).toLocaleString():'—'}));
+      });
+      const tbl=el('table',{},
+        el('thead',{},el('tr',{},el('th',{},'Trace ID'),el('th',{},'Model'),el('th',{},'Tool'),el('th',{},'Tool ver'),el('th',{},'Switcher ver'),el('th',{},'Status'),el('th',{},'Trust'),el('th',{class:'num'},'Created'))),
+        el('tbody',{},rows.length?rows:el('tr',{},el('td',{colspan:'8',class:'faint'},'No traces recorded today'))));
+      v.append(stats,el('div',{class:'card scroll'},tbl));
+    }catch(e){v.append(el('div',{class:'card empty'},el('b',{},e.message)))}
+  }
+}
+
+async function showFindingHistory(id){
+  $('cTitle').textContent='Finding history: '+id;
+  try{
+    const hist=await api('/api/contracts/findings/'+encodeURIComponent(id)+'/history')||[];
+    const rows=hist.map(h=>{
+      return el('div',{style:'padding:.5rem 0;border-bottom:1px solid var(--line)'},
+        el('div',{style:'display:flex;justify-content:space-between;margin-bottom:.25rem'},
+          el('span',{class:'small faint',text:new Date(h.at).toLocaleString()}),
+          el('span',{class:'badge',text:(h.old_status||'start')+' → '+h.new_status})),
+        el('div',{class:'small',text:'By: '+(h.who||'system')}),
+        h.note?el('div',{class:'small faint',text:h.note}):null);
+    });
+    $('cBody').replaceChildren(rows.length?rows:el('div',{class:'faint'},'No history entries'));
+    $('cFoot').replaceChildren(el('button',{class:'primary',type:'button','data-close':true},'Done'));
+    openModal('cModal');
+  }catch(e){alert(e.message)}
+}
+
+function resolveFindingModal(f){
+  $('cTitle').textContent='Resolve finding: '+f.id;
+  const statusSel=el('select',{},
+    el('option',{value:'fixed',text:'fixed (switcher fixed)'}),
+    el('option',{value:'wontfix',text:'wontfix (ignore)'}));
+  const noteInp=el('input',{placeholder:'Resolution note...',autocomplete:'off'});
+  const err=el('div',{class:'err-msg'});
+  $('cBody').replaceChildren(
+    el('label',{class:'f'},'Status',statusSel),
+    el('label',{class:'f'},'Note',noteInp),
+    err);
+  const go=el('button',{class:'primary',type:'button'},'Resolve');
+  $('cFoot').replaceChildren(el('button',{class:'ghost',type:'button','data-close':true},'Cancel'),go);
+  go.onclick=async()=>{
+    go.disabled=true;
+    try{
+      await postJSON('/api/contracts/findings/'+encodeURIComponent(f.id)+'/resolve',{status:statusSel.value,note:noteInp.value.trim()});
+      closeModal('cModal');
+      toast('Finding resolved');
+      route();
+    }catch(e){
+      err.textContent=e.message;
+      go.disabled=false;
+    }
+  };
+  openModal('cModal');
+}
+
 // ---- Errors
 // Every error a provider answered, kept for analysis: grouped by signature
 // (status and message with ids and numbers removed), or one by one.

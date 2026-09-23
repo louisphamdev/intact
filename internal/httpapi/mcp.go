@@ -37,10 +37,11 @@ type rpcError struct {
 }
 
 type mcpTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
-	run         func(a *api, args map[string]any) (any, error)
+	Name             string         `json:"name"`
+	Description      string         `json:"description"`
+	InputSchema      map[string]any `json:"inputSchema"`
+	run              func(a *api, args map[string]any) (any, error)
+	runWithPrincipal func(a *api, p principal, args map[string]any) (any, error)
 }
 
 func schema(props map[string]any, required ...string) map[string]any {
@@ -430,6 +431,43 @@ var mcpTools = []mcpTool{
 			}
 			return rows, err
 		}},
+	{Name: "list_contracts", Description: "List model and tool contract indexes with contract version hash, last sample, and open finding counts.",
+		InputSchema: schema(map[string]any{"model": pString}),
+		run: func(a *api, args map[string]any) (any, error) {
+			return a.contractsIndexData(argStr(args, "model")), nil
+		}},
+	{Name: "get_contract", Description: "Get the learned contract of a model and the golden contract of each tool. Never returns hash or string lengths.",
+		InputSchema: schema(map[string]any{"model": pString}, "model"),
+		run: func(a *api, args map[string]any) (any, error) {
+			m := argStr(args, "model")
+			if m == "" {
+				return nil, errors.New("model is required")
+			}
+			return a.contractModelDetailsData(m)
+		}},
+	{Name: "list_contract_findings", Description: "List contract discrepancies and findings with evidence. Trusted callers only.",
+		InputSchema: schema(map[string]any{"model": pString, "status": pString}),
+		runWithPrincipal: func(a *api, p principal, args map[string]any) (any, error) {
+			if !a.isCallerTrusted(p) {
+				return nil, errors.New("unauthorized: caller is not trusted to read contract findings")
+			}
+			status := argStr(args, "status")
+			findings, err := a.store.ListContractFindings(status, 0, true)
+			if err != nil {
+				return nil, err
+			}
+			m := argStr(args, "model")
+			if m != "" {
+				var filtered []store.ContractFinding
+				for _, f := range findings {
+					if f.Model == m {
+						filtered = append(filtered, f)
+					}
+				}
+				findings = filtered
+			}
+			return a.formatFindingsJSON(findings), nil
+		}},
 }
 
 func argStr(args map[string]any, k string) string {
@@ -551,7 +589,13 @@ func (a *api) mcp(w http.ResponseWriter, r *http.Request) {
 			if p.Arguments == nil {
 				p.Arguments = map[string]any{}
 			}
-			res, err := t.run(a, p.Arguments)
+			var res any
+			var err error
+			if t.runWithPrincipal != nil {
+				res, err = t.runWithPrincipal(a, principalOf(r), p.Arguments)
+			} else {
+				res, err = t.run(a, p.Arguments)
+			}
 			if m := mcpMask[t.Name]; m != nil && !admin {
 				res = m(res)
 			}

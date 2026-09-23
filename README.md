@@ -50,6 +50,10 @@ tools) and wants to use them all from any client.
 
   The decisions and the trial behind them are in
   [Drift](docs/drift.md#automatic-review).
+- **Contract Lab.** Evaluates converter loss and schema drift across client
+  tools and providers without storing prompt or answer text. Evaluates shapes,
+  detects changes, and generates test fixtures.
+  [Contracts](docs/contracts.md)
 - **Error log.** Every error a provider answers is kept for 14 days, with the
   request that was sent, the answer, the headers and the latency. That
   includes the attempts intact failed over from.

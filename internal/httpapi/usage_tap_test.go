@@ -48,7 +48,7 @@ func TestProxyRecordsUsageWithoutAlteringTheResponse(t *testing.T) {
 		t.Fatalf("Usage rows = %d, want 1: %+v", len(rows), rows)
 	}
 	r := rows[0]
-	today := time.Now().UTC().Format("2006-01-02")
+	today := usageDay(time.Now())
 	if r.Day != today || r.ConnectionID != c.ID || r.Model != "llama-3.3-70b-versatile" {
 		t.Errorf("row key = %+v, want day=%s conn=%s model=llama-3.3-70b-versatile", r, today, c.ID)
 	}

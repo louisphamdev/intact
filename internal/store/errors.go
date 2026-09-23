@@ -2,28 +2,32 @@ package store
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
 // UpstreamError is one failed answer (or failed call) of a provider, kept
 // for analysis: every attempt, including the ones intact failed over from.
 type UpstreamError struct {
-	ID         int64   `json:"id"`
-	At         string  `json:"at"`
-	Provider   string  `json:"provider"`
-	Connection string  `json:"connectionId"`
-	Model      string  `json:"model"`
-	Client     string  `json:"client"`
-	Endpoint   string  `json:"endpoint"`
-	Status     int     `json:"status"` // 0: the call itself failed (network, timeout)
-	LatencyMs  int64   `json:"latencyMs"`
-	Class      string  `json:"class"`
-	Signature  string  `json:"signature"`
-	Message    string  `json:"message"`
-	QuotaLeft  float64 `json:"quotaLeft"` // 0–1 of the model's quota when read; -1 unknown
-	Headers    string  `json:"headers,omitempty"`
-	RespBody   string  `json:"respBody,omitempty"`
-	ReqBody    string  `json:"reqBody,omitempty"`
+	ID         int64  `json:"id"`
+	At         string `json:"at"`
+	Provider   string `json:"provider"`
+	Connection string `json:"connectionId"`
+	Model      string `json:"model"`
+	Client     string `json:"client"`
+	// ClientKeyID is the dashboard key that sent the request. It decides who
+	// may read the bodies; Client is only a label and can repeat.
+	ClientKeyID string  `json:"clientKeyId,omitempty"`
+	Endpoint    string  `json:"endpoint"`
+	Status      int     `json:"status"` // 0: the call itself failed (network, timeout)
+	LatencyMs   int64   `json:"latencyMs"`
+	Class       string  `json:"class"`
+	Signature   string  `json:"signature"`
+	Message     string  `json:"message"`
+	QuotaLeft   float64 `json:"quotaLeft"` // 0–1 of the model's quota when read; -1 unknown
+	Headers     string  `json:"headers,omitempty"`
+	RespBody    string  `json:"respBody,omitempty"`
+	ReqBody     string  `json:"reqBody,omitempty"`
 }
 
 const errorsSchema = `
@@ -34,6 +38,7 @@ CREATE TABLE IF NOT EXISTS upstream_errors (
 	connection  TEXT NOT NULL DEFAULT '',
 	model       TEXT NOT NULL DEFAULT '',
 	client      TEXT NOT NULL DEFAULT '',
+	client_key_id TEXT NOT NULL DEFAULT '',
 	endpoint    TEXT NOT NULL DEFAULT '',
 	status      INTEGER NOT NULL,
 	latency_ms  INTEGER NOT NULL DEFAULT 0,
@@ -48,14 +53,24 @@ CREATE TABLE IF NOT EXISTS upstream_errors (
 CREATE INDEX IF NOT EXISTS upstream_errors_at ON upstream_errors (at);
 CREATE INDEX IF NOT EXISTS upstream_errors_prov ON upstream_errors (provider, at);`
 
+// migrateErrors adds the columns a database written by an older version has
+// not got. A second run is a no-op.
+func (s *Store) migrateErrors() error {
+	if _, err := s.DB.Exec(`ALTER TABLE upstream_errors ADD COLUMN client_key_id TEXT NOT NULL DEFAULT ''`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column") {
+		return fmt.Errorf("add column client_key_id: %w", err)
+	}
+	return nil
+}
+
 // AddUpstreamError stores an error and returns its id.
 func (s *Store) AddUpstreamError(e UpstreamError) (int64, error) {
 	if e.At == "" {
 		e.At = time.Now().UTC().Format(time.RFC3339)
 	}
-	res, err := s.DB.Exec(`INSERT INTO upstream_errors (at, provider, connection, model, client, endpoint, status, latency_ms,
-		class, signature, message, quota_left, headers, resp_body, req_body) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		e.At, e.Provider, e.Connection, e.Model, e.Client, e.Endpoint, e.Status, e.LatencyMs, e.Class, e.Signature,
+	res, err := s.DB.Exec(`INSERT INTO upstream_errors (at, provider, connection, model, client, client_key_id, endpoint, status,
+		latency_ms, class, signature, message, quota_left, headers, resp_body, req_body) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		e.At, e.Provider, e.Connection, e.Model, e.Client, e.ClientKeyID, e.Endpoint, e.Status, e.LatencyMs, e.Class, e.Signature,
 		e.Message, e.QuotaLeft, e.Headers, e.RespBody, e.ReqBody)
 	if err != nil {
 		return 0, fmt.Errorf("add upstream error: %w", err)
@@ -79,7 +94,7 @@ type ErrorFilter struct {
 
 // ListUpstreamErrors returns errors, newest first.
 func (s *Store) ListUpstreamErrors(f ErrorFilter) ([]UpstreamError, error) {
-	cols := `id, at, provider, connection, model, client, endpoint, status, latency_ms, class, signature, message, quota_left, headers`
+	cols := `id, at, provider, connection, model, client, client_key_id, endpoint, status, latency_ms, class, signature, message, quota_left, headers`
 	if f.Full {
 		cols += `, resp_body, req_body`
 	}
@@ -114,8 +129,8 @@ func (s *Store) ListUpstreamErrors(f ErrorFilter) ([]UpstreamError, error) {
 	out := []UpstreamError{}
 	for rows.Next() {
 		var e UpstreamError
-		dst := []any{&e.ID, &e.At, &e.Provider, &e.Connection, &e.Model, &e.Client, &e.Endpoint, &e.Status, &e.LatencyMs,
-			&e.Class, &e.Signature, &e.Message, &e.QuotaLeft, &e.Headers}
+		dst := []any{&e.ID, &e.At, &e.Provider, &e.Connection, &e.Model, &e.Client, &e.ClientKeyID, &e.Endpoint, &e.Status,
+			&e.LatencyMs, &e.Class, &e.Signature, &e.Message, &e.QuotaLeft, &e.Headers}
 		if f.Full {
 			dst = append(dst, &e.RespBody, &e.ReqBody)
 		}
@@ -130,10 +145,10 @@ func (s *Store) ListUpstreamErrors(f ErrorFilter) ([]UpstreamError, error) {
 // GetUpstreamError returns one error with its bodies.
 func (s *Store) GetUpstreamError(id int64) (UpstreamError, error) {
 	var e UpstreamError
-	err := s.DB.QueryRow(`SELECT id, at, provider, connection, model, client, endpoint, status, latency_ms, class, signature,
-		message, quota_left, headers, resp_body, req_body FROM upstream_errors WHERE id = ?`, id).Scan(&e.ID, &e.At, &e.Provider,
-		&e.Connection, &e.Model, &e.Client, &e.Endpoint, &e.Status, &e.LatencyMs, &e.Class, &e.Signature, &e.Message,
-		&e.QuotaLeft, &e.Headers, &e.RespBody, &e.ReqBody)
+	err := s.DB.QueryRow(`SELECT id, at, provider, connection, model, client, client_key_id, endpoint, status, latency_ms, class,
+		signature, message, quota_left, headers, resp_body, req_body FROM upstream_errors WHERE id = ?`, id).Scan(&e.ID, &e.At,
+		&e.Provider, &e.Connection, &e.Model, &e.Client, &e.ClientKeyID, &e.Endpoint, &e.Status, &e.LatencyMs, &e.Class,
+		&e.Signature, &e.Message, &e.QuotaLeft, &e.Headers, &e.RespBody, &e.ReqBody)
 	return e, err
 }
 

@@ -160,16 +160,23 @@ func OpenAIToGemini(body []byte, sigs Signatures) ([]byte, error) {
 		}
 		if len(decls) > 0 {
 			out["tools"] = []any{obj{"functionDeclarations": decls}}
-			mode := "VALIDATED"
+			fc := obj{"mode": "VALIDATED"}
 			switch tc := in["tool_choice"].(type) {
 			case string:
 				if tc == "required" {
-					mode = "ANY"
+					fc["mode"] = "ANY"
 				} else if tc == "none" {
-					mode = "NONE"
+					fc["mode"] = "NONE"
+				}
+			case obj:
+				// The object form names one tool. Without allowedFunctionNames the
+				// model stays free to answer in text.
+				if name := geminiName(str(asObj(tc["function"])["name"])); name != "" {
+					fc["mode"] = "ANY"
+					fc["allowedFunctionNames"] = []any{name}
 				}
 			}
-			out["toolConfig"] = obj{"functionCallingConfig": obj{"mode": mode}}
+			out["toolConfig"] = obj{"functionCallingConfig": fc}
 		}
 	}
 	return json.Marshal(out)

@@ -38,7 +38,7 @@ func TestProxyForwardsPathBodyAndAuthUnchanged(t *testing.T) {
 	h := New(s, map[string]string{"groq": up.URL})
 	// The provider prefix is the only byte range intact changes.
 	body := `{"model":"llama-3.3-70b-versatile","messages":[]}`
-	req := httptest.NewRequest("POST", "/v1/chat/completions?beta=1",
+	req := loopbackRequest("POST", "/v1/chat/completions?beta=1",
 		strings.NewReader(`{"model":"groq/llama-3.3-70b-versatile","messages":[]}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -83,7 +83,7 @@ func TestProxyReplacesAnyIncomingAuthorization(t *testing.T) {
 	s.CreateConnection("groq", "test", "gsk-real")
 
 	h := New(s, map[string]string{"groq": up.URL})
-	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"groq/m"}`))
+	req := loopbackRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"groq/m"}`))
 	req.Header.Set("Authorization", "Bearer attacker-supplied")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -161,7 +161,7 @@ func TestProxyAppliesClassAIdentityAndDefaults(t *testing.T) {
 	}
 
 	h := New(s, map[string]string{"claude": up.URL})
-	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m"}`))
+	req := loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m"}`))
 	// The caller sends its own identity and its own feature selection.
 	req.Header.Set("User-Agent", "some-other-client/1.0")
 	req.Header.Set("Anthropic-Beta", "caller-chose-this")
@@ -189,7 +189,7 @@ func TestV1RejectsProviderWithNoAccount(t *testing.T) {
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
 	h := New(s, nil)
-	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"claude/m"}`))
+	req := loopbackRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"claude/m"}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -207,7 +207,7 @@ func TestV1RefusesUnwiredProvider(t *testing.T) {
 	s.CreateConnection("somegateway", "imported", "token")
 
 	h := New(s, nil)
-	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"somegateway/m"}`))
+	req := loopbackRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"somegateway/m"}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
@@ -233,7 +233,7 @@ func TestModelsListsEveryProviderWithItsPrefix(t *testing.T) {
 	h := New(s, map[string]string{"groq": up.URL, "nvidia": up.URL})
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/models", nil))
+	h.ServeHTTP(rec, loopbackRequest("GET", "/v1/models", nil))
 	body := rec.Body.String()
 	for _, want := range []string{`"groq/llama"`, `"groq/qwen"`, `"nvidia/llama"`} {
 		if !strings.Contains(body, want) {

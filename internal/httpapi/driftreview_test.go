@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -106,7 +107,7 @@ func TestDriftReviewAcksOnlyConfidentBenignChanges(t *testing.T) {
 		t.Errorf("judged again: %d", n)
 	}
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/drift/review", strings.NewReader(`{"enabled":false}`)))
+	h.ServeHTTP(rec, loopbackRequest("POST", "/drift/review", strings.NewReader(`{"enabled":false}`)))
 	add("codex", "request", "stream_options", "added", "hermes")
 	if n, _ := a.reviewPending(context.Background()); n != 0 {
 		t.Errorf("judged while off: %d", n)
@@ -132,7 +133,7 @@ func TestDriftLearnsClientsApartAndSkipsArguments(t *testing.T) {
 	fb, _ := s.RevealAPIKey(kB.ID)
 	a, h := newServer(s, map[string]string{"github": up.URL}, nil)
 	call := func(key, b string) {
-		req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(b))
+		req := loopbackRequest("POST", "/v1/chat/completions", strings.NewReader(b))
 		req.Header.Set("Authorization", "Bearer "+key)
 		h.ServeHTTP(httptest.NewRecorder(), req)
 	}
@@ -208,7 +209,7 @@ func TestDriftResolverSettlesEverything(t *testing.T) {
 	a, h := newServer(s, map[string]string{"typesafe": jev.URL, "groq": chat.URL}, nil)
 	post := func(body string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest("POST", "/drift/review", strings.NewReader(body)))
+		h.ServeHTTP(rec, loopbackRequest("POST", "/drift/review", strings.NewReader(body)))
 		return rec
 	}
 	// Config is checked.
@@ -276,6 +277,80 @@ func TestDriftResolverSettlesEverything(t *testing.T) {
 	}
 }
 
+func TestDriftReviewWaitsForOwnerOnKeyTraffic(t *testing.T) {
+	jev, _ := fakeJev(map[string][2]any{
+		"injected_field": {CauseNewClient, 0.4},
+	})
+	defer jev.Close()
+
+	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ans, _ := json.Marshal("Here you go:\n" + `{"cause":"new_client_usage","action":"blacklist","reason":"try stripping"}`)
+		w.Write([]byte(`{"choices":[{"message":{"content":` + string(ans) + `}}]}`))
+	}))
+	defer chat.Close()
+
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("typesafe", "jev", "k")
+	s.CreateConnection("groq", "g", "k")
+	a, h := newServer(s, map[string]string{"typesafe": jev.URL, "groq": chat.URL}, nil)
+
+	post := func(body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, loopbackRequest("POST", "/drift/review", strings.NewReader(body)))
+		return rec
+	}
+	if rec := post(`{"enabled":true,"decisionModel":"typesafe/jev-latest","resolverModel":"groq/llama-3.3-70b"}`); rec.Code != 200 {
+		t.Fatalf("config: %s", rec.Body.String())
+	}
+
+	k, err := s.CreateAPIKey("dashboard-key")
+	if err != nil {
+		t.Fatalf("create key: %v", err)
+	}
+
+	s.AddShapeChange(store.ShapeChange{
+		Direction:   "request",
+		Provider:    "groq",
+		Endpoint:    "chat/completions",
+		Path:        "injected_field",
+		Kind:        "added",
+		Client:      "dashboard-key",
+		ClientKeyID: k.ID,
+	})
+	s.AddUpstreamError(store.UpstreamError{
+		Provider:  "groq",
+		Status:    400,
+		Class:     ClassRejected,
+		QuotaLeft: -1,
+		At:        time.Now().Add(10 * time.Second).UTC().Format(time.RFC3339),
+	})
+
+	n, err := a.reviewPending(context.Background())
+	if err != nil || n != 1 {
+		t.Fatalf("judged %d, %v", n, err)
+	}
+
+	filters, _ := s.ListFilters()
+	var got []string
+	for _, f := range filters {
+		if strings.HasPrefix(f.Note, "drift review") {
+			got = append(got, f.Provider+":"+f.Pattern)
+		}
+	}
+	if len(got) != 0 {
+		t.Fatalf("filters = %v, want none: key-caused change must not auto-blacklist", got)
+	}
+
+	list, _ := s.ListShapeChanges(store.ShapeChangeFilter{})
+	if len(list) != 1 {
+		t.Fatalf("expected 1 shape change, got %d", len(list))
+	}
+	if !strings.Contains(list[0].VerdictNote, "owner must approve") {
+		t.Errorf("verdict note = %q, want it to say owner must approve", list[0].VerdictNote)
+	}
+}
+
 func TestDriftReviewWithoutResolverKeepsTheUnsure(t *testing.T) {
 	jev, _ := fakeJev(map[string][2]any{"x": {CauseNewClient, 0.3}})
 	defer jev.Close()
@@ -288,5 +363,112 @@ func TestDriftReviewWithoutResolverKeepsTheUnsure(t *testing.T) {
 	list, _ := s.ListShapeChanges(store.ShapeChangeFilter{})
 	if list[0].Acked || !strings.Contains(list[0].VerdictNote, "no resolver is set") {
 		t.Errorf("change = %+v", list[0])
+	}
+}
+
+// Most request drift sits under messages, tools, input or contents, so the
+// blacklist works on the whole path. What the request needs stays.
+func TestAutoBlacklistTakesNestedFieldsAndRefusesEssentialOnes(t *testing.T) {
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	a, _ := newServer(s, nil, nil)
+	facts := map[string]any{"failed_answers_since": 1}
+	run := func(path string) string {
+		return a.autoBlacklist(store.ShapeChange{Direction: "request", Kind: "added", Provider: "codex",
+			Endpoint: "chat/completions", Path: path}, facts)
+	}
+	for path, want := range map[string]string{
+		"messages[].content[].cache_control":            "messages.*.content.*.cache_control",
+		"tools[].input_schema.properties.{*}.encrypted": "tools.*.input_schema.properties.*.encrypted",
+	} {
+		if note := run(path); !strings.Contains(note, "blacklisted "+want) {
+			t.Errorf("%s: note = %q, want the filter %s", path, note, want)
+		}
+		if got := reviewFilters(t, s); !contains(got, "codex:field:"+want) {
+			t.Errorf("%s: filters = %v, want %s", path, got, want)
+		}
+	}
+	before := len(reviewFilters(t, s))
+	for _, path := range []string{"messages", "tools", "messages[]", "messages[].content", "messages[].role",
+		"input[].content", "contents[].parts", "tools[].name", "tools[].function"} {
+		if note := run(path); !strings.Contains(note, "not blacklisted: the request needs") {
+			t.Errorf("%s: note = %q, want it refused", path, note)
+		}
+		if got := reviewFilters(t, s); len(got) != before {
+			t.Errorf("%s: filters = %v, want none added", path, got)
+		}
+	}
+	// The same change judged twice must not file the rule twice.
+	run("messages[].content[].cache_control")
+	n := 0
+	for _, f := range reviewFilters(t, s) {
+		if f == "codex:field:messages.*.content.*.cache_control" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("the same rule is stored %d times, want 1", n)
+	}
+}
+
+// Two passes over the same changes would pay every model call twice.
+func TestDriftReviewRunsOneAtATime(t *testing.T) {
+	release := make(chan struct{})
+	var mu sync.Mutex
+	calls := 0
+	jev := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		first := calls == 1
+		mu.Unlock()
+		if first {
+			<-release
+		}
+		json.NewEncoder(w).Encode(map[string]any{"answers": map[string]any{
+			"cause": map[string]any{"type": "choice", "choice": CauseDataNoise, "confidence": 0.9, "probabilities": map[string]float64{}}}})
+	}))
+	defer jev.Close()
+	alerts := alertsServer(t)
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("typesafe", "jev", "k")
+	a, h := newServer(s, map[string]string{"typesafe": jev.URL}, nil)
+	for _, p := range []string{"a_new", "b_new", "c_new"} {
+		s.AddShapeChange(store.ShapeChange{Direction: "request", Provider: "codex", Endpoint: "chat/completions", Path: p, Kind: "added"})
+	}
+	s.SetSetting(reviewConfigKey, `{"enabled":true,"decisionModel":"typesafe/jev-latest","ackConfidence":0.6}`)
+	done := make(chan error, 1)
+	go func() { _, err := a.reviewPending(context.Background()); done <- err }()
+	waitUntil(t, "the first decision call", func() bool { mu.Lock(); defer mu.Unlock(); return calls == 1 })
+	if _, err := a.reviewPending(context.Background()); !errors.Is(err, errReviewRunning) {
+		t.Errorf("second pass err = %v, want %v", err, errReviewRunning)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("POST", "/drift/review", strings.NewReader(`{"run":true}`)))
+	if rec.Code != http.StatusConflict {
+		t.Errorf("POST run while running = %d %s, want 409", rec.Code, rec.Body.String())
+	}
+	// The loop must not read a busy pass as a model failure.
+	a.reviewOnce()
+	a.review.mu.Lock()
+	paused, lastErr := a.review.pauseTill, a.review.lastError
+	a.review.mu.Unlock()
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	if !paused.IsZero() || lastErr != "" {
+		t.Errorf("pauseTill = %v lastError = %q, want the busy pass ignored", paused, lastErr)
+	}
+	for _, m := range alerts() {
+		if strings.Contains(m, "paused") {
+			t.Errorf("a busy pass alerted: %q", m)
+		}
+	}
+	mu.Lock()
+	got := calls
+	mu.Unlock()
+	if got != 3 {
+		t.Errorf("decision calls = %d, want one per pending change (3)", got)
 	}
 }

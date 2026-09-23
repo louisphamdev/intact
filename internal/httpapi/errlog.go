@@ -138,8 +138,8 @@ func (a *api) sendLogged(r *http.Request, p provider.Provider, conn store.Connec
 	start := time.Now()
 	resp, err := a.send(r, p, conn.Provider, path, secret, body)
 	ms := time.Since(start).Milliseconds()
-	e := store.UpstreamError{Provider: conn.Provider, Connection: conn.ID, Model: model, Client: clientOf(r), Endpoint: path,
-		LatencyMs: ms, QuotaLeft: -1, ReqBody: clip(body, errReqLimit)}
+	e := store.UpstreamError{Provider: conn.Provider, Connection: conn.ID, Model: model, Client: clientOf(r),
+		ClientKeyID: principalOf(r).keyID, Endpoint: path, LatencyMs: ms, QuotaLeft: -1, ReqBody: clip(body, errReqLimit)}
 	switch {
 	case err != nil:
 		e.Status, e.Class, e.Message = 0, ClassNetwork, err.Error()
@@ -185,8 +185,10 @@ func (a *api) classify429(id int64, conn store.Connection, model string, ms int6
 
 // quotaLeft is the share of quota left for a model: its own window when the
 // provider has one per model, else the tightest window; -1 when unknown.
+// Windows arrive in name order, so the longest prefix has to win: the window
+// of gemini-3.8-flash must not answer for gemini-3.8-flash-lite.
 func quotaLeft(q AccountQuota, model string) float64 {
-	best := -1.0
+	best, exactModel, exactBase, prefix, prefixLen := -1.0, -1.0, -1.0, -1.0, -1
 	base, _ := splitVariant(model)
 	for _, w := range q.Windows {
 		if w.UsedPct < 0 {
@@ -194,15 +196,32 @@ func quotaLeft(q AccountQuota, model string) float64 {
 		}
 		left := 1 - w.UsedPct/100
 		name := strings.TrimPrefix(w.Name, "model ")
-		if name != w.Name {
-			if name == model || name == base || strings.HasPrefix(model, name) {
-				return left
+		switch {
+		case name == w.Name:
+			if best < 0 || left < best {
+				best = left
 			}
-			continue
+		case name == model:
+			if exactModel < 0 || left < exactModel {
+				exactModel = left
+			}
+		case base != "" && name == base:
+			if exactBase < 0 || left < exactBase {
+				exactBase = left
+			}
+		case strings.HasPrefix(model, name):
+			if len(name) > prefixLen || (len(name) == prefixLen && (prefix < 0 || left < prefix)) {
+				prefix, prefixLen = left, len(name)
+			}
 		}
-		if best < 0 || left < best {
-			best = left
-		}
+	}
+	switch {
+	case exactModel >= 0:
+		return exactModel
+	case exactBase >= 0:
+		return exactBase
+	case prefix >= 0:
+		return prefix
 	}
 	return best
 }
@@ -255,12 +274,13 @@ func (a *api) errorGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, e)
 }
 
-// ownsError reports whether the caller may read an error's stored bodies: the
-// dashboard session ("internal") and the master token ("env") may read every
-// error; a dashboard key may read only the errors its own requests caused.
+// ownsError reports whether the caller may read an error's stored bodies: an
+// admin (the dashboard session or the master token) may read every error; a
+// dashboard key may read only the errors its own key id caused. An error
+// stored before the key id was recorded belongs to no key.
 func ownsError(r *http.Request, e store.UpstreamError) bool {
-	who := clientOf(r)
-	return who == "internal" || who == "env" || who == e.Client
+	p := principalOf(r)
+	return p.admin || (e.ClientKeyID != "" && e.ClientKeyID == p.keyID)
 }
 
 // ErrorGroup is the errors of one signature.

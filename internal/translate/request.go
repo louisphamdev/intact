@@ -103,15 +103,29 @@ func OpenAIToAnthropic(body []byte) ([]byte, error) {
 	}
 	out["messages"] = msgs
 
+	var maxTok int64 = DefaultMaxTokens
 	switch {
 	case in["max_tokens"] != nil:
 		out["max_tokens"] = in["max_tokens"]
+		maxTok = num(in["max_tokens"])
 	case in["max_completion_tokens"] != nil:
 		out["max_tokens"] = in["max_completion_tokens"]
+		maxTok = num(in["max_completion_tokens"])
 	default:
 		out["max_tokens"] = DefaultMaxTokens
 	}
-	for _, k := range []string{"temperature", "top_p", "stream"} {
+	tc := oaToolChoice(in["tool_choice"])
+	forcedTool := tc != nil && (tc["type"] == "any" || tc["type"] == "tool")
+
+	keep := []string{"temperature", "top_p", "stream"}
+	if !forcedTool {
+		if b := thinkingBudget(str(in["reasoning_effort"]), maxTok); b > 0 {
+			out["thinking"] = obj{"type": "enabled", "budget_tokens": b}
+			// Anthropic refuses temperature and top_p while thinking is enabled.
+			keep = []string{"stream"}
+		}
+	}
+	for _, k := range keep {
 		if v, ok := in[k]; ok {
 			out[k] = v
 		}
@@ -144,7 +158,7 @@ func OpenAIToAnthropic(body []byte) ([]byte, error) {
 		}
 		out["tools"] = ts
 	}
-	if tc := oaToolChoice(in["tool_choice"]); tc != nil {
+	if tc != nil {
 		if p, ok := in["parallel_tool_calls"].(bool); ok && !p {
 			tc["disable_parallel_tool_use"] = true
 		}
@@ -232,6 +246,56 @@ func parseArgs(s string) any {
 		return obj{}
 	}
 	return v
+}
+
+// Thinking budget thresholds of docs/routing.md, and Anthropic's smallest
+// accepted budget. Both translators use them, so a request that crosses from
+// one shape to the other and back keeps its reasoning level.
+const (
+	lowBudget         = 1500
+	mediumBudget      = 6000
+	minThinkingBudget = 1024
+)
+
+// thinkingBudget turns an OpenAI reasoning_effort into an Anthropic thinking
+// budget. It returns 0 when the caller asked for no reasoning, or when
+// max_tokens is too small to hold a budget and still leave room for an answer.
+func thinkingBudget(effort string, maxTokens int64) int64 {
+	var share float64
+	var ceiling int64
+	switch effort {
+	case "", "none":
+		return 0
+	case "minimal", "low":
+		share, ceiling = 0.2, lowBudget
+	case "high", "xhigh", "max":
+		share = 0.8
+	default:
+		share, ceiling = 0.5, mediumBudget
+	}
+	b := int64(share * float64(maxTokens))
+	if ceiling > 0 && b > ceiling {
+		b = ceiling
+	}
+	if b < minThinkingBudget {
+		b = minThinkingBudget
+	}
+	if b >= maxTokens {
+		return 0
+	}
+	return b
+}
+
+// effortForBudget is the other direction: an Anthropic thinking budget becomes
+// the nearest OpenAI reasoning_effort.
+func effortForBudget(budget int64) string {
+	switch {
+	case budget <= lowBudget:
+		return "low"
+	case budget <= mediumBudget:
+		return "medium"
+	}
+	return "high"
 }
 
 func oaToolChoice(v any) obj {
@@ -330,6 +394,9 @@ func AnthropicToOpenAI(body []byte) ([]byte, error) {
 		if v, ok := in[k]; ok {
 			out[k] = v
 		}
+	}
+	if th := asObj(in["thinking"]); str(th["type"]) == "enabled" {
+		out["reasoning_effort"] = effortForBudget(num(th["budget_tokens"]))
 	}
 	if s, ok := in["stream"].(bool); ok {
 		out["stream"] = s

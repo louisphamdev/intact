@@ -72,7 +72,7 @@ func TestAnthropicCallerReachesOpenAIProvider(t *testing.T) {
 	h := New(s, map[string]string{"groq": up.URL})
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/messages",
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/messages",
 		strings.NewReader(`{"model":"groq/llama","max_tokens":10,"stream":true,"system":"sys","messages":[{"role":"user","content":"hi"}]}`)))
 	if gotPath != "/chat/completions" || !strings.Contains(gotBody, `"include_usage":true`) || !strings.Contains(gotBody, `"role":"system"`) {
 		t.Errorf("upstream got %s %s", gotPath, gotBody)
@@ -99,7 +99,7 @@ func TestTranslatedErrorKeepsStatusAndShape(t *testing.T) {
 	s.CreateConnection("groq", "g", "k")
 	h := New(s, map[string]string{"groq": up.URL})
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"groq/x","max_tokens":5,"messages":[]}`)))
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"groq/x","max_tokens":5,"messages":[]}`)))
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"type":"error"`) || !strings.Contains(rec.Body.String(), "bad model") {
 		t.Errorf("code=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -114,7 +114,7 @@ func TestCountTokensIsEstimatedForAnOpenAIProvider(t *testing.T) {
 	s.CreateConnection("groq", "g", "k")
 	h := New(s, map[string]string{"groq": up.URL})
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/messages/count_tokens",
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/messages/count_tokens",
 		strings.NewReader(`{"model":"groq/m","messages":[{"role":"user","content":"hello there"}]}`)))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"input_tokens":`) || called {
 		t.Errorf("code=%d body=%s upstream called=%v", rec.Code, rec.Body.String(), called)

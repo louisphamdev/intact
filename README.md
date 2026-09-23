@@ -69,10 +69,12 @@ tools) and wants to use them all from any client.
 - **Quota and usage.** Quota is read from each provider (rolling windows, weekly
   pools, per-model shares). Token usage is counted per account, model and day.
   [Quota and usage](docs/quota-and-usage.md)
-- **Management API and MCP.** Everything the dashboard does is available at
-  `/api/*`, and to an agent through an MCP server at `/mcp`. [API](docs/api.md)
-- **Dashboard.** A single embedded page with sign-in by TOTP code (no password).
-  API keys are created there. [Security](docs/security.md)
+- **Management API and MCP.** Every dashboard action has a route under `/api/*`,
+  and a tool on the MCP server at `/mcp`. The routes that change intact need the
+  dashboard session or the master token. A dashboard key calls `/v1` and reads
+  what is not admin-only. [API](docs/api.md)
+- **Dashboard.** A single embedded page with sign-in by a TOTP code and nothing
+  else. No password. API keys are created there. [Security](docs/security.md)
   - It is in English and Vietnamese.
   - It has light, dark and automatic (system) themes.
   - Both choices are made at the bottom of the menu and kept in the browser.
@@ -142,3 +144,10 @@ go vet ./...
 ```
 
 The tests run against fake upstreams. None of them calls a real provider.
+
+## License
+
+intact is released under the MIT License (SPDX identifier `MIT`). The full text
+is in [LICENSE](LICENSE).
+
+To report a security fault, read [SECURITY.md](SECURITY.md).

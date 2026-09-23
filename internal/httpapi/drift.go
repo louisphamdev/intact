@@ -23,6 +23,11 @@ func (a *api) driftChanges(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "cannot read changes")
 		return
 	}
+	if !principalOf(r).admin {
+		for i := range list {
+			list[i].Sample = ""
+		}
+	}
 	writeJSON(w, map[string]any{"changes": list, "unacked": a.store.CountUnackedShapeChanges()})
 }
 
@@ -31,7 +36,12 @@ func (a *api) driftAck(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		IDs []int64 `json:"ids"`
 	}
-	json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body)
+	// A body that cannot be read must never reach the ack-all branch, which an
+	// empty ids list means.
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad json")
+		return
+	}
 	n, err := a.store.AckShapeChanges(body.IDs)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "cannot acknowledge")

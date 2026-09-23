@@ -101,7 +101,7 @@ func (a *api) runTypeSafeTest(ctx context.Context, prov, model string) modelTest
 	body, _ := json.Marshal(map[string]any{"model": prov + "/" + model, "state": typeSafeTestState, "questions": typeSafeTestQuestions})
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/systemone", strings.NewReader(string(body)))
+	req := withPrincipal(httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/systemone", strings.NewReader(string(body))), intactJob)
 	req.SetPathValue("path", "systemone")
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

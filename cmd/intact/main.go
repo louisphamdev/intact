@@ -2,11 +2,14 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"time"
 
 	"github.com/louisphamdev/intact/internal/auth"
 	"github.com/louisphamdev/intact/internal/httpapi"
@@ -17,6 +20,7 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:20130", "listen address")
 	dbPath := flag.String("db", "intact.db", "path to the database file")
 	enroll := flag.Bool("enroll", false, "print a new TOTP secret and otpauth URI, then exit")
+	insecure := flag.Bool("insecure-no-auth", false, "start with no sign-in gate; every caller reaches every stored credential")
 	flag.Parse()
 
 	if *enroll {
@@ -35,41 +39,36 @@ func main() {
 	}
 	defer s.Close()
 
-	authCfg := auth.FromEnv()
+	authCfg, err := auth.FromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := authDecision(authCfg, *insecure || os.Getenv("INTACT_INSECURE_NO_AUTH") == "1"); err != nil {
+		log.Fatal(err)
+	}
 	if authCfg == nil {
 		log.Printf("WARNING: no INTACT_TOTP_SECRET set, the server is not authenticated")
 	}
-	// A public listener with no auth would expose every stored credential, so
-	// refuse it. Loopback stays open for local use.
-	if authCfg == nil && !isLoopback(*addr) {
-		log.Fatalf("refusing to listen on %s without INTACT_TOTP_SECRET: that would expose credentials", *addr)
-	}
 
+	srv := &http.Server{
+		Addr:    *addr,
+		Handler: httpapi.NewWithAuth(s, nil, authCfg),
+		// Header-read only. A read or write deadline would cut a long stream.
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 	log.Printf("intact listening on http://%s", *addr)
-	if err := http.ListenAndServe(*addr, httpapi.NewWithAuth(s, nil, authCfg)); err != nil {
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }
 
-// isLoopback reports whether the listen address is bound to localhost only.
-func isLoopback(addr string) bool {
-	host := addr
-	if i := lastColon(addr); i >= 0 {
-		host = addr[:i]
+// authDecision refuses to start an ungated server. The reference deployment
+// binds loopback behind a tunnel, so a loopback bind proves nothing about who
+// reaches the port.
+func authDecision(authCfg *auth.Config, insecureNoAuth bool) error {
+	if authCfg == nil && !insecureNoAuth {
+		return errors.New("INTACT_TOTP_SECRET is not set: every caller would reach every stored credential. " +
+			"Set it, or pass -insecure-no-auth (or INTACT_INSECURE_NO_AUTH=1) to start with no gate")
 	}
-	switch host {
-	case "127.0.0.1", "localhost", "::1", "[::1]":
-		return true
-	}
-	// An empty host or 0.0.0.0 means every interface, which is not loopback.
-	return false
-}
-
-func lastColon(s string) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == ':' {
-			return i
-		}
-	}
-	return -1
+	return nil
 }

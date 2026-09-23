@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/louisphamdev/intact/internal/filter"
 	"github.com/louisphamdev/intact/internal/store"
 )
 
@@ -66,7 +69,7 @@ func TestErrorReviewBlacklistsWhatTheReplayProves(t *testing.T) {
 	h := New(s, map[string]string{"groq": up.URL, "openrouter": judge.URL})
 	do := func(method, path, body string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
+		h.ServeHTTP(rec, loopbackRequest(method, path, strings.NewReader(body)))
 		return rec
 	}
 	// A channel for the alerts; its token never comes back.
@@ -135,7 +138,7 @@ func TestErrorReviewClosesPassingFailuresWithoutTheModel(t *testing.T) {
 		postV1(h, `{"model":"groq/m","messages":[{"role":"user","content":"hi"}]}`)
 	}
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/errors/review", strings.NewReader(`{"enabled":true,"model":"openrouter/judge","run":true}`)))
+	h.ServeHTTP(rec, loopbackRequest("POST", "/errors/review", strings.NewReader(`{"enabled":true,"model":"openrouter/judge","run":true}`)))
 	list, _ := s.ListErrorVerdicts(0)
 	if judged || len(list) != 1 || list[0].Action != "ignore" || list[0].Cause != "passing failure" {
 		t.Errorf("judged=%v verdicts=%+v (%s)", judged, list, rec.Body.String())
@@ -149,7 +152,7 @@ func TestNotifyChannels(t *testing.T) {
 	h := New(s, nil)
 	do := func(method, path, body string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
+		h.ServeHTTP(rec, loopbackRequest(method, path, strings.NewReader(body)))
 		return rec
 	}
 	for body, want := range map[string]string{
@@ -203,5 +206,229 @@ func TestProtectedPatternAndSketch(t *testing.T) {
 	s := sketchJSON(long, 4000)
 	if len(s) > 4000 || !strings.Contains(s, "anti_cheat") || !strings.Contains(s, "more items") || !strings.Contains(s, "end") {
 		t.Errorf("sketch (%d) = %.300s", len(s), s)
+	}
+}
+
+// waitUntil polls until cond holds, so a test never sleeps a fixed time.
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for i := 0; i < 500; i++ {
+		if cond() {
+			return
+		}
+		sleepMs(10)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+// reviewFilters counts the rules a review installed.
+func reviewFilters(t *testing.T, s *store.Store) []string {
+	t.Helper()
+	list, err := s.ListFilters()
+	if err != nil {
+		t.Fatalf("list filters: %v", err)
+	}
+	var out []string
+	for _, f := range list {
+		if strings.HasPrefix(f.Note, "error review") || strings.HasPrefix(f.Note, "drift review") {
+			out = append(out, f.Provider+":"+f.Kind+":"+f.Pattern)
+		}
+	}
+	return out
+}
+
+// A rule under a protected container is refused even when the provider's
+// message names it, so the replay-less fallback cannot break every request.
+func TestProtectedPatternRefusesNestedContent(t *testing.T) {
+	for _, p := range []string{"messages.*", "messages.*.content", "messages.*.role", "contents.*.parts",
+		"request.contents.*.parts", "contents.*.parts.*.text", "tools.*"} {
+		if !protectedPattern(filter.Field, p) {
+			t.Errorf("field %q is not protected", p)
+		}
+	}
+	for _, p := range []string{"messages.*.cache_control", "request.generationConfig.foo"} {
+		if protectedPattern(filter.Field, p) {
+			t.Errorf("field %q should be allowed", p)
+		}
+	}
+	for _, re := range []string{`[\s\S]{2,}`, `^.{2,}$`, `^.{30,}$`} {
+		if !protectedPattern(filter.System, re) {
+			t.Errorf("system %q is not protected", re)
+		}
+	}
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	a, _ := newServer(s, nil, nil)
+	var p errProposal
+	if err := json.Unmarshal([]byte(`{"action":"blacklist","candidates":[{"kind":"field","pattern":"request.contents.*.parts"}]}`), &p); err != nil {
+		t.Fatalf("proposal: %v", err)
+	}
+	e := store.UpstreamError{Provider: "antigravity", Signature: "400 invalid value",
+		Message: "Invalid value at 'request.contents[3].parts[0]'",
+		ReqBody: `{"request":{"contents":[{"parts":[{"text":"hi"}]}]}}`}
+	var v store.ErrorVerdict
+	a.tryBlacklist(context.Background(), &v, e, p, false)
+	if v.Applied || len(reviewFilters(t, s)) != 0 {
+		t.Errorf("applied=%v filters=%v, want the rule refused", v.Applied, reviewFilters(t, s))
+	}
+}
+
+// A verdict built from a request a dashboard key wrote is stored, never acted
+// on: that request's text can steer the model.
+func TestErrorReviewWaitsForTheOwnerOnKeyTraffic(t *testing.T) {
+	judge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		answer := `{"cause":"unknown field","action":"blacklist","candidates":[{"kind":"field","pattern":"messages.*.cache_control"}],"reason":"the provider names cache_control"}`
+		b, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": answer}}}})
+		w.Write(b)
+	}))
+	defer judge.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("openrouter", "o", "k2")
+	a, _ := newServer(s, map[string]string{"openrouter": judge.URL}, nil)
+	k, _ := s.CreateAPIKey("hermes")
+	big := `{"model":"groq/m","messages":[{"role":"user","content":"` + strings.Repeat("x", 70<<10) + `","cache_control":{"type":"ephemeral"}}]}`
+	add := func(sig, keyID string) {
+		s.AddUpstreamError(store.UpstreamError{Provider: "groq", Connection: "c1", Model: "m", Client: "hermes",
+			ClientKeyID: keyID, Endpoint: "chat/completions", Status: 400, Class: ClassRejected, Signature: sig,
+			Message: "Invalid value: messages.*.cache_control is not allowed", ReqBody: big, QuotaLeft: -1})
+	}
+	s.SetSetting(errReviewKey, `{"enabled":true,"model":"openrouter/judge","minErrors":3,"replay":false}`)
+	for i := 0; i < 3; i++ {
+		add("400 from a key", k.ID)
+	}
+	if n, err := a.reviewErrors(context.Background()); n != 1 || err != nil {
+		t.Fatalf("judged %d, %v", n, err)
+	}
+	list, _ := s.ListErrorVerdicts(0)
+	if len(list) != 1 || list[0].Applied || !strings.Contains(list[0].Note, "owner") {
+		t.Fatalf("verdict = %+v, want Applied=false and a note about the owner", list)
+	}
+	if got := reviewFilters(t, s); len(got) != 0 {
+		t.Fatalf("filters = %v, want none: a key holder's text may not install a rule", got)
+	}
+	// The same group sent by intact itself, with no key: the review acts.
+	for i := 0; i < 3; i++ {
+		add("400 with no key", "")
+	}
+	if n, err := a.reviewErrors(context.Background()); n != 1 || err != nil {
+		t.Fatalf("second run judged %d, %v", n, err)
+	}
+	if got := reviewFilters(t, s); len(got) != 1 || got[0] != "groq:field:messages.*.cache_control" {
+		t.Errorf("filters = %v, want the rule installed for traffic that is not a key's", got)
+	}
+}
+
+// Two passes over the same group would pay every model call twice and file the
+// rule and the alert twice.
+func TestErrorReviewRunsOneAtATime(t *testing.T) {
+	release := make(chan struct{})
+	var mu sync.Mutex
+	judgeCalls := 0
+	judge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		judgeCalls++
+		mu.Unlock()
+		<-release
+		answer := `{"cause":"unknown field","action":"blacklist","candidates":[{"kind":"field","pattern":"anti_cheat"}],"reason":"the provider refuses anti_cheat"}`
+		b, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": answer}}}})
+		w.Write(b)
+	}))
+	defer judge.Close()
+	alerts := alertsServer(t)
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("openrouter", "o", "k2")
+	a, h := newServer(s, map[string]string{"openrouter": judge.URL}, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("POST", "/notify/channels",
+		strings.NewReader(`{"name":"ops","type":"telegram","enabled":true,"config":{"botToken":"123:TOK","chatId":"-100"}}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("channel: %d %s", rec.Code, rec.Body.String())
+	}
+	for i := 0; i < 3; i++ {
+		s.AddUpstreamError(store.UpstreamError{Provider: "groq", Connection: "c1", Model: "m", Client: "internal",
+			Endpoint: "chat/completions", Status: 400, Class: ClassRejected, Signature: "400 unknown field anti_cheat",
+			Message: "Unknown field anti_cheat", ReqBody: `{"model":"m","anti_cheat":1,"messages":[]}`, QuotaLeft: -1})
+	}
+	s.SetSetting(errReviewKey, `{"enabled":true,"model":"openrouter/judge","minErrors":3,"replay":false}`)
+	done := make(chan error, 1)
+	go func() { _, err := a.reviewErrors(context.Background()); done <- err }()
+	waitUntil(t, "the first model call", func() bool { mu.Lock(); defer mu.Unlock(); return judgeCalls == 1 })
+	if _, err := a.reviewErrors(context.Background()); !errors.Is(err, errReviewRunning) {
+		t.Errorf("second pass err = %v, want %v", err, errReviewRunning)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("POST", "/errors/review", strings.NewReader(`{"run":true}`)))
+	if rec.Code != http.StatusConflict {
+		t.Errorf("POST run while running = %d %s, want 409", rec.Code, rec.Body.String())
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	mu.Lock()
+	calls := judgeCalls
+	mu.Unlock()
+	if calls != 1 {
+		t.Errorf("model calls = %d, want 1", calls)
+	}
+	if got := reviewFilters(t, s); len(got) != 1 {
+		t.Errorf("filters = %v, want one", got)
+	}
+	if got := alerts(); len(got) != 1 || !strings.Contains(got[0], "Blacklisted field: anti_cheat") {
+		t.Errorf("alerts = %q, want one", got)
+	}
+}
+
+// A pass that is already running is not a model failure: the loop must not
+// pause the review or tell the channels.
+func TestErrorReviewLoopTreatsABusyPassAsNoError(t *testing.T) {
+	release := make(chan struct{})
+	var mu sync.Mutex
+	judgeCalls := 0
+	judge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		judgeCalls++
+		mu.Unlock()
+		<-release
+		b, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]any{
+			"content": `{"cause":"c","action":"ignore","reason":"r"}`}}}})
+		w.Write(b)
+	}))
+	defer judge.Close()
+	alerts := alertsServer(t)
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("openrouter", "o", "k2")
+	a, h := newServer(s, map[string]string{"openrouter": judge.URL}, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("POST", "/notify/channels",
+		strings.NewReader(`{"name":"ops","type":"telegram","enabled":true,"config":{"botToken":"123:TOK","chatId":"-100"}}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("channel: %d %s", rec.Code, rec.Body.String())
+	}
+	for i := 0; i < 3; i++ {
+		s.AddUpstreamError(store.UpstreamError{Provider: "groq", Connection: "c1", Model: "m", Client: "internal",
+			Endpoint: "chat/completions", Status: 400, Class: ClassRejected, Signature: "400 refused",
+			Message: "refused", ReqBody: `{"model":"m","messages":[]}`, QuotaLeft: -1})
+	}
+	s.SetSetting(errReviewKey, `{"enabled":true,"model":"openrouter/judge","minErrors":3,"replay":false}`)
+	done := make(chan error, 1)
+	go func() { _, err := a.reviewErrors(context.Background()); done <- err }()
+	waitUntil(t, "the first model call", func() bool { mu.Lock(); defer mu.Unlock(); return judgeCalls == 1 })
+	a.errorReviewOnce()
+	a.errReview.mu.Lock()
+	paused, lastErr := a.errReview.pauseTill, a.errReview.lastError
+	a.errReview.mu.Unlock()
+	close(release)
+	<-done
+	if !paused.IsZero() || lastErr != "" {
+		t.Errorf("pauseTill = %v lastError = %q, want the busy pass ignored", paused, lastErr)
+	}
+	for _, m := range alerts() {
+		if strings.Contains(m, "paused") {
+			t.Errorf("a busy pass alerted: %q", m)
+		}
 	}
 }

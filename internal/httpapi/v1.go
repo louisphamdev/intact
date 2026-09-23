@@ -41,6 +41,10 @@ const (
 	catalogFailTTL = time.Minute
 )
 
+// catalogFetchTimeout bounds one list fetch. The fetch outlives the caller that
+// started it, so it carries its own bound.
+var catalogFetchTimeout = upstream.NewLimit(2 * time.Minute)
+
 type catalogEntry struct {
 	ids []string
 	ok  bool
@@ -56,6 +60,15 @@ type catalogEntry struct {
 type catalog struct {
 	mu sync.Mutex
 	m  map[string]catalogEntry
+	// inflight holds the fetch running for a provider, so concurrent misses
+	// share one upstream list call.
+	inflight map[string]*catalogFetch
+}
+
+// catalogFetch is one running list fetch. A waiter reads ids after done closes.
+type catalogFetch struct {
+	done chan struct{}
+	ids  []string
 }
 
 // v1 forwards a request to the accounts that serve the model named in its body.
@@ -64,6 +77,12 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 	r.Body.Close()
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "cannot read body")
+		return
+	}
+	// Only the first "model" is read here, while the provider may read the
+	// last one, so the id intact checks would not be the id that runs.
+	if topLevelCount(body, "model") > 1 {
+		writeError(w, http.StatusBadRequest, "the request names \"model\" more than once")
 		return
 	}
 	original := body
@@ -272,10 +291,8 @@ func (a *api) providerModels(ctx context.Context, prov string) []string {
 	return out
 }
 
-// catalogIDs returns everything a provider lists, fetching when the cache is
-// stale and recording the list in the database: a live list drops the models
-// that are gone, a fallback list does not. New models start by the provider's
-// policy; under AutoTest they are tested in the background.
+// catalogIDs returns everything a provider lists, from the cache while it is
+// fresh and from one shared fetch when it is not.
 func (a *api) catalogIDs(ctx context.Context, prov string) []string {
 	a.cat.mu.Lock()
 	e, hit := a.cat.m[prov]
@@ -287,6 +304,54 @@ func (a *api) catalogIDs(ctx context.Context, prov string) []string {
 	if hit && time.Since(e.at) < ttl {
 		return e.ids
 	}
+	return a.fetchCatalog(ctx, prov, e.ids)
+}
+
+// fetchCatalog runs one list fetch per provider: a caller that arrives while a
+// fetch runs waits for that one instead of starting a second. The fetch is
+// detached from the caller, so it still fills the cache when the caller goes
+// away, and a caller that gives up gets the list it already had.
+func (a *api) fetchCatalog(ctx context.Context, prov string, stale []string) []string {
+	a.cat.mu.Lock()
+	f, running := a.cat.inflight[prov]
+	if !running {
+		f = &catalogFetch{done: make(chan struct{})}
+		a.cat.inflight[prov] = f
+		go a.runCatalogFetch(ctx, prov, f)
+	}
+	a.cat.mu.Unlock()
+	select {
+	case <-f.done:
+		return f.ids
+	case <-ctx.Done():
+		return stale
+	}
+}
+
+// runCatalogFetch fills one entry and wakes its waiters. A fetch that brings
+// nothing keeps the ids already cached: an empty list would drop every model of
+// a provider that is briefly unreachable.
+func (a *api) runCatalogFetch(ctx context.Context, prov string, f *catalogFetch) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), catalogFetchTimeout.Get())
+	defer cancel()
+	e := a.fetchCatalogEntry(ctx, prov)
+	a.cat.mu.Lock()
+	defer a.cat.mu.Unlock()
+	if prev, had := a.cat.m[prov]; had && len(e.ids) == 0 && len(prev.ids) > 0 {
+		prev.ok, prev.at = false, time.Now()
+		e = prev
+	}
+	a.cat.m[prov] = e
+	delete(a.cat.inflight, prov)
+	f.ids = e.ids
+	close(f.done)
+}
+
+// fetchCatalogEntry reads a provider's list and records it in the database: a
+// live list drops the models that are gone, a fallback list does not. New
+// models start by the provider's policy; under AutoTest they are tested in the
+// background.
+func (a *api) fetchCatalogEntry(ctx context.Context, prov string) catalogEntry {
 	ids, ok := []string(nil), false
 	var groups map[string]variantSet
 	var raw []byte
@@ -315,19 +380,18 @@ func (a *api) catalogIDs(ctx context.Context, prov string) []string {
 			go a.autoTestHeld(prov, added, false)
 		}
 	}
-	a.cat.mu.Lock()
-	a.cat.m[prov] = catalogEntry{ids: ids, ok: ok, at: time.Now(), groups: groups, raw: raw,
+	return catalogEntry{ids: ids, ok: ok, at: time.Now(), groups: groups, raw: raw,
 		info: foldInfos(modelInfos(raw), groups)}
-	a.cat.mu.Unlock()
-	return ids
 }
 
-// refreshCatalog drops a provider's cached list and fetches it again.
+// refreshCatalog fetches a provider's list again, however fresh the cache is.
+// The cached entry stays until a new one replaces it, so a failed refresh still
+// serves the list that works.
 func (a *api) refreshCatalog(ctx context.Context, prov string) []string {
 	a.cat.mu.Lock()
-	delete(a.cat.m, prov)
+	ids := a.cat.m[prov].ids
 	a.cat.mu.Unlock()
-	return a.catalogIDs(ctx, prov)
+	return a.fetchCatalog(ctx, prov, ids)
 }
 
 // fetchModelIDs reads one account's model list and returns its ids.
@@ -645,7 +709,10 @@ func (a *api) send(r *http.Request, p provider.Provider, providerID, path, secre
 	if err != nil {
 		return nil, err
 	}
-	return upstream.Do(r.Context(), out, 1)
+	// The answer is relayed to the caller, so the wait for the headers and the
+	// gap between two reads are bounded, never the whole call: a stream that
+	// keeps sending must reach the caller whole.
+	return upstream.DoStream(r.Context(), out, 1)
 }
 
 // activeConnections returns the active connections of one provider.

@@ -26,8 +26,15 @@ The four parts are:
 Some object keys are names rather than fields, and they collapse to `{*}` so
 they do not raise alerts:
 - keys under `properties` (tool parameters) and `answers`;
-- id-like keys;
+- id-like keys, such as `msg_01AbCdEfGh`;
 - objects wider than 96 keys.
+
+An ordinary snake_case field name is not an id. `top_logprobs`,
+`safety_identifier` and `system_instruction` stay as they are. A key is a real
+field name when it is lower case, has an underscore, has no run of four digits
+and has no part longer than 20 characters. If the old code learned such a name
+as `{*}`, intact maps that entry to the real name at the first document that
+carries it. It records no change for the map.
 
 Some values are data, not API: `args`, `arguments`, `metadata`,
 `client_metadata`, `extra_body` and `headers`. For these, only each value's
@@ -126,8 +133,8 @@ Operation:
 
 ### Why a decision model, and why only the cause (decision, 2026-09-22)
 
-The first 48 changes recorded in production came from Hermes starting to call
-through intact: streaming, tools, JSON schema keywords. A hand review found
+The first 48 changes recorded in production came from a new client that started
+to call through intact: streaming, tools, JSON schema keywords. A hand review found
 none that was a provider change. The same 48 were given to Jev:
 
 | Trial | Matched the hand review |

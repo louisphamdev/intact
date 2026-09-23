@@ -111,11 +111,11 @@ func TestArenaAlias(t *testing.T) {
 	h := New(s, nil)
 	post := func(body string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest("POST", "/rankings/alias", strings.NewReader(body)))
+		h.ServeHTTP(rec, loopbackRequest("POST", "/rankings/alias", strings.NewReader(body)))
 		return rec
 	}
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/rankings/refresh", nil))
+	h.ServeHTTP(rec, loopbackRequest("POST", "/rankings/refresh", nil))
 	if rec.Code != 200 {
 		t.Fatalf("refresh %d %s", rec.Code, rec.Body.String())
 	}
@@ -128,7 +128,7 @@ func TestArenaAlias(t *testing.T) {
 	post(`{"provider":"github","model":"claude-opus-5","name":"-"}`)
 	s.SyncModels("github", []string{"kimi-k3-copilot", "claude-opus-5"}, false, nil)
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/providers/github/model-table", nil))
+	h.ServeHTTP(rec, loopbackRequest("GET", "/providers/github/model-table", nil))
 	var d struct{ Arena map[string]ArenaMatch }
 	json.Unmarshal(rec.Body.Bytes(), &d)
 	if d.Arena["kimi-k3-copilot"].Name != "kimi-k3-max" || fmt.Sprint(d.Arena["claude-opus-5"].Name) != "" {

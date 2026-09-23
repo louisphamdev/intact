@@ -636,8 +636,24 @@ function copy(text,what){
 }
 const copyBtn=(text,what)=>el('button',{class:'icon',type:'button',title:'Copy','aria-label':t('Copy {0}',what||text),onclick:()=>copy(text,what)},svg(ICON.copy));
 const copyLine=text=>el('div',{class:'copyline'},el('code',{text}),copyBtn(text));
+// A URL the provider sent may become an href, so only http(s) may be linked:
+// a javascript: value would run when the person clicks the link.
+function safeHref(u){
+  try{const x=new URL(u);return x.protocol==='https:'||x.protocol==='http:'}catch(e){return false}
+}
+// An expired session answers 302 /login, and fetch follows that to the 200
+// login page. Leave for /login at once, before any caller can read the answer
+// as a success and show a toast or an empty list.
+function checkSession(r){
+  let gone=r.status===401;
+  if(!gone&&r.redirected){try{gone=new URL(r.url).pathname==='/login'}catch(e){}}
+  if(!gone)return;
+  location.href='/login';
+  throw new Error(t('Your session expired. Sign in again.'));
+}
 async function api(path,opts){
   const r=await fetch(path,opts);
+  checkSession(r);
   const d=(r.headers.get('content-type')||'').includes('json')?await r.json():null;
   if(!r.ok)throw new Error((d&&d.error)||('HTTP '+r.status));
   return d;
@@ -733,7 +749,10 @@ function viewEndpoint(v,tab){
     // The sample calls a model that exists: the first of the first active provider.
     const p=[...new Set(S.accounts.filter(a=>a.isActive).map(a=>a.provider))].filter(wired).sort()[0];
     const r=p?await modelsFor(p):{ids:[]};
-    const m=p&&r.ids&&r.ids[0]?p+'/'+r.ids[0]:'<provider>/<model>';
+    // The sample is pasted into a shell, where a quote in a model id would
+    // break out of the single-quoted body.
+    const id=p&&r.ids&&r.ids[0];
+    const m=id&&/^[A-Za-z0-9._:/@+-]+$/.test(id)?p+'/'+id:'<provider>/<model>';
     curl.text=anth
       ?'curl '+o+path+' \\\n  -H "x-api-key: $INTACT_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"'+m+'","max_tokens":256,"messages":[{"role":"user","content":"hi"}]}\''
       :'curl '+o+path+' \\\n  -H "Authorization: Bearer $INTACT_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"model":"'+m+'","messages":[{"role":"user","content":"hi"}]}\'';
@@ -1313,6 +1332,7 @@ $('aForm').onsubmit=async e=>{
     if(!$('aIdRow').hidden&&!/^[a-z0-9][a-z0-9-]{0,39}$/.test(fd.get('provider')))throw new Error(t('The provider id must be lowercase letters, digits or -.'));
     if(!$('aIdRow').hidden&&setupOf(fd.get('provider')))throw new Error(t('That id is a built-in provider; open it from the list instead.'));
     const r=await fetch('/accounts',{method:'POST',body:new URLSearchParams(fd)});
+    checkSession(r);
     if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.error||('HTTP '+r.status))}
     const np=$('aProv').value;delete modelCache[np];closeModal('aModal');toast('Connection added');await load();
     if(!location.hash.endsWith('/'+np))location.hash='#/providers/'+encodeURIComponent(np);
@@ -1321,8 +1341,11 @@ $('aForm').onsubmit=async e=>{
 };
 async function deleteAccount(a){
   if(!confirm(t('Delete "{0}"?',a.label||a.id)))return;
-  const r=await fetch('/accounts/'+a.id+'/delete',{method:'POST'});
-  if(!r.ok){alert('Delete failed');return}
+  try{
+    const r=await fetch('/accounts/'+a.id+'/delete',{method:'POST'});
+    checkSession(r);
+    if(!r.ok)throw new Error('HTTP '+r.status);
+  }catch(e){alert(t('Delete failed'));return}
   delete modelCache[a.provider];toast('Deleted');await load();
 }
 
@@ -1528,7 +1551,10 @@ async function runLogin(p,label){
   if(r.device){
     const code=el('div',{style:'font:700 1.6rem/1.2 ui-monospace,monospace;letter-spacing:.15em;text-align:center;padding:.6rem;background:var(--bg);border:1px solid var(--line);border-radius:10px',text:r.userCode});
     $('lBody').replaceChildren(el('div',{class:'f'},'1. Copy this code',el('div',{style:'display:flex;gap:.5rem;align-items:center'},el('div',{style:'flex:1'},code),copyBtn(r.userCode,'code'))),
-      el('div',{class:'f'},t('2. Enter it at {0}',pname(p)),el('a',{href:r.verificationUri,target:'_blank',rel:'noopener',class:'copyline',style:'text-decoration:none'},el('code',{text:r.verificationUri}))),
+      el('div',{class:'f'},t('2. Enter it at {0}',pname(p)),
+        safeHref(r.verificationUri)
+          ?el('a',{href:r.verificationUri,target:'_blank',rel:'noopener',class:'copyline',style:'text-decoration:none'},el('code',{text:r.verificationUri}))
+          :el('div',{class:'copyline'},el('code',{text:r.verificationUri}))),
       el('p',{class:'muted small',style:'margin:0'},t('Waiting for {0}…',pname(p))),err);
     const poll=async()=>{
       if($('lModal').hidden)return;

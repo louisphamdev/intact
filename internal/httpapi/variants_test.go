@@ -104,18 +104,18 @@ func TestAntigravityVariantsFoldAndFallBack(t *testing.T) {
 	defer func() { antigravityProdURL = old }()
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
-	s.CreateConnection("antigravity", "a1", "ya29.a")
-	s.CreateConnection("antigravity", "a2", "ya29.b")
+	s.CreateConnection("antigravity", "a1", "fake-token-a")
+	s.CreateConnection("antigravity", "a2", "fake-token-b")
 	h := New(s, map[string]string{"antigravity": up.URL})
 
 	// One model per base in the list, with its variants beside it.
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/models", nil))
+	h.ServeHTTP(rec, loopbackRequest("GET", "/v1/models", nil))
 	if b := rec.Body.String(); !strings.Contains(b, `"antigravity/gemini-3.8-flash"`) || strings.Contains(b, "flash-high") {
 		t.Errorf("models = %s", b)
 	}
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/providers/antigravity/model-table", nil))
+	h.ServeHTTP(rec, loopbackRequest("GET", "/providers/antigravity/model-table", nil))
 	if !strings.Contains(rec.Body.String(), `"gemini-3.8-flash":["tiered","high","low"]`) || !strings.Contains(rec.Body.String(), `"gemini-3.1-pro":["low"]`) {
 		t.Errorf("table variants = %s", rec.Body.String())
 	}
@@ -212,7 +212,7 @@ func TestCloudflareListsFromModelSearch(t *testing.T) {
 	s.SetBaseURL(c.ID, up.URL+"/client/v4/accounts/acc/ai/v1")
 	h := New(s, nil)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/providers/cloudflare-ai/model-table", nil))
+	h.ServeHTTP(rec, loopbackRequest("GET", "/providers/cloudflare-ai/model-table", nil))
 	if gotPath != "/client/v4/accounts/acc/ai/models/search" || !strings.Contains(gotQuery, "task=Text%20Generation") {
 		t.Errorf("list read at %s?%s", gotPath, gotQuery)
 	}

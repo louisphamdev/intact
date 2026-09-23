@@ -129,8 +129,10 @@ func (a *api) quotaList(w http.ResponseWriter, r *http.Request) {
 // windowsFromHeaders reads the rate-limit headers providers send with each
 // answer: OpenAI-style x-ratelimit-{limit,remaining,reset}-{requests,tokens},
 // Codex's x-codex-{primary,secondary}-*, Copilot's x-quota-snapshot-*.
+// It never returns nil: the JSON of one account with null windows breaks the
+// whole Quota page.
 func windowsFromHeaders(h map[string]string) []QuotaWindow {
-	var out []QuotaWindow
+	out := []QuotaWindow{}
 	// Codex: primary (short) and secondary (weekly) windows.
 	for _, w := range []string{"primary", "secondary"} {
 		used, ok := h["x-codex-"+w+"-used-percent"]

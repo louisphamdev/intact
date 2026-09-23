@@ -45,7 +45,7 @@ func fakeModels(list *atomic.Value, works map[string]bool, auth *atomic.Value) *
 
 func tableOf(t *testing.T, h http.Handler, prov string) map[string]store.ProviderModel {
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/providers/"+prov+"/model-table", nil))
+	h.ServeHTTP(rec, loopbackRequest("GET", "/providers/"+prov+"/model-table", nil))
 	var d struct{ Models []store.ProviderModel }
 	json.Unmarshal(rec.Body.Bytes(), &d)
 	out := map[string]store.ProviderModel{}
@@ -57,7 +57,7 @@ func tableOf(t *testing.T, h http.Handler, prov string) map[string]store.Provide
 
 func post(h http.Handler, path, body string) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", path, strings.NewReader(body)))
+	h.ServeHTTP(rec, loopbackRequest("POST", path, strings.NewReader(body)))
 	return rec
 }
 
@@ -65,7 +65,7 @@ func waitIdle(t *testing.T, h http.Handler, prov string) {
 	t.Helper()
 	for i := 0; i < 200; i++ {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest("GET", "/providers/"+prov+"/model-policy", nil))
+		h.ServeHTTP(rec, loopbackRequest("GET", "/providers/"+prov+"/model-policy", nil))
 		if strings.Contains(rec.Body.String(), `"running":false`) {
 			return
 		}
@@ -92,7 +92,7 @@ func TestOnlyFreeWithoutAutoTest(t *testing.T) {
 	}
 	// A new model under only free starts on only when free.
 	list.Store(`{"data":[{"id":"a:free"},{"id":"b"},{"id":"c-free"},{"id":"d"}]}`)
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/providers/groq/model-table?refresh=1", nil))
+	h.ServeHTTP(httptest.NewRecorder(), loopbackRequest("GET", "/providers/groq/model-table?refresh=1", nil))
 	if m := tableOf(t, h, "groq"); !m["c-free"].Active || m["d"].Active {
 		t.Errorf("new under only free: %+v", m)
 	}
@@ -114,7 +114,7 @@ func TestFailedFetchDeletesNothing(t *testing.T) {
 	h := New(s, map[string]string{"groq": up.URL})
 	tableOf(t, h, "groq")
 	list.Store("")
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/providers/groq/model-table?refresh=1", nil))
+	h.ServeHTTP(httptest.NewRecorder(), loopbackRequest("GET", "/providers/groq/model-table?refresh=1", nil))
 	if m := tableOf(t, h, "groq"); len(m) != 2 {
 		t.Errorf("a failed fetch deleted models: %+v", m)
 	}
@@ -148,7 +148,7 @@ func TestAutoTestSwitchesByResult(t *testing.T) {
 	}
 	// A new model is tested before it is switched on.
 	list.Store(`{"data":[{"id":"good"},{"id":"good:free"},{"id":"new:free"}]}`)
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/providers/groq/model-table?refresh=1", nil))
+	h.ServeHTTP(httptest.NewRecorder(), loopbackRequest("GET", "/providers/groq/model-table?refresh=1", nil))
 	waitIdle(t, h, "groq")
 	m = tableOf(t, h, "groq")
 	if b, ok := m["bad"]; !ok || !b.Stale {
@@ -177,7 +177,7 @@ func TestAccountTestIsPinned(t *testing.T) {
 		}
 	}
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/account-tests", nil))
+	h.ServeHTTP(rec, loopbackRequest("GET", "/account-tests", nil))
 	if !strings.Contains(rec.Body.String(), two.ID) || !strings.Contains(rec.Body.String(), `"model":"m"`) {
 		t.Errorf("account tests = %s", rec.Body.String())
 	}

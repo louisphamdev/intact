@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+// MaxToolCallIndex is the highest tool_calls index a stream may use. The index
+// comes from the upstream body, so it is never trusted as a slice position: a
+// larger or negative index is dropped, never merged into another call.
+const MaxToolCallIndex = 127
+
 // CollectOpenAIStream reads Chat Completions chunks and returns the single
 // chat.completion they add up to. An upstream that only streams can still
 // answer a caller that asked for a whole response.
@@ -14,7 +19,7 @@ func CollectOpenAIStream(src io.Reader) []byte {
 	id, model := "", ""
 	var text, reasoning strings.Builder
 	type call struct{ id, name, args string }
-	var calls []*call
+	calls := map[int]*call{}
 	finish := ""
 	var usage obj
 	var errObj obj
@@ -51,17 +56,22 @@ func CollectOpenAIStream(src io.Reader) []byte {
 		for _, raw := range list(d["tool_calls"]) {
 			tc := asObj(raw)
 			i := int(num(tc["index"]))
-			for len(calls) <= i {
-				calls = append(calls, &call{})
+			if i < 0 || i > MaxToolCallIndex {
+				continue
+			}
+			c := calls[i]
+			if c == nil {
+				c = &call{}
+				calls[i] = c
 			}
 			fn := asObj(tc["function"])
 			if s := str(tc["id"]); s != "" {
-				calls[i].id = s
+				c.id = s
 			}
 			if s := str(fn["name"]); s != "" {
-				calls[i].name = s
+				c.name = s
 			}
-			calls[i].args += str(fn["arguments"])
+			c.args += str(fn["arguments"])
 		}
 		if f := str(c["finish_reason"]); f != "" {
 			finish = f
@@ -85,8 +95,10 @@ func CollectOpenAIStream(src io.Reader) []byte {
 	}
 	if len(calls) > 0 {
 		var tcs []any
-		for _, c := range calls {
-			tcs = append(tcs, obj{"id": c.id, "type": "function", "function": obj{"name": c.name, "arguments": c.args}})
+		for i := 0; i <= MaxToolCallIndex; i++ {
+			if c := calls[i]; c != nil {
+				tcs = append(tcs, obj{"id": c.id, "type": "function", "function": obj{"name": c.name, "arguments": c.args}})
+			}
 		}
 		msg["tool_calls"] = tcs
 	}

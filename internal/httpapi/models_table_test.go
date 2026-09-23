@@ -27,7 +27,7 @@ func TestModelTableSwitchDropAndTest(t *testing.T) {
 	h := New(s, map[string]string{"groq": up.URL})
 	do := func(method, path, body string) string {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
+		h.ServeHTTP(rec, loopbackRequest(method, path, strings.NewReader(body)))
 		return rec.Body.String()
 	}
 	if b := do("GET", "/providers/groq/model-table", ""); !strings.Contains(b, `"model":"a"`) || !strings.Contains(b, `"active":true`) {

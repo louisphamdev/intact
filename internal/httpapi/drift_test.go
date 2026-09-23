@@ -24,7 +24,7 @@ func TestDriftSeesANewClientFieldAndANewProviderField(t *testing.T) {
 	h := New(s, map[string]string{"claude": up.URL})
 	msg := func(b string) {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/messages", strings.NewReader(b)))
+		h.ServeHTTP(rec, loopbackRequest("POST", "/v1/messages", strings.NewReader(b)))
 	}
 	for i := 0; i < 4; i++ {
 		msg(`{"model":"claude/m","max_tokens":1,"messages":[]}`)
@@ -36,7 +36,7 @@ func TestDriftSeesANewClientFieldAndANewProviderField(t *testing.T) {
 	var body string
 	for i := 0; i < 50; i++ {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/drift/changes?unacked=1", nil))
+		h.ServeHTTP(rec, loopbackRequest("GET", "/api/drift/changes?unacked=1", nil))
 		body = rec.Body.String()
 		if strings.Contains(body, "anti_cheat_nonce") && strings.Contains(body, "x_new") {
 			break
@@ -50,9 +50,9 @@ func TestDriftSeesANewClientFieldAndANewProviderField(t *testing.T) {
 		t.Errorf("provider field not reported: %s", body)
 	}
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/drift/ack", strings.NewReader(`{}`)))
+	h.ServeHTTP(rec, loopbackRequest("POST", "/api/drift/ack", strings.NewReader(`{}`)))
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/drift/changes?unacked=1", nil))
+	h.ServeHTTP(rec, loopbackRequest("GET", "/api/drift/changes?unacked=1", nil))
 	if !strings.Contains(rec.Body.String(), `"unacked":0`) {
 		t.Errorf("after ack: %s", rec.Body.String())
 	}
@@ -82,7 +82,7 @@ func TestDriftFieldsEmptyIsAList(t *testing.T) {
 	defer s.Close()
 	h := New(s, nil)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/drift/fields?provider=codex", nil))
+	h.ServeHTTP(rec, loopbackRequest("GET", "/drift/fields?provider=codex", nil))
 	if !strings.Contains(rec.Body.String(), `"fields":[]`) {
 		t.Errorf("fields = %s", rec.Body.String())
 	}

@@ -16,7 +16,7 @@ import (
 
 func postJSONTo(h http.Handler, path, body string) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", path, strings.NewReader(body)))
+	h.ServeHTTP(rec, loopbackRequest("POST", path, strings.NewReader(body)))
 	return rec
 }
 
@@ -43,7 +43,7 @@ func TestDeclaredAPIKeyProvider(t *testing.T) {
 	}
 	// An account: a pasted key, as for a built-in provider.
 	rec := httptest.NewRecorder()
-	areq := httptest.NewRequest("POST", "/accounts", strings.NewReader(url.Values{"provider": {"acme"}, "label": {"k"}, "secret": {"sk-1"}}.Encode()))
+	areq := loopbackRequest("POST", "/accounts", strings.NewReader(url.Values{"provider": {"acme"}, "label": {"k"}, "secret": {"sk-1"}}.Encode()))
 	areq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	h.ServeHTTP(rec, areq)
 	if rec.Code >= 400 {
@@ -51,7 +51,7 @@ func TestDeclaredAPIKeyProvider(t *testing.T) {
 	}
 	// The list: a bare array, "models/" dropped.
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/models", nil))
+	h.ServeHTTP(rec, loopbackRequest("GET", "/v1/models", nil))
 	if b := rec.Body.String(); !strings.Contains(b, `"acme/alpha"`) || !strings.Contains(b, `"acme/beta"`) {
 		t.Errorf("models = %s", b)
 	}
@@ -61,7 +61,7 @@ func TestDeclaredAPIKeyProvider(t *testing.T) {
 	}
 	// It is listed with its name, and refuses deletion while it has an account.
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/providers", nil))
+	h.ServeHTTP(rec, loopbackRequest("GET", "/providers", nil))
 	if !strings.Contains(rec.Body.String(), `"name":"Acme AI"`) {
 		t.Errorf("providers = %s", rec.Body.String())
 	}
@@ -86,7 +86,7 @@ func TestDeclaredFixedModelsAndAnthropic(t *testing.T) {
 	c, _ := s.CreateConnection("claudish", "k", "ak")
 	_ = c
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/providers/claudish/model-table", nil))
+	h.ServeHTTP(rec, loopbackRequest("GET", "/providers/claudish/model-table", nil))
 	if b := rec.Body.String(); !strings.Contains(b, `"model":"m-1"`) || !strings.Contains(b, `"model":"m-2"`) {
 		t.Errorf("table = %s", b)
 	}

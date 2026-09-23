@@ -13,7 +13,7 @@ import (
 
 func rpc(t *testing.T, h http.Handler, token, body string) map[string]any {
 	t.Helper()
-	req := httptest.NewRequest("POST", "/mcp", strings.NewReader(body))
+	req := loopbackRequest("POST", "/mcp", strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -90,11 +90,11 @@ func TestManagementAPINeedsTheToken(t *testing.T) {
 
 	for _, path := range []string{"/api/filters", "/api/accounts", "/api/providers", "/api/usage"} {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		h.ServeHTTP(rec, loopbackRequest("GET", path, nil))
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s without token: code=%d", path, rec.Code)
 		}
-		req := httptest.NewRequest("GET", path, nil)
+		req := loopbackRequest("GET", path, nil)
 		req.Header.Set("Authorization", "Bearer "+cfg.APIToken)
 		rec = httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
@@ -102,7 +102,7 @@ func TestManagementAPINeedsTheToken(t *testing.T) {
 			t.Errorf("%s with token: code=%d body=%s", path, rec.Code, rec.Body.String())
 		}
 	}
-	req := httptest.NewRequest("POST", "/api/filters", strings.NewReader(`{"kind":"header","pattern":"x-debug"}`))
+	req := loopbackRequest("POST", "/api/filters", strings.NewReader(`{"kind":"header","pattern":"x-debug"}`))
 	req.Header.Set("Authorization", "Bearer "+cfg.APIToken)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -111,7 +111,7 @@ func TestManagementAPINeedsTheToken(t *testing.T) {
 	if rec.Code != http.StatusOK || f.Pattern != "X-Debug" || f.Provider != "*" {
 		t.Fatalf("create: code=%d body=%s", rec.Code, rec.Body.String())
 	}
-	req = httptest.NewRequest("DELETE", "/api/filters/"+f.ID, nil)
+	req = loopbackRequest("DELETE", "/api/filters/"+f.ID, nil)
 	req.Header.Set("Authorization", "Bearer "+cfg.APIToken)
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -127,7 +127,7 @@ func TestDashboardKeysWorkAsAPITokens(t *testing.T) {
 	h := NewWithAuth(s, nil, cfg)
 	ck := loginCookie(t, h, cfg)
 
-	req := httptest.NewRequest("POST", "/keys", strings.NewReader(`{"name":"laptop"}`))
+	req := loopbackRequest("POST", "/keys", strings.NewReader(`{"name":"laptop"}`))
 	req.AddCookie(ck)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -137,7 +137,7 @@ func TestDashboardKeysWorkAsAPITokens(t *testing.T) {
 		t.Fatalf("create: %s", rec.Body.String())
 	}
 	call := func(hdr, val string) int {
-		req := httptest.NewRequest("GET", "/api/filters", nil)
+		req := loopbackRequest("GET", "/api/filters", nil)
 		req.Header.Set(hdr, val)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
@@ -154,7 +154,7 @@ func TestDashboardKeysWorkAsAPITokens(t *testing.T) {
 		t.Errorf("disabled key: code=%d", c)
 	}
 	// A machine token cannot manage keys.
-	req = httptest.NewRequest("GET", "/keys", nil)
+	req = loopbackRequest("GET", "/keys", nil)
 	req.Header.Set("Authorization", "Bearer "+cfg.APIToken)
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

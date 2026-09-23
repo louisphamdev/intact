@@ -91,11 +91,11 @@ usage:
 `cache_creation`, `service_tier` and `inference_geo` have no equivalent in the
 OpenAI schema; a gateway that converts the response must drop them.
 
-## Not implemented
+## Token refresh
 
-**The OAuth token is stored, not refreshed.** Claude Code refreshes its token
-when it expires. `intact` holds the value it was given, so a stored token stops
-working when it expires. Refresh belongs to a later phase.
+`intact` refreshes the OAuth token. When the access token expires, it sends the
+refresh-token grant to Anthropic and stores the new pair. When Anthropic rotates
+the refresh token, the new one is stored too. See [Providers](providers.md).
 
 To add a connection, insert the token as the secret of a `claude` connection. The
 token never appears in a response: `/accounts` returns the id, the provider, the

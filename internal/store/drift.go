@@ -16,6 +16,10 @@ type ShapeField struct {
 	LastObs  int64  `json:"lastObs"`
 	Gone     bool   `json:"gone"`
 	LastAt   string `json:"lastAt"`
+	// Legacy marks a path the code before the field-name fix learned. Such a
+	// path may hold a real field name that was collapsed to "{*}", so the
+	// observer maps it instead of reporting it as removed.
+	Legacy bool `json:"legacy,omitempty"`
 }
 
 // ShapeChange is one recorded change of structure.
@@ -35,6 +39,8 @@ type ShapeChange struct {
 	// Client is who sent a request change: the API key's name, "env" for the
 	// environment token, "internal" for intact's own calls.
 	Client string `json:"client,omitempty"`
+	// ClientKeyID is the API key ID that sent the request change.
+	ClientKeyID string `json:"clientKeyId,omitempty"`
 	// Verdict is the reviewer's category (see the drift review), with its
 	// confidence; AutoAcked marks a change the reviewer acknowledged itself.
 	Verdict     string  `json:"verdict,omitempty"`
@@ -61,12 +67,28 @@ type Verdict struct {
 
 // migrateDrift adds the columns newer than the table.
 func (s *Store) migrateDrift() error {
-	for _, col := range []string{"client TEXT NOT NULL DEFAULT ''", "verdict TEXT NOT NULL DEFAULT ''",
+	for _, col := range []string{"client TEXT NOT NULL DEFAULT ''", "client_key_id TEXT NOT NULL DEFAULT ''", "verdict TEXT NOT NULL DEFAULT ''",
 		"verdict_conf REAL NOT NULL DEFAULT 0", "verdict_at TEXT NOT NULL DEFAULT ''", "auto_acked INTEGER NOT NULL DEFAULT 0",
 		"verdict_by TEXT NOT NULL DEFAULT ''", "verdict_note TEXT NOT NULL DEFAULT ''", "resolved INTEGER NOT NULL DEFAULT 0"} {
 		if _, err := s.DB.Exec("ALTER TABLE shape_changes ADD COLUMN " + col); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return fmt.Errorf("migrate shape_changes: %w", err)
 		}
+	}
+	return s.migrateShapeFields()
+}
+
+// migrateShapeFields adds the legacy column. The ALTER succeeds exactly once,
+// on a database the old code wrote, so that is where the already learned "{*}"
+// paths are marked. A later start finds the column and does nothing.
+func (s *Store) migrateShapeFields() error {
+	if _, err := s.DB.Exec("ALTER TABLE shape_fields ADD COLUMN legacy INTEGER NOT NULL DEFAULT 0"); err != nil {
+		if strings.Contains(err.Error(), "duplicate column") {
+			return nil
+		}
+		return fmt.Errorf("migrate shape_fields: %w", err)
+	}
+	if _, err := s.DB.Exec("UPDATE shape_fields SET legacy = 1 WHERE path LIKE '%{*}%'"); err != nil {
+		return fmt.Errorf("mark learned shape fields: %w", err)
 	}
 	return nil
 }
@@ -110,7 +132,7 @@ func (s *Store) ShapeChangesSince(at string) ([]ShapeChange, error) {
 }
 
 const shapeChangeCols = `id, at, direction, provider, endpoint, event, path, kind, old_type, new_type, sample, acked,
-	client, verdict, verdict_conf, verdict_at, auto_acked, verdict_by, verdict_note, resolved`
+	client, verdict, verdict_conf, verdict_at, auto_acked, verdict_by, verdict_note, resolved, client_key_id`
 
 func (s *Store) queryShapeChanges(q string, args ...any) ([]ShapeChange, error) {
 	rows, err := s.DB.Query(q, args...)
@@ -124,7 +146,7 @@ func (s *Store) queryShapeChanges(q string, args ...any) ([]ShapeChange, error) 
 		var acked, auto, resolved int
 		if err := rows.Scan(&c.ID, &c.At, &c.Direction, &c.Provider, &c.Endpoint, &c.Event, &c.Path, &c.Kind,
 			&c.OldType, &c.NewType, &c.Sample, &acked, &c.Client, &c.Verdict, &c.VerdictConf, &c.VerdictAt, &auto,
-			&c.VerdictBy, &c.VerdictNote, &resolved); err != nil {
+			&c.VerdictBy, &c.VerdictNote, &resolved, &c.ClientKeyID); err != nil {
 			return nil, err
 		}
 		c.Acked, c.AutoAcked, c.Resolved = acked != 0, auto != 0, resolved != 0
@@ -147,6 +169,7 @@ CREATE TABLE IF NOT EXISTS shape_fields (
 	last_obs  INTEGER NOT NULL,
 	gone      INTEGER NOT NULL DEFAULT 0,
 	last_at   TEXT NOT NULL DEFAULT '',
+	legacy    INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (key, path)
 );
 CREATE TABLE IF NOT EXISTS shape_changes (
@@ -161,7 +184,8 @@ CREATE TABLE IF NOT EXISTS shape_changes (
 	old_type  TEXT NOT NULL DEFAULT '',
 	new_type  TEXT NOT NULL DEFAULT '',
 	sample    TEXT NOT NULL DEFAULT '',
-	acked     INTEGER NOT NULL DEFAULT 0
+	acked     INTEGER NOT NULL DEFAULT 0,
+	client_key_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS shape_changes_acked ON shape_changes (acked, id);`
 
@@ -179,7 +203,7 @@ func (s *Store) LoadShapes() (map[string]int64, []ShapeField, error) {
 		keys[k] = n
 	}
 	rows.Close()
-	frows, err := s.DB.Query(`SELECT key, path, type, seen, first_obs, last_obs, gone, last_at FROM shape_fields`)
+	frows, err := s.DB.Query(`SELECT key, path, type, seen, first_obs, last_obs, gone, last_at, legacy FROM shape_fields`)
 	if err != nil {
 		return nil, nil, fmt.Errorf("query shape fields: %w", err)
 	}
@@ -187,11 +211,11 @@ func (s *Store) LoadShapes() (map[string]int64, []ShapeField, error) {
 	var fields []ShapeField
 	for frows.Next() {
 		var f ShapeField
-		var gone int
-		if err := frows.Scan(&f.Key, &f.Path, &f.Type, &f.Seen, &f.FirstObs, &f.LastObs, &gone, &f.LastAt); err != nil {
+		var gone, legacy int
+		if err := frows.Scan(&f.Key, &f.Path, &f.Type, &f.Seen, &f.FirstObs, &f.LastObs, &gone, &f.LastAt, &legacy); err != nil {
 			return nil, nil, err
 		}
-		f.Gone = gone != 0
+		f.Gone, f.Legacy = gone != 0, legacy != 0
 		fields = append(fields, f)
 	}
 	return keys, fields, frows.Err()
@@ -211,15 +235,18 @@ func (s *Store) SaveShapes(keys map[string]int64, fields []ShapeField) error {
 		}
 	}
 	for _, f := range fields {
-		gone := 0
+		gone, legacy := 0, 0
 		if f.Gone {
 			gone = 1
 		}
-		if _, err := tx.Exec(`INSERT INTO shape_fields (key, path, type, seen, first_obs, last_obs, gone, last_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		if f.Legacy {
+			legacy = 1
+		}
+		if _, err := tx.Exec(`INSERT INTO shape_fields (key, path, type, seen, first_obs, last_obs, gone, last_at, legacy)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(key, path) DO UPDATE SET type = excluded.type, seen = excluded.seen,
-			  last_obs = excluded.last_obs, gone = excluded.gone, last_at = excluded.last_at`,
-			f.Key, f.Path, f.Type, f.Seen, f.FirstObs, f.LastObs, gone, f.LastAt); err != nil {
+			  last_obs = excluded.last_obs, gone = excluded.gone, last_at = excluded.last_at, legacy = excluded.legacy`,
+			f.Key, f.Path, f.Type, f.Seen, f.FirstObs, f.LastObs, gone, f.LastAt, legacy); err != nil {
 			return fmt.Errorf("save shape field: %w", err)
 		}
 	}
@@ -231,9 +258,9 @@ func (s *Store) AddShapeChange(c ShapeChange) error {
 	if c.At == "" {
 		c.At = time.Now().UTC().Format(time.RFC3339)
 	}
-	_, err := s.DB.Exec(`INSERT INTO shape_changes (at, direction, provider, endpoint, event, path, kind, old_type, new_type, sample, client)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.At, c.Direction, c.Provider, c.Endpoint, c.Event, c.Path, c.Kind, c.OldType, c.NewType, c.Sample, c.Client)
+	_, err := s.DB.Exec(`INSERT INTO shape_changes (at, direction, provider, endpoint, event, path, kind, old_type, new_type, sample, client, client_key_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.At, c.Direction, c.Provider, c.Endpoint, c.Event, c.Path, c.Kind, c.OldType, c.NewType, c.Sample, c.Client, c.ClientKeyID)
 	if err != nil {
 		return fmt.Errorf("add shape change: %w", err)
 	}

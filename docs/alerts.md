@@ -42,6 +42,9 @@ A channel takes the events ticked for it; none ticked means every event.
 
 ## API and MCP
 
+These routes need the dashboard session or `INTACT_API_TOKEN`. A dashboard key
+gets 403, because a webhook url is a credential.
+
 | Route | Meaning |
 | --- | --- |
 | `GET /api/notify` | Channels (secrets masked), `types` with their fields, `events`. |
@@ -52,9 +55,3 @@ A channel takes the events ticked for it; none ticked means every event.
 
 MCP tools: `list_notify_channels`, `put_notify_channel`,
 `test_notify_channel`, `delete_notify_channel`.
-
-## This deployment (2026-09-22)
-
-Alerts go to the topic **🛡 intact alerts** of the Hermes News Telegram group,
-through Hermes' bot. The owner asked for one place where every problem
-reaches them; later users pick their own channels on this page.

@@ -21,7 +21,7 @@ func TestRefreshSendsGrantAndParsesToken(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tok, newRT, exp, err := Refresh(context.Background(), srv.URL, "cid", "csecret", "rt-1")
+	tok, newRT, exp, err := Refresh(context.Background(), srv.URL, "cid", "csecret", "rt-1", false)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestRefreshOmitsEmptySecret(t *testing.T) {
 		w.Write([]byte(`{"access_token":"t","expires_in":60}`))
 	}))
 	defer srv.Close()
-	if _, _, _, err := Refresh(context.Background(), srv.URL, "cid", "", "rt"); err != nil {
+	if _, _, _, err := Refresh(context.Background(), srv.URL, "cid", "", "rt", false); err != nil {
 		t.Fatal(err)
 	}
 	if hadSecret {
@@ -61,7 +61,7 @@ func TestRefreshErrorsOnBadStatus(t *testing.T) {
 		w.Write([]byte(`{"error":"invalid_grant"}`))
 	}))
 	defer srv.Close()
-	if _, _, _, err := Refresh(context.Background(), srv.URL, "cid", "", "rt"); err == nil {
+	if _, _, _, err := Refresh(context.Background(), srv.URL, "cid", "", "rt", false); err == nil {
 		t.Error("Refresh returned no error on 401")
 	}
 }

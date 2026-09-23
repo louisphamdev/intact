@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -59,16 +60,46 @@ var (
 )
 
 // mcpAdminTools are the tools a dashboard inference key may not run through
-// /mcp: config changes, credential moves, and reads of another client's stored
-// bodies. Only the master token, or the open loopback server, may.
+// /mcp: config changes, credential moves, reads of a credential, and reads of
+// another client's stored bodies. Only the master token, or the open loopback
+// server, may.
 var mcpAdminTools = map[string]bool{
 	"set_account_active": true, "set_models_active": true, "test_account": true,
-	"set_model_policy":   true,
-	"put_provider_def":   true, "delete_provider_def": true,
-	"add_filter":         true, "update_filter": true, "delete_filter": true,
-	"ack_drift_changes":  true, "drift_review": true, "error_review": true,
+	"set_model_policy": true,
+	"put_provider_def": true, "delete_provider_def": true,
+	"add_filter": true, "update_filter": true, "delete_filter": true,
+	"ack_drift_changes": true, "drift_review": true, "error_review": true,
 	"put_notify_channel": true, "test_notify_channel": true, "delete_notify_channel": true,
-	"get_error":          true,
+	"list_notify_channels": true, "get_error": true,
+}
+
+// mcpMask hides what a tool must not show a caller that is not admin. The
+// reply of an admin stays as stored, so an edit-and-save round trip never
+// writes a mask. A shape the mask does not know is dropped, never passed on.
+var mcpMask = map[string]func(any) any{
+	"list_provider_defs": func(v any) any {
+		defs, ok := v.([]provider.Def)
+		if !ok {
+			return nil
+		}
+		out := make([]provider.Def, len(defs))
+		for i, d := range defs {
+			out[i] = maskDef(d)
+		}
+		return out
+	},
+	"list_drift_changes": func(v any) any {
+		changes, ok := v.([]store.ShapeChange)
+		if !ok {
+			return nil
+		}
+		out := make([]store.ShapeChange, len(changes))
+		for i, c := range changes {
+			c.Sample = ""
+			out[i] = c
+		}
+		return out
+	},
 }
 
 var mcpTools = []mcpTool{
@@ -158,7 +189,7 @@ var mcpTools = []mcpTool{
 			of, _ := args["onlyFree"].(bool)
 			return a.updatePolicy(argStr(args, "provider"), at, of)
 		}},
-	{Name: "list_provider_defs", Description: "List the declared providers (added from the dashboard, the API or MCP rather than built in), with their full definition.",
+	{Name: "list_provider_defs", Description: "List the declared providers (added from the dashboard, the API or MCP rather than built in), with their definition. A dashboard key reads the credentials masked.",
 		InputSchema: schema(map[string]any{}),
 		run:         func(a *api, args map[string]any) (any, error) { return a.store.ProviderDefs() }},
 	{Name: "put_provider_def", Description: "Declare a provider, or replace a declared provider's definition. def: {id, name, kind: apikey|oauth-code|oauth-device, api: openai|anthropic|responses, baseUrl, authHeader?, authPrefix?, headers?, modelsUrl? (or \"none\" with models), models?, color?, icon?, oauth?: {authorizeUrl|deviceCodeUrl, tokenUrl, clientId, clientSecret?, scope?, redirectUri?, verifyUrl?, noPkce?, jsonToken?, extra?}}.",
@@ -276,9 +307,19 @@ var mcpTools = []mcpTool{
 	{Name: "ack_drift_changes", Description: "Mark structure changes as reviewed: the ids given, or all of them when ids is empty.",
 		InputSchema: schema(map[string]any{"ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}}}),
 		run: func(a *api, args map[string]any) (any, error) {
+			// An id that is not an integer must be an error: dropping it would
+			// leave an empty list, which acknowledges every change.
 			var ids []int64
-			for _, v := range list(args["ids"]) {
-				if f, ok := v.(float64); ok {
+			if raw, given := args["ids"]; given && raw != nil {
+				l, ok := raw.([]any)
+				if !ok {
+					return nil, fmt.Errorf("ids must be a list of integers")
+				}
+				for _, v := range l {
+					f, ok := v.(float64)
+					if !ok || f != math.Trunc(f) {
+						return nil, fmt.Errorf("ids must be a list of integers, got %v", v)
+					}
 					ids = append(ids, int64(f))
 				}
 			}
@@ -405,8 +446,8 @@ func (a *api) putFilter(f store.Filter) (store.Filter, error) {
 	}
 	// Shared by the HTTP and the MCP entry points: neither may install a rule
 	// that strips an essential field from every request.
-	if riskyFieldPattern(f.Kind, f.Pattern) {
-		return store.Filter{}, errors.New("this pattern would strip an essential field from every request; narrow it")
+	if why := unsafeFilter(f.Kind, rule.Pattern); why != "" {
+		return store.Filter{}, errors.New(why)
 	}
 	f.Pattern = rule.Pattern
 	saved, err := a.store.SaveFilter(f)
@@ -499,8 +540,7 @@ func (a *api) mcp(w http.ResponseWriter, r *http.Request) {
 		// master token (or the open loopback server), the same bar the /api
 		// routes hold. callHandler runs a handler with no request identity, so
 		// the gate has to live here.
-		caller := clientOf(r)
-		admin := caller == "env" || caller == "internal"
+		admin := principalOf(r).admin
 		for _, t := range mcpTools {
 			if t.Name != p.Name {
 				continue
@@ -513,6 +553,9 @@ func (a *api) mcp(w http.ResponseWriter, r *http.Request) {
 				p.Arguments = map[string]any{}
 			}
 			res, err := t.run(a, p.Arguments)
+			if m := mcpMask[t.Name]; m != nil && !admin {
+				res = m(res)
+			}
 			rpcReply(w, req.ID, toolResult(res, err), nil)
 			return
 		}

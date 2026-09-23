@@ -5,8 +5,13 @@
 | Gate | How |
 | --- | --- |
 | **token** | An API key or `INTACT_API_TOKEN`, as `Authorization: Bearer <key>` or `x-api-key: <key>` |
+| **admin** | `INTACT_API_TOKEN` or the dashboard session cookie. An API key gets 403. |
 | **session** | The dashboard's session cookie, from the TOTP sign-in |
 | **open** | none |
+
+An API key calls the proxy and reads the management API. It does not manage
+intact. Every route marked **admin** below needs the master token or the
+session. [Security](security.md) lists the same routes and the masked reads.
 
 Errors are JSON: `{"error":{"message":"…"}}`.
 
@@ -23,7 +28,7 @@ Errors are JSON: `{"error":{"message":"…"}}`.
 Response header: `X-Intact-Model`, the upstream model that answered, when
 intact picked it (Antigravity variants). See [Routing](routing.md).
 
-## Management API (token)
+## Management API (token, some admin)
 
 ### Providers and accounts
 
@@ -31,8 +36,8 @@ intact picked it (Antigravity variants). See [Routing](routing.md).
 | --- | --- |
 | `GET /api/providers` | Providers with their account counts and setup kind. |
 | `GET /api/accounts` | Accounts (never credentials): id, provider, label, active, base URL. |
-| `POST /api/accounts/{id}/active` | `{"active":bool}`. |
-| `POST /api/accounts/{id}/test` | `{"model":"…"}` optional. Test one account alone; the result is kept. |
+| `POST /api/accounts/{id}/active` (admin) | `{"active":bool}`. |
+| `POST /api/accounts/{id}/test` (admin) | `{"model":"…"}` optional. Test one account alone; the result is kept. |
 
 ### Models
 
@@ -40,13 +45,13 @@ intact picked it (Antigravity variants). See [Routing](routing.md).
 | --- | --- |
 | `GET /api/providers/{id}/models` | The model table (see the fields below). `?refresh=1` fetches the list first. |
 | `GET /api/providers/{id}/models/raw` | The provider's last list answer, as it came. |
-| `POST /api/providers/{id}/models/active` | `{"models":[…],"active":bool}`. |
-| `POST /api/providers/{id}/models/delete` | `{"models":[…]}`. A model still listed comes back on the next fetch. |
-| `POST /api/providers/{id}/models/test` | `{"model":"…","account":"<connection id, optional>"}`. Returns `ok`, `status`, `ms`, `message`, `account`, and `active` when the test set the switch. |
+| `POST /api/providers/{id}/models/active` (admin) | `{"models":[…],"active":bool}`. |
+| `POST /api/providers/{id}/models/delete` (admin) | `{"models":[…]}`. A model still listed comes back on the next fetch. |
+| `POST /api/providers/{id}/models/test` (admin) | `{"model":"…","account":"<connection id, optional>"}`. Returns `ok`, `status`, `ms`, `message`, `account`, and `active` when the test set the switch. |
 | `GET /api/providers/{id}/rotation` | `{"rotation":{mode,sticky,order},"next":"<connection id>","used":n}`. |
-| `POST /api/providers/{id}/rotation` | `{"mode":"round-robin"\|"fallback","sticky":1–1000,"order":[connection ids]}`; fields left out keep their value. |
+| `POST /api/providers/{id}/rotation` (admin) | `{"mode":"round-robin"\|"fallback","sticky":1–1000,"order":[connection ids]}`; fields left out keep their value. |
 | `GET /api/providers/{id}/model-policy` | `{"policy":{autoTest,onlyFree,lastRun,lastResult},"running":bool}`. |
-| `POST /api/providers/{id}/model-policy` | `{"autoTest":bool,"onlyFree":bool}`: stores and applies it. |
+| `POST /api/providers/{id}/model-policy` (admin) | `{"autoTest":bool,"onlyFree":bool}`: stores and applies it. |
 
 Fields of the model table:
 
@@ -64,10 +69,10 @@ Fields of the model table:
 
 | Method and path | Purpose |
 | --- | --- |
-| `GET /api/provider-defs` | Every declared provider's definition. |
-| `GET /api/provider-defs/{id}` | One definition. |
-| `POST /api/provider-defs` | Declare a provider, or replace its definition (the JSON of [Declared providers](providers.md#declared-providers)). |
-| `DELETE /api/provider-defs/{id}` | Delete a declared provider with no account left. |
+| `GET /api/provider-defs` | Every declared provider's definition. For an API key the OAuth client secret and every static header value read `••••`. |
+| `GET /api/provider-defs/{id}` | One definition, masked the same way for an API key. |
+| `POST /api/provider-defs` (admin) | Declare a provider, or replace its definition (the JSON of [Declared providers](providers.md#declared-providers)). |
+| `DELETE /api/provider-defs/{id}` (admin) | Delete a declared provider with no account left. |
 
 Declared OAuth providers sign in through `POST /oauth/{id}/start` and then:
 - `POST /oauth/{id}/finish` for the browser flow;
@@ -78,8 +83,8 @@ Declared OAuth providers sign in through `POST /oauth/{id}/start` and then:
 | Method and path | Purpose |
 | --- | --- |
 | `GET /api/rankings` | The LMArena boards intact holds (`?q=` filters names), with `published`, `fetchedAt` and each board's top rating. |
-| `POST /api/rankings/refresh` | Read the boards now (otherwise once a day). |
-| `POST /api/rankings/alias` | `{"provider","model","name"}`: map a model to a board name by hand; `""` returns to automatic matching, `"-"` marks it as not on the board. |
+| `POST /api/rankings/refresh` (admin) | Read the boards now (otherwise once a day). |
+| `POST /api/rankings/alias` (admin) | `{"provider","model","name"}`: map a model to a board name by hand; `""` returns to automatic matching, `"-"` marks it as not on the board. |
 
 The model table also carries `arena` (per model: the matched entry, `how` and
 its `scores` per board: `rating`, `rank`, `votes`, `tier`) and `arenaMeta`.
@@ -89,27 +94,27 @@ its `scores` per board: `rating`, `rank`, `votes`, `tier`) and `arenaMeta`.
 | Method and path | Purpose |
 | --- | --- |
 | `GET /api/filters` | Every rule. |
-| `POST /api/filters` | `{"provider","kind","pattern","note","enabled"}`; with `id`, updates that rule. |
-| `DELETE /api/filters/{id}` (or `POST …/delete`) | Delete a rule. |
+| `POST /api/filters` (admin) | `{"provider","kind","pattern","note","enabled"}`; with `id`, updates that rule. |
+| `DELETE /api/filters/{id}` (or `POST …/delete`) (admin) | Delete a rule. |
 
 ### Drift
 
 | Method and path | Purpose |
 | --- | --- |
 | `GET /api/drift/changes` | `?provider=&direction=request\|response&unacked=1&since=<id>&limit=` |
-| `POST /api/drift/ack` | `{"ids":[…]}`; no ids acknowledges every change. |
+| `POST /api/drift/ack` (admin) | `{"ids":[…]}`; no ids acknowledges every change. The body must be JSON and less than 64 KiB, or the answer is 400. |
 | `GET /api/drift/fields` | `?provider=&direction=&endpoint=`: learned paths, types and counts. |
 | `GET /api/drift/review` | The automatic review: `enabled`, `decisionModel`, `resolverModel`, `ackConfidence`, `ready` (an account serves the decision model), `lastError`. |
-| `POST /api/drift/review` | Any of `{"enabled","decisionModel","resolverModel","ackConfidence"}`; `enabled` needs a decision model. `{"run":true}` judges the waiting changes now. |
-| `POST /api/drift/seed` | `{"direction","provider","endpoint","sse":bool,"documents":[…]}`: learn reference captures, recording no change. |
+| `POST /api/drift/review` (admin) | Any of `{"enabled","decisionModel","resolverModel","ackConfidence"}`; `enabled` needs a decision model. `{"run":true}` judges the waiting changes now. |
+| `POST /api/drift/seed` (admin) | `{"direction","provider","endpoint","sse":bool,"documents":[…]}`: learn reference captures, recording no change. |
 
 ### Errors
 
 | Route | Meaning |
 | --- | --- |
 | `GET /api/errors` | `?provider=&class=&status=&signature=&since=<RFC 3339>&limit=`: provider errors, newest first, without bodies. |
-| `GET /api/errors/{id}` | One error with its headers, answer and request. |
-| `GET /api/errors/review`, `POST /api/errors/review` | The error review: `{"enabled","model","minErrors","replay"}`; `{"run":true}` judges the groups due now. |
+| `GET /api/errors/{id}` | One error with its headers, answer and request. An API key reads the stored bodies only for the errors its own requests caused. |
+| `GET /api/errors/review`, `POST /api/errors/review` (admin for POST) | The error review: `{"enabled","model","minErrors","replay"}`; `{"run":true}` judges the groups due now. |
 | `GET /api/errors/verdicts` | The review's verdicts, newest first. |
 | `GET /api/errors/stats` | `?provider=&since=`: errors grouped by signature, with count, classes, models, median latency, first and last time. |
 
@@ -117,10 +122,10 @@ its `scores` per board: `rating`, `rank`, `votes`, `tier`) and `arenaMeta`.
 
 | Route | Meaning |
 | --- | --- |
-| `GET /api/notify` | Channels (secrets masked), channel types and their fields, events. |
-| `POST /api/notify/channels`, `PUT /api/notify/channels/{id}` | Create or replace `{"name","type","enabled","events","config"}`. |
-| `DELETE /api/notify/channels/{id}` | Delete. |
-| `POST /api/notify/channels/{id}/test` | Send a test alert. |
+| `GET /api/notify` (admin) | Channels (secrets masked), channel types and their fields, events. |
+| `POST /api/notify/channels`, `PUT /api/notify/channels/{id}` (admin) | Create or replace `{"name","type","enabled","events","config"}`. |
+| `DELETE /api/notify/channels/{id}` (admin) | Delete. |
+| `POST /api/notify/channels/{id}/test` (admin) | Send a test alert. |
 
 ### Quota and usage
 

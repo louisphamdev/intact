@@ -2,7 +2,6 @@
 package httpapi
 
 import (
-	"context"
 	"net/http"
 	"strings"
 	"sync"
@@ -60,8 +59,8 @@ func New(s *store.Store, baseOverride map[string]string) http.Handler {
 }
 
 // NewWithAuth builds the route table. When authCfg is not nil, a person must log
-// in with a password and a TOTP code to reach the dashboard, and a machine must
-// present the bearer token to use a provider.
+// in with a TOTP code to reach the dashboard, and a machine must present the
+// master token or a dashboard key. Only the session and the master token are admin.
 func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.Config) http.Handler {
 	_, h := newServer(s, baseOverride, authCfg)
 	return h
@@ -70,8 +69,9 @@ func NewWithAuth(s *store.Store, baseOverride map[string]string, authCfg *auth.C
 // newServer builds the api and its routes; tests reach the api through it.
 func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Config) (*api, http.Handler) {
 	a := &api{store: s, baseOverride: baseOverride, auth: authCfg, rrNext: map[string]rrCursor{},
-		cat: catalog{m: map[string]catalogEntry{}}, copilot: copilotCache{m: map[string]copilotToken{}},
-		sigs: sigStore{m: map[string]sigEntry{}}, drift: drift.New(s),
+		cat:     catalog{m: map[string]catalogEntry{}, inflight: map[string]*catalogFetch{}},
+		copilot: copilotCache{m: map[string]copilotToken{}},
+		sigs:    sigStore{m: map[string]sigEntry{}}, drift: drift.New(s),
 		rate: rateHeaders{m: map[string]rateSnapshot{}}, quota: quotaCache{m: map[string]AccountQuota{}},
 		auto: autoState{running: map[string]*autoRun{}}, login: newLoginGuard()}
 	go a.autoTestLoop()
@@ -88,7 +88,7 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	// Management API for machines: the same token as /v1.
 	mux.HandleFunc("GET /api/providers", a.requireToken(a.apiProviders))
 	mux.HandleFunc("GET /api/accounts", a.requireToken(a.accounts))
-	mux.HandleFunc("POST /api/accounts/{id}/active", a.requireToken(a.setActive))
+	mux.HandleFunc("POST /api/accounts/{id}/active", a.requireAdmin(a.setActive))
 	mux.HandleFunc("GET /api/usage", a.requireToken(a.usage))
 	mux.HandleFunc("GET /api/quota", a.requireToken(a.quotaList))
 	mux.HandleFunc("GET /quota", a.requireSession(a.quotaList))
@@ -101,12 +101,13 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	for _, pre := range []string{"", "/api"} {
 		// read: the dashboard session, or any machine token. write: the session
 		// or the master token only, so a shared inference key cannot redirect an
-		// alert channel or trigger a review.
+		// alert channel or trigger a review. The channel list is a write-level
+		// read: a webhook url IS the credential for Slack, Discord and ntfy.
 		read, write := a.requireSession, a.requireSession
 		if pre != "" {
 			read, write = a.requireToken, a.requireAdmin
 		}
-		mux.HandleFunc("GET "+pre+"/notify", read(a.notifyInfo))
+		mux.HandleFunc("GET "+pre+"/notify", write(a.notifyInfo))
 		mux.HandleFunc("POST "+pre+"/notify/channels", write(a.putChannel))
 		mux.HandleFunc("PUT "+pre+"/notify/channels/{id}", write(a.putChannel))
 		mux.HandleFunc("DELETE "+pre+"/notify/channels/{id}", write(a.deleteChannel))
@@ -143,7 +144,7 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	mux.HandleFunc("POST /accounts/{id}/label", a.requireSession(a.setLabel))
 	mux.HandleFunc("POST /accounts/{id}/test", a.requireSession(a.testAccount))
 	mux.HandleFunc("GET /account-tests", a.requireSession(a.accountTests))
-	mux.HandleFunc("POST /api/accounts/{id}/test", a.requireToken(a.testAccount))
+	mux.HandleFunc("POST /api/accounts/{id}/test", a.requireAdmin(a.testAccount))
 	mux.HandleFunc("GET /providers", a.requireSession(a.providers))
 	mux.HandleFunc("GET /providers/{id}/models", a.requireSession(a.providerModelList))
 	mux.HandleFunc("GET /providers/{id}/model-table", a.requireSession(a.providerModelTable))
@@ -153,11 +154,11 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	mux.HandleFunc("GET /providers/{id}/rotation", a.requireSession(a.getRotation))
 	mux.HandleFunc("POST /providers/{id}/rotation", a.requireSession(a.setRotation))
 	mux.HandleFunc("GET /api/providers/{id}/rotation", a.requireToken(a.getRotation))
-	mux.HandleFunc("POST /api/providers/{id}/rotation", a.requireToken(a.setRotation))
+	mux.HandleFunc("POST /api/providers/{id}/rotation", a.requireAdmin(a.setRotation))
 	mux.HandleFunc("GET /providers/{id}/model-policy", a.requireSession(a.getModelPolicy))
 	mux.HandleFunc("POST /providers/{id}/model-policy", a.requireSession(a.setModelPolicy))
 	mux.HandleFunc("GET /api/providers/{id}/model-policy", a.requireToken(a.getModelPolicy))
-	mux.HandleFunc("POST /api/providers/{id}/model-policy", a.requireToken(a.setModelPolicy))
+	mux.HandleFunc("POST /api/providers/{id}/model-policy", a.requireAdmin(a.setModelPolicy))
 	mux.HandleFunc("GET /api/providers/{id}/models", a.requireToken(a.providerModelTable))
 	mux.HandleFunc("GET /api/providers/{id}/models/raw", a.requireToken(a.providerModelsRaw))
 	mux.HandleFunc("GET /api/provider-defs", a.requireToken(a.listDefs))
@@ -169,14 +170,14 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	mux.HandleFunc("POST /provider-defs", a.requireSession(a.putDef))
 	mux.HandleFunc("POST /provider-defs/{id}/delete", a.requireSession(a.deleteDef))
 	mux.HandleFunc("GET /api/rankings", a.requireToken(a.rankings))
-	mux.HandleFunc("POST /api/rankings/refresh", a.requireToken(a.refreshRankings))
-	mux.HandleFunc("POST /api/rankings/alias", a.requireToken(a.setArenaAlias))
+	mux.HandleFunc("POST /api/rankings/refresh", a.requireAdmin(a.refreshRankings))
+	mux.HandleFunc("POST /api/rankings/alias", a.requireAdmin(a.setArenaAlias))
 	mux.HandleFunc("GET /rankings", a.requireSession(a.rankings))
 	mux.HandleFunc("POST /rankings/refresh", a.requireSession(a.refreshRankings))
 	mux.HandleFunc("POST /rankings/alias", a.requireSession(a.setArenaAlias))
-	mux.HandleFunc("POST /api/providers/{id}/models/active", a.requireToken(a.setModelsActive))
-	mux.HandleFunc("POST /api/providers/{id}/models/delete", a.requireToken(a.deleteModels))
-	mux.HandleFunc("POST /api/providers/{id}/models/test", a.requireToken(a.testModel))
+	mux.HandleFunc("POST /api/providers/{id}/models/active", a.requireAdmin(a.setModelsActive))
+	mux.HandleFunc("POST /api/providers/{id}/models/delete", a.requireAdmin(a.deleteModels))
+	mux.HandleFunc("POST /api/providers/{id}/models/test", a.requireAdmin(a.testModel))
 	mux.HandleFunc("GET /icons/{name}", a.icon)
 	mux.HandleFunc("GET /favicon.svg", a.siteIcon)
 	mux.HandleFunc("GET /favicon.ico", a.siteIcon)
@@ -200,7 +201,7 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	// "{$}" matches the root and nothing else. A bare "/" would be a catch-all
 	// and would answer every mistyped path with the dashboard.
 	mux.HandleFunc("GET /{$}", a.requireSession(a.dashboard))
-	return a, mux
+	return a, a.guardRequest(mux)
 }
 
 // requireSession lets a request through when auth is off or the session cookie
@@ -208,11 +209,11 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 func (a *api) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if a.auth == nil {
-			next(w, r)
+			next(w, withPrincipal(r, principal{admin: true}))
 			return
 		}
 		if ck, err := r.Cookie(sessionCookie); err == nil && a.auth.ValidSession(ck.Value) {
-			next(w, r)
+			next(w, withPrincipal(r, principal{admin: true}))
 			return
 		}
 		http.Redirect(w, r, "/login", http.StatusFound)
@@ -226,18 +227,19 @@ func (a *api) requireSession(next http.HandlerFunc) http.HandlerFunc {
 func (a *api) requireToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tok := bearerToken(r)
-		// The caller's name (its key's, or "env" for the environment token)
-		// travels with the request, so drift can learn each client apart.
+		// Who the caller is travels with the request: the master token is
+		// admin, and a dashboard key owns only what its key id caused. The key
+		// name is a label for drift and the error log, never a right.
 		if tok != "" && a.auth != nil && a.auth.CheckAPIToken("Bearer "+tok) {
-			next(w, r.WithContext(context.WithValue(r.Context(), clientKey{}, "env")))
+			next(w, withPrincipal(r, principal{admin: true, name: "env"}))
 			return
 		}
-		if name, ok := a.store.APIKeyName(tok); ok {
-			next(w, r.WithContext(context.WithValue(r.Context(), clientKey{}, name)))
+		if id, name, ok := a.store.APIKeyByToken(tok); ok {
+			next(w, withPrincipal(r, principal{keyID: id, name: name}))
 			return
 		}
 		if a.auth == nil {
-			next(w, r)
+			next(w, withPrincipal(r, principal{admin: true}))
 			return
 		}
 		writeError(w, http.StatusUnauthorized, "missing or invalid bearer token")
@@ -252,15 +254,15 @@ func (a *api) requireToken(next http.HandlerFunc) http.HandlerFunc {
 func (a *api) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if a.auth == nil {
-			next(w, r)
+			next(w, withPrincipal(r, principal{admin: true}))
 			return
 		}
 		if ck, err := r.Cookie(sessionCookie); err == nil && a.auth.ValidSession(ck.Value) {
-			next(w, r)
+			next(w, withPrincipal(r, principal{admin: true}))
 			return
 		}
 		if tok := bearerToken(r); tok != "" && a.auth.CheckAPIToken("Bearer "+tok) {
-			next(w, r.WithContext(context.WithValue(r.Context(), clientKey{}, "env")))
+			next(w, withPrincipal(r, principal{admin: true, name: "env"}))
 			return
 		}
 		writeError(w, http.StatusForbidden, "this action needs the dashboard session or the master token")
@@ -286,16 +288,4 @@ func (a *api) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(b)
-}
-
-// clientKey carries the calling client's name in a request's context.
-type clientKey struct{}
-
-// clientOf names who made a request: its API key's name, "env", or
-// "internal" for intact's own calls (tests, reviews) and an open server.
-func clientOf(r *http.Request) string {
-	if n, _ := r.Context().Value(clientKey{}).(string); n != "" {
-		return n
-	}
-	return "internal"
 }

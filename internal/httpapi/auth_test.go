@@ -44,14 +44,14 @@ func TestLoginWithCodeThenReachDashboard(t *testing.T) {
 	if rec.Code != http.StatusFound {
 		t.Fatalf("login POST code=%d, want 302", rec.Code)
 	}
-	cookie := rec.Result().Cookies()
-	if len(cookie) == 0 {
-		t.Fatal("login set no cookie")
+	cookie := cookieNamed(rec, sessionCookie)
+	if cookie == nil {
+		t.Fatal("login set no session cookie")
 	}
 
 	rec2 := httptest.NewRecorder()
 	req2 := httptest.NewRequest("GET", "/accounts", nil)
-	req2.AddCookie(cookie[0])
+	req2.AddCookie(cookie)
 	h.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("with session /accounts code=%d, want 200", rec2.Code)
@@ -109,8 +109,8 @@ func TestLoginPageRendersCleanly(t *testing.T) {
 		if strings.Contains(page, "{{ERR}}") {
 			t.Errorf("login page left a placeholder unfilled with msg=%q", msg)
 		}
-		if !strings.Contains(page, `aria-label="digit 1"`) {
-			t.Errorf("login page missing the OTP inputs")
+		if !strings.Contains(page, `id="code" name="totp"`) {
+			t.Errorf("login page missing the OTP input")
 		}
 		if msg != "" && !strings.Contains(page, msg) {
 			t.Errorf("login page did not show the error message")

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/louisphamdev/intact/internal/filter"
 	"github.com/louisphamdev/intact/internal/provider"
 	"github.com/louisphamdev/intact/internal/store"
 )
@@ -130,7 +131,14 @@ type reviewState struct {
 	mu        sync.Mutex
 	pauseTill time.Time
 	lastError string
+	// run is held for the length of one pass. A second pass would read the
+	// same rows and pay every model call again.
+	run sync.Mutex
 }
+
+// errReviewRunning answers a caller that asked for a pass while one runs. It
+// is not a failure: the caller that holds the lock does the work.
+var errReviewRunning = errors.New("a review is already running")
 
 // reviewFacts is what intact itself knows of a change.
 func (a *api) reviewFacts(c store.ShapeChange, around []store.ShapeChange) map[string]any {
@@ -181,7 +189,7 @@ func (a *api) askJev(ctx context.Context, model string, state any, questions map
 	body, _ := json.Marshal(map[string]any{"model": model, "state": string(st), "questions": questions})
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/systemone", strings.NewReader(string(body)))
+	req := withPrincipal(httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/systemone", strings.NewReader(string(body))), intactJob)
 	req.SetPathValue("path", "systemone")
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -273,7 +281,7 @@ func (a *api) resolveChange(ctx context.Context, cfg ReviewConfig, c store.Shape
 		"messages": []any{map[string]any{"role": "system", "content": resolverPrompt}, map[string]any{"role": "user", "content": string(in)}}})
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/chat/completions", strings.NewReader(string(body)))
+	req := withPrincipal(httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/chat/completions", strings.NewReader(string(body))), intactJob)
 	req.SetPathValue("path", "chat/completions")
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -306,36 +314,36 @@ func (a *api) resolveChange(ctx context.Context, cfg ReviewConfig, c store.Shape
 	// The resolver's action is final: the change is closed either way.
 	v := store.Verdict{Cause: out.Cause, Conf: jevConf, By: cfg.ResolverModel, Note: out.Reason, Resolved: true, Ack: true}
 	if out.Action == "blacklist" {
-		if why := a.autoBlacklist(c, facts); why != "" {
+		if c.ClientKeyID != "" {
+			v.Note = "the owner must approve: the change was sent by a dashboard key, so its text can steer the model"
+		} else if why := a.autoBlacklist(c, facts); why != "" {
 			v.Note = strings.TrimSpace(v.Note + " (" + why + ")")
 		}
 	}
 	return v, a.store.SetShapeVerdict(c.ID, v)
 }
 
-// protectedFields are never stripped on a model's word: without them the
-// request means something else.
-var protectedFields = map[string]bool{"model": true, "messages": true, "input": true, "tools": true, "stream": true,
-	"system": true, "max_tokens": true, "contents": true, "prompt": true}
-
 // autoBlacklist adds a field rule for a request field a provider refuses, when
 // the evidence holds: a request field that appeared or changed type, answers
-// failing since, and not a field the request needs. It says what it did.
+// failing since, and not a field the request needs. Most request drift sits
+// under messages, tools, input or contents, so the whole path is judged, never
+// its first segment. It says what it did.
 func (a *api) autoBlacklist(c store.ShapeChange, facts map[string]any) string {
-	top := c.Path
-	if i := strings.IndexAny(top, ".["); i >= 0 {
-		top = top[:i]
+	if c.ClientKeyID != "" {
+		return "not blacklisted: the owner must approve"
 	}
+	pattern := toFieldPattern(c.Path)
 	switch {
 	case c.Direction != "request" || (c.Kind != "added" && c.Kind != "type"):
 		return "not blacklisted: only a new request field can be"
 	case facts["failed_answers_since"].(int) == 0:
 		return "not blacklisted: no answer failed since"
-	case protectedFields[top]:
-		return "not blacklisted: the request needs " + top
+	case essentialField(pattern):
+		return "not blacklisted: the request needs " + pattern
+	case a.filterInPlace(c.Provider, filter.Field, pattern):
+		return "already blacklisted " + pattern
 	}
-	pattern := toFieldPattern(c.Path)
-	if _, err := a.putFilter(store.Filter{Provider: c.Provider, Kind: "field", Pattern: pattern,
+	if _, err := a.putFilter(store.Filter{Provider: c.Provider, Kind: filter.Field, Pattern: pattern,
 		Note: "drift review: " + c.Kind + " on " + c.Endpoint, Enabled: true}); err != nil {
 		return "blacklist failed: " + err.Error()
 	}
@@ -349,6 +357,10 @@ func (a *api) autoBlacklist(c store.ShapeChange, facts map[string]any) string {
 // ones judged before a resolver was set to it. It stops at the first failure
 // of a model.
 func (a *api) reviewPending(ctx context.Context) (int, error) {
+	if !a.review.run.TryLock() {
+		return 0, errReviewRunning
+	}
+	defer a.review.run.Unlock()
 	cfg := a.reviewConfig()
 	if !cfg.Enabled {
 		return 0, nil
@@ -394,23 +406,32 @@ func (a *api) reviewLoop() {
 		paused := time.Now().Before(a.review.pauseTill)
 		a.review.mu.Unlock()
 		if !paused {
-			a.drift.Drain()
-			a.drift.Flush()
-			if n, err := a.reviewPending(context.Background()); err != nil {
-				log.Printf("drift review: %v", err)
-				a.notify(EventReviewPaused, "paused|drift", 6*time.Hour, notifyMsg{Title: "Drift review paused for 10 minutes",
-					Lines: []string{truncate(err.Error(), 300)}, Path: "#/drift"})
-				a.review.mu.Lock()
-				a.review.pauseTill, a.review.lastError = time.Now().Add(reviewBackoff), err.Error()
-				a.review.mu.Unlock()
-			} else if n > 0 {
-				a.review.mu.Lock()
-				a.review.lastError = ""
-				a.review.mu.Unlock()
-				log.Printf("drift review: judged %d change(s)", n)
-			}
+			a.reviewOnce()
 		}
 		time.Sleep(reviewEvery)
+	}
+}
+
+// reviewOnce runs one pass and records a failure of the model. A pass that is
+// already running is not a failure, so it neither pauses nor alerts.
+func (a *api) reviewOnce() {
+	a.drift.Drain()
+	a.drift.Flush()
+	n, err := a.reviewPending(context.Background())
+	switch {
+	case errors.Is(err, errReviewRunning):
+	case err != nil:
+		log.Printf("drift review: %v", err)
+		a.notify(EventReviewPaused, "paused|drift", 6*time.Hour, notifyMsg{Title: "Drift review paused for 10 minutes",
+			Lines: []string{truncate(err.Error(), 300)}, Path: "#/drift"})
+		a.review.mu.Lock()
+		a.review.pauseTill, a.review.lastError = time.Now().Add(reviewBackoff), err.Error()
+		a.review.mu.Unlock()
+	case n > 0:
+		a.review.mu.Lock()
+		a.review.lastError = ""
+		a.review.mu.Unlock()
+		log.Printf("drift review: judged %d change(s)", n)
 	}
 }
 
@@ -438,6 +459,10 @@ func (a *api) driftReview(w http.ResponseWriter, r *http.Request) {
 		}
 		if b.Run {
 			n, err := a.reviewPending(r.Context())
+			if errors.Is(err, errReviewRunning) {
+				writeError(w, http.StatusConflict, err.Error())
+				return
+			}
 			if err != nil {
 				writeError(w, http.StatusBadGateway, err.Error())
 				return

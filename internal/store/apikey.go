@@ -127,14 +127,14 @@ func (s *Store) ValidAPIKey(k string) bool {
 	return s.DB.QueryRow(`SELECT 1 FROM api_keys WHERE key = ? AND enabled = 1`, k).Scan(&one) == nil
 }
 
-// APIKeyName returns the name of an enabled key, for telling clients apart.
-func (s *Store) APIKeyName(k string) (string, bool) {
-	if k == "" {
-		return "", false
+// APIKeyByToken returns the id and the name of an enabled key. The id is the
+// caller's identity: a name is free text that the operator can repeat.
+func (s *Store) APIKeyByToken(tok string) (id, name string, ok bool) {
+	if tok == "" {
+		return "", "", false
 	}
-	var name string
-	if s.DB.QueryRow(`SELECT name FROM api_keys WHERE key = ? AND enabled = 1`, k).Scan(&name) != nil {
-		return "", false
+	if s.DB.QueryRow(`SELECT id, name FROM api_keys WHERE key = ? AND enabled = 1`, tok).Scan(&id, &name) != nil {
+		return "", "", false
 	}
-	return name, true
+	return id, name, true
 }

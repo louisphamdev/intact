@@ -36,6 +36,9 @@ type field struct {
 	gone     bool
 	lastAt   string
 	dirty    bool
+	// legacy marks a "{*}" path the old collapsing rule learned. It never
+	// reports a removal, and a real field name may take its counters over.
+	legacy bool
 }
 
 type key struct {
@@ -45,9 +48,9 @@ type key struct {
 }
 
 type job struct {
-	dir, provider, endpoint, client string
-	body                            []byte
-	sse                             bool
+	dir, provider, endpoint, client, clientKeyID string
+	body                                         []byte
+	sse                                          bool
 }
 
 // Observer learns structures and records their changes. Observe never blocks
@@ -76,7 +79,7 @@ func newObserver(s *store.Store, background bool) *Observer {
 				kk = &key{fields: map[string]*field{}}
 				o.keys[f.Key] = kk
 			}
-			kk.fields[f.Path] = &field{typ: f.Type, seen: f.Seen, firstObs: f.FirstObs, lastObs: f.LastObs, gone: f.Gone, lastAt: f.LastAt}
+			kk.fields[f.Path] = &field{typ: f.Type, seen: f.Seen, firstObs: f.FirstObs, lastObs: f.LastObs, gone: f.Gone, lastAt: f.LastAt, legacy: f.Legacy}
 		}
 	} else {
 		log.Printf("drift: load: %v", err)
@@ -96,11 +99,16 @@ func (o *Observer) Observe(dir, provider, endpoint string, body []byte, sse bool
 // per client, so one client's habits (a field it always sends) do not read as
 // another client's change.
 func (o *Observer) ObserveFrom(dir, provider, client, endpoint string, body []byte, sse bool) {
+	o.ObserveFromKey(dir, provider, client, "", endpoint, body, sse)
+}
+
+// ObserveFromKey queues a document sent by a named client and API key.
+func (o *Observer) ObserveFromKey(dir, provider, client, keyID, endpoint string, body []byte, sse bool) {
 	if o == nil || len(body) == 0 {
 		return
 	}
 	select {
-	case o.q <- job{dir, provider, endpoint, client, body, sse}:
+	case o.q <- job{dir, provider, endpoint, client, keyID, body, sse}:
 	default:
 	}
 }
@@ -135,7 +143,7 @@ func (o *Observer) process(j job) {
 		if paths == nil {
 			continue
 		}
-		o.observe(j.dir, j.provider, j.endpoint, j.client, ev.Name, paths, ev.Body, false)
+		o.observe(j.dir, j.provider, j.endpoint, j.client, j.clientKeyID, ev.Name, paths, ev.Body, false)
 	}
 }
 
@@ -151,14 +159,14 @@ func (o *Observer) Seed(dir, provider, endpoint string, body []byte, sse bool) i
 	n := 0
 	for _, ev := range events {
 		if paths := Paths(ev.Body); paths != nil {
-			o.observe(dir, provider, endpoint, "", ev.Name, paths, ev.Body, true)
+			o.observe(dir, provider, endpoint, "", "", ev.Name, paths, ev.Body, true)
 			n++
 		}
 	}
 	return n
 }
 
-func (o *Observer) observe(dir, provider, endpoint, client, event string, paths map[string]string, body []byte, quiet bool) {
+func (o *Observer) observe(dir, provider, endpoint, client, clientKeyID, event string, paths map[string]string, body []byte, quiet bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	ep := endpoint
@@ -181,11 +189,20 @@ func (o *Observer) observe(dir, provider, endpoint, client, event string, paths 
 			return
 		}
 		changes = append(changes, store.ShapeChange{At: now, Direction: dir, Provider: provider, Endpoint: endpoint,
-			Event: event, Path: path, Kind: kind, OldType: oldT, NewType: newT, Sample: sample(body), Client: client})
+			Event: event, Path: path, Kind: kind, OldType: oldT, NewType: newT, Sample: sample(body), Client: client, ClientKeyID: clientKeyID})
 	}
 	for p, t := range paths {
 		f := kk.fields[p]
 		if f == nil {
+			// The old rule collapsed this name to "{*}". Take that entry's
+			// counters over, so the rename is no change for the review.
+			if lp := legacyPath(p); lp != p {
+				if lf := kk.fields[lp]; lf != nil && lf.legacy {
+					kk.fields[p] = &field{typ: MergeTypes(lf.typ, t), seen: lf.seen + 1, firstObs: lf.firstObs,
+						lastObs: kk.obs, lastAt: now, dirty: true}
+					continue
+				}
+			}
 			kk.fields[p] = &field{typ: t, seen: 1, firstObs: kk.obs, lastObs: kk.obs, lastAt: now, dirty: true}
 			change(p, "added", "", t)
 			continue
@@ -209,7 +226,7 @@ func (o *Observer) observe(dir, provider, endpoint, client, event string, paths 
 		f.dirty = true
 	}
 	for p, f := range kk.fields {
-		if f.gone || kk.obs-f.lastObs < goneAfter || f.seen < goneMinSeen {
+		if f.legacy || f.gone || kk.obs-f.lastObs < goneAfter || f.seen < goneMinSeen {
 			continue
 		}
 		span := f.lastObs - f.firstObs + 1
@@ -253,7 +270,7 @@ func (o *Observer) Flush() {
 		for p, f := range kk.fields {
 			if f.dirty {
 				fields = append(fields, store.ShapeField{Key: k, Path: p, Type: f.typ, Seen: f.seen,
-					FirstObs: f.firstObs, LastObs: f.lastObs, Gone: f.gone, LastAt: f.lastAt})
+					FirstObs: f.firstObs, LastObs: f.lastObs, Gone: f.gone, LastAt: f.lastAt, Legacy: f.legacy})
 				f.dirty = false
 				clearedFields = append(clearedFields, [2]string{k, p})
 			}

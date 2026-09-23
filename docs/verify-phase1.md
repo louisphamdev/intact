@@ -1,10 +1,10 @@
 # Phase 1 verification
 
 Date: 2026-09-20
-Host: VPS `copilot`, 2 vCPU Xeon E-2236, Debian
+Host: a 2 vCPU Debian server
 Binary: cross-compiled from Windows, `GOOS=linux GOARCH=amd64 CGO_ENABLED=0`, 10.8 MB, stripped, statically linked
 Listen: `127.0.0.1:20140`
-Provider under test: `groq`, credential taken from the existing 9router database **on the VPS**; it never left that host.
+Provider under test: `groq`. The credential stayed on the test host.
 
 ## What was proven
 
@@ -70,22 +70,22 @@ GET /nope    http=404
 
 ```
 intact           17.6 MB RSS
-9router core     54.9 MB RSS
-9router next-server 188.4 MB RSS
 ```
 
-## Two defects found only on the VPS
+The two processes of the gateway it replaces used 54.9 MB and 188.4 MB on the
+same host.
 
-1. **Port 20130 was already taken** by a local python service, so the first start
-   failed with `bind: address already in use` and the test request reached that
-   other service, which proxied it to 9router and returned a 9Router HTML page.
-   Moved to 20140.
-2. **The model id in the llm-switcher profile does not exist at groq.**
+## Two defects found only on the host
+
+1. **The first port was already taken** by another local service, so the start
+   failed with `bind: address already in use`. The test request then reached that
+   other service, which answered with an HTML page. The listener moved to a free
+   port.
+2. **The model id in the client profile does not exist at groq.**
    `llama-3.3-70b-versatile` returns `model_not_found`; groq exposes
-   `openai/gpt-oss-120b`. That name is a 9router alias, not a provider id — the
-   same class of defect the `patch-antigravity-tiered-ids.py` patch corrects.
-   `intact` returned the provider's 404 body verbatim, which is how the cause was
-   identified in one request.
+   `openai/gpt-oss-120b`. The first name is an alias of another gateway, not a
+   provider id. `intact` returned the provider's 404 body unchanged, which is how
+   the cause was identified in one request.
 
 ## Repeated on a reproducible binary
 
@@ -94,7 +94,7 @@ reported `3a6e510e9923+dirty`, so the code that ran was not the code in any comm
 
 The binary was built again from a clean `15aa927` with `-trimpath`, which makes the
 build reproducible: two builds of the same commit gave the same SHA-256, and the
-file on the VPS has that same digest. `go version -m` now reports
+file on the test host has that same digest. `go version -m` now reports
 `vcs.revision=15aa927070c9` and `vcs.modified=false`.
 
 The live check was repeated on that binary:
@@ -110,7 +110,8 @@ usage         : queue_time, prompt_tokens, prompt_time, completion_tokens,
 RSS           : 13.7 MB
 ```
 
-`message.reasoning` is the field that the 9router hub removes. It arrives here.
+`message.reasoning` is the field that the gateway it replaces removes. It
+arrives here.
 
 CAUTION: Build a release with `-trimpath`. Without it the build embeds the path of
 the source directory, so the same commit gives a different digest on each machine

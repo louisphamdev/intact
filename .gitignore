@@ -6,3 +6,5 @@
 /intact-linux
 /intact-local.exe
 temp/
+*.env
+intact.env

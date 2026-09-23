@@ -16,14 +16,14 @@ func loginCookie(t *testing.T, h http.Handler, cfg *auth.Config) *http.Cookie {
 	t.Helper()
 	form := url.Values{"totp": {auth.TOTPNow(cfg.TOTPSecret)}}
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
+	req := loopbackRequest("POST", "/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	h.ServeHTTP(rec, req)
-	cks := rec.Result().Cookies()
-	if len(cks) == 0 {
-		t.Fatal("login gave no cookie")
+	ck := cookieNamed(rec, sessionCookie)
+	if ck == nil {
+		t.Fatal("login gave no session cookie")
 	}
-	return cks[0]
+	return ck
 }
 
 func TestAddAndDeleteConnectionThroughDashboard(t *testing.T) {
@@ -36,7 +36,7 @@ func TestAddAndDeleteConnectionThroughDashboard(t *testing.T) {
 	// create
 	form := url.Values{"provider": {"groq"}, "label": {"Work"}, "secret": {"gsk-xyz"}}
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/accounts", strings.NewReader(form.Encode()))
+	req := loopbackRequest("POST", "/accounts", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(ck)
 	h.ServeHTTP(rec, req)
@@ -51,7 +51,7 @@ func TestAddAndDeleteConnectionThroughDashboard(t *testing.T) {
 
 	// delete
 	rec2 := httptest.NewRecorder()
-	req2 := httptest.NewRequest("POST", "/accounts/"+id+"/delete", nil)
+	req2 := loopbackRequest("POST", "/accounts/"+id+"/delete", nil)
 	req2.AddCookie(ck)
 	h.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusFound {
@@ -69,7 +69,7 @@ func TestAddConnectionNeedsSession(t *testing.T) {
 	h := NewWithAuth(s, nil, authConfig())
 	form := url.Values{"provider": {"groq"}, "label": {"x"}, "secret": {"y"}}
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/accounts", strings.NewReader(form.Encode()))
+	req := loopbackRequest("POST", "/accounts", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/login" {
@@ -88,7 +88,7 @@ func TestToggleActiveThroughDashboard(t *testing.T) {
 	h := NewWithAuth(s, nil, cfg)
 	ck := loginCookie(t, h, cfg)
 
-	req := httptest.NewRequest("POST", "/accounts/"+c.ID+"/active", strings.NewReader(`{"active":false}`))
+	req := loopbackRequest("POST", "/accounts/"+c.ID+"/active", strings.NewReader(`{"active":false}`))
 	req.AddCookie(ck)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -101,7 +101,7 @@ func TestToggleActiveThroughDashboard(t *testing.T) {
 	}
 	// An inactive account is skipped by round-robin.
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/x", strings.NewReader(`{"model":"groq/m"}`)))
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/x", strings.NewReader(`{"model":"groq/m"}`)))
 	if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusNotFound {
 		t.Errorf("round-robin with no active account: code=%d", rec.Code)
 	}

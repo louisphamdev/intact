@@ -30,7 +30,7 @@ func TestLoginStartBuildsThePKCEURL(t *testing.T) {
 	defer s.Close()
 	h := New(s, nil)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/oauth/codex/start", nil))
+	h.ServeHTTP(rec, loopbackRequest("POST", "/oauth/codex/start", nil))
 	var d struct{ URL, State string }
 	json.Unmarshal(rec.Body.Bytes(), &d)
 	u, err := url.Parse(d.URL)
@@ -44,7 +44,7 @@ func TestLoginStartBuildsThePKCEURL(t *testing.T) {
 	}
 	// A pasted URL from another sign-in is refused before any exchange.
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/oauth/codex/finish",
+	h.ServeHTTP(rec, loopbackRequest("POST", "/oauth/codex/finish",
 		strings.NewReader(`{"state":"`+d.State+`","input":"http://localhost:1455/auth/callback?code=x&state=other"}`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("mismatched state: code=%d", rec.Code)

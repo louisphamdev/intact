@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-// loginPage is a single screen: six segmented boxes for the TOTP code. There is
-// no password. It auto-advances, accepts a paste, and submits on the sixth
-// digit. %s is the error line (a fixed internal string, never caller input).
+// loginPage is a single screen with one TOTP field, drawn as six boxes. Keep it
+// one real input: mobile paste and code autofill arrive as one input event, and
+// six maxlength=1 boxes keep only the first digit. It submits on the sixth digit.
 const loginPage = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>intact — sign in</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="icon" href="/favicon.ico" sizes="32x32"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#7c6cf6">
@@ -23,15 +23,20 @@ const loginPage = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 .lang button[aria-pressed=true]{color:var(--accent);font-weight:600}
 *{box-sizing:border-box}
 body{font:15px system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:var(--bg);color:var(--fg);display:grid;place-items:center;min-height:100vh;padding:1rem}
-.card{background:var(--card);border:1px solid var(--line);padding:2rem 1.75rem;border-radius:14px;width:min(23rem,94vw);text-align:center}
+.card{background:var(--card);border:1px solid var(--line);padding:2rem clamp(1rem,5vw,1.75rem);border-radius:14px;width:min(23rem,94vw);text-align:center}
 h1{font-size:1.6rem;font-weight:800;letter-spacing:-.03em;margin:.6rem 0 .3rem;background:linear-gradient(90deg,var(--fg) 20%,var(--mint));-webkit-background-clip:text;background-clip:text;color:transparent}
 .logo{display:inline-block;filter:drop-shadow(0 6px 18px rgba(124,108,246,.45))}
 p{color:var(--muted);font-size:.85rem;margin:0 0 1.5rem}
-.otp{display:flex;gap:.5rem;justify-content:center}
-.otp input{width:3rem;height:3.5rem;text-align:center;font-size:1.4rem;font-weight:600;color:var(--fg);
+.otp{position:relative;display:grid;grid-template-columns:repeat(6,minmax(0,3rem));gap:clamp(.3rem,1.8vw,.5rem);justify-content:center}
+.otp .cell{aspect-ratio:6/7;display:grid;place-items:center;font-size:1.4rem;font-weight:600;color:var(--fg);
   background:var(--bg);border:1px solid var(--line);border-radius:10px;transition:border-color .15s,box-shadow .15s}
-.otp input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(139,128,249,.25)}
-.otp.err input{border-color:var(--err)}
+.otp.focus .cell.on{border-color:var(--accent);box-shadow:0 0 0 3px rgba(139,128,249,.25)}
+.otp.err .cell{border-color:var(--err)}
+.otp input{position:absolute;inset:0;z-index:1;width:100%;height:100%;margin:0;padding:0;border:0;outline:none;
+  background:transparent;color:transparent;-webkit-text-fill-color:transparent;caret-color:transparent;font-size:16px;cursor:text}
+.otp input::selection{background:transparent}
+.otp input:-webkit-autofill{-webkit-background-clip:text;background-clip:text}
+.otp input:autofill{-webkit-background-clip:text;background-clip:text}
 .msg{color:var(--err);font-size:.82rem;min-height:1.2em;margin-top:1rem}
 @media (prefers-reduced-motion:no-preference){.otp.err{animation:shake .3s}}
 @keyframes shake{25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
@@ -42,15 +47,12 @@ p{color:var(--muted);font-size:.85rem;margin:0 0 1.5rem}
   <p id="prompt">Enter the 6-digit code from your authenticator</p>
   <form id="f" method="post" action="/login">
     <div class="otp" id="otp">
-      <input aria-label="digit 1" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" autofocus>
-      <input aria-label="digit 2" inputmode="numeric" pattern="[0-9]*" maxlength="1">
-      <input aria-label="digit 3" inputmode="numeric" pattern="[0-9]*" maxlength="1">
-      <input aria-label="digit 4" inputmode="numeric" pattern="[0-9]*" maxlength="1">
-      <input aria-label="digit 5" inputmode="numeric" pattern="[0-9]*" maxlength="1">
-      <input aria-label="digit 6" inputmode="numeric" pattern="[0-9]*" maxlength="1">
+      <input id="code" name="totp" type="text" inputmode="numeric" autocomplete="one-time-code" enterkeyhint="go"
+        spellcheck="false" autocapitalize="off" aria-labelledby="prompt" aria-describedby="msg" required autofocus>
+      <span class="cell" aria-hidden="true"></span><span class="cell" aria-hidden="true"></span><span class="cell" aria-hidden="true"></span>
+      <span class="cell" aria-hidden="true"></span><span class="cell" aria-hidden="true"></span><span class="cell" aria-hidden="true"></span>
     </div>
-    <input type="hidden" name="totp" id="totp">
-    <div class="msg" id="msg">{{ERR}}</div>
+    <div class="msg" id="msg" role="alert">{{ERR}}</div>
   </form>
   <div class="lang" id="lang"><button type="button" data-l="en">English</button>·<button type="button" data-l="vi">Tiếng Việt</button></div>
 </div>
@@ -63,24 +65,25 @@ p{color:var(--muted);font-size:.85rem;margin:0 0 1.5rem}
   let lang='en';try{lang=localStorage.getItem('intact-lang')||((navigator.language||'').toLowerCase().startsWith('vi')?'vi':'en')}catch(e){}
   if(lang==='vi'){document.documentElement.lang='vi';
     for(const id of ['prompt','msg']){const e=document.getElementById(id);if(VI[e.textContent])e.textContent=VI[e.textContent]}
-    document.title=VI[document.title]||document.title;
-    document.querySelectorAll('.otp input').forEach((b,i)=>b.setAttribute('aria-label','chữ số '+(i+1)))}
+    document.title=VI[document.title]||document.title}
   document.querySelectorAll('#lang button').forEach(b=>{b.setAttribute('aria-pressed',String(b.dataset.l===lang));
     b.onclick=()=>{try{localStorage.setItem('intact-lang',b.dataset.l)}catch(e){}location.reload()}});
 })();
-const boxes=[...document.querySelectorAll('.otp input')],wrap=document.getElementById('otp'),
-  hidden=document.getElementById('totp'),form=document.getElementById('f');
-function collect(){return boxes.map(b=>b.value).join('')}
-function submit(){const v=collect();if(v.length===6){hidden.value=v;form.submit()}}
-boxes.forEach((b,i)=>{
-  b.addEventListener('input',()=>{b.value=b.value.replace(/\D/g,'').slice(0,1);
-    if(b.value&&i<5)boxes[i+1].focus();submit()});
-  b.addEventListener('keydown',e=>{if(e.key==='Backspace'&&!b.value&&i>0)boxes[i-1].focus()});
-  b.addEventListener('paste',e=>{e.preventDefault();
-    const d=(e.clipboardData.getData('text')||'').replace(/\D/g,'').slice(0,6);
-    d.split('').forEach((c,j)=>{if(boxes[j])boxes[j].value=c});
-    (boxes[Math.min(d.length,5)]||b).focus();submit()});
-});
+const input=document.getElementById('code'),wrap=document.getElementById('otp'),form=document.getElementById('f'),
+  cells=[...wrap.querySelectorAll('.cell')];
+let sent=false;
+function draw(){const v=input.value;cells.forEach((c,i)=>{c.textContent=v[i]||'';c.classList.toggle('on',i===Math.min(v.length,5))})}
+// No maxlength: a copied "123 456" must lose its space before the cut, not its last digit.
+function clean(){const v=input.value.replace(/\D/g,'').slice(0,6);if(v!==input.value)input.value=v;draw();
+  if(v.length===6&&!sent){sent=true;form.submit()}}
+function toEnd(){const n=input.value.length;input.setSelectionRange(n,n)}
+input.addEventListener('input',()=>{wrap.classList.remove('err');clean()});
+input.addEventListener('focus',()=>{wrap.classList.add('focus');toEnd()});
+input.addEventListener('blur',()=>wrap.classList.remove('focus'));
+input.addEventListener('click',toEnd);
+form.addEventListener('submit',e=>{if(sent||input.value.length!==6)e.preventDefault();else sent=true});
+if(document.activeElement===input)wrap.classList.add('focus');
+draw();
 </script>
 </body></html>`
 
@@ -89,17 +92,28 @@ func (a *api) loginForm(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(renderLogin("")))
 }
 
+// loginBodyMax caps the sign-in body. The form carries one 6-digit field, so a
+// larger body comes from something else.
+const loginBodyMax = 4 << 10
+
+// deviceMaxAge keeps the device cookie longer than any session, because it is
+// what keeps a known browser out of the public budget.
+const deviceMaxAge = 400 * 24 * 3600
+
 func (a *api) loginSubmit(w http.ResponseWriter, r *http.Request) {
 	if a.auth == nil {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, loginBodyMax)
 	if err := r.ParseForm(); err != nil {
 		writeError(w, http.StatusBadRequest, "bad form")
 		return
 	}
-	ip := clientIP(r)
-	if ok, wait := a.login.allow(ip, time.Now()); !ok {
+	// The attempt is charged before the code is checked, so a flood cannot get
+	// more code checks than the lane allows.
+	src := loginSourceOf(r, a.auth.DeviceID, a.login.ownerLoopback)
+	if ok, wait := a.login.reserve(src, time.Now()); !ok {
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -107,13 +121,12 @@ func (a *api) loginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !a.auth.CheckCode(r.PostFormValue("totp")) {
-		a.login.fail(ip, time.Now())
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(renderLogin("Wrong or expired code. Try again.")))
 		return
 	}
-	a.login.succeed(ip)
+	a.login.refund(src)
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    a.auth.IssueSession(),
@@ -123,7 +136,40 @@ func (a *api) loginSubmit(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   a.auth.TTLSeconds(),
 	})
+	a.setDeviceCookie(w, r)
 	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+// setDeviceCookie marks this browser as one that has signed in. The cookie
+// grants nothing on its own: it only moves a later wrong code to a per-device
+// budget, which a stranger cannot fill because a stranger cannot sign it. A
+// browser keeps the device it already has, so its budget is not reset.
+func (a *api) setDeviceCookie(w http.ResponseWriter, r *http.Request) {
+	value := ""
+	if ck, err := r.Cookie(deviceCookie); err == nil {
+		if _, ok := a.auth.DeviceID(ck.Value); ok {
+			value = ck.Value
+		}
+	}
+	if value == "" {
+		value = a.auth.IssueDevice()
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     deviceCookie,
+		Value:    value,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   requestIsTLS(r),
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   deviceMaxAge,
+	})
+}
+
+// requestIsTLS reports whether the browser's leg of the connection used TLS.
+// The tunnel terminates TLS and forwards plain http, and it names the scheme in
+// X-Forwarded-Proto. A Secure cookie on a plain connection is dropped.
+func requestIsTLS(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 func (a *api) logout(w http.ResponseWriter, r *http.Request) {

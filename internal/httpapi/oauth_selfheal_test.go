@@ -39,7 +39,7 @@ func TestProxySelfHealsOn401(t *testing.T) {
 
 	h := NewWithAuth(s, map[string]string{"claude": up.URL}, nil)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m"}`)))
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m"}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code=%d, want 200 after self-heal; body=%s", rec.Code, rec.Body.String())
 	}

@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -201,14 +200,23 @@ func specFor(prov string) (loginSpec, bool) {
 		scope: o.Scope, pkce: !o.NoPKCE, jsonExchange: o.JSONToken, extra: o.Extra, secret: o.ClientSecret}, true
 }
 
+// jsonTokenBody reports whether a provider's token endpoint takes a JSON body.
+// A refresh must use the same encoding as the sign-in exchange, or the provider
+// refuses it and the account dies at the first expiry. The declared def is read
+// directly, because the device flow also obeys jsonToken and specFor drops it.
+func jsonTokenBody(prov string) bool {
+	if s, ok := loginSpecs[prov]; ok {
+		return s.jsonExchange
+	}
+	d, ok := provider.Declared(prov)
+	return ok && d.OAuth != nil && d.OAuth.JSONToken
+}
+
 func (a *api) exchangeLogin(ctx context.Context, p store.PendingLogin, code string) (store.Connection, error) {
 	spec, _ := specFor(p.Provider)
 	secret := spec.secret
 	if p.Provider == "antigravity" {
 		secret = a.antigravityClientSecret()
-		if secret == "" {
-			return store.Connection{}, errors.New("no Antigravity client secret: import one account first or set INTACT_ANTIGRAVITY_CLIENT_SECRET")
-		}
 	}
 	fields := map[string]string{"grant_type": "authorization_code", "client_id": spec.clientID, "code": code,
 		"redirect_uri": spec.redirectURI}
@@ -325,14 +333,22 @@ func (a *api) saveOAuthAccount(prov, label string, t tokenAnswer, tokenURL, clie
 	return c, nil
 }
 
-// antigravityClientSecret is the Antigravity app's installed-client secret:
-// taken from an imported account, or from the environment.
+// antigravityInstalledSecret ships inside the Antigravity desktop app. Google's
+// installed-app flow does not treat it as confidential, and PKCE protects the
+// exchange, so a fresh install needs no imported account and no Antigravity CLI.
+const antigravityInstalledSecret = "GOCSPX-REDACTED"
+
+// antigravityClientSecret is the Antigravity app's installed-client secret: the
+// environment, then an imported account, then the secret the app ships.
 func (a *api) antigravityClientSecret() string {
 	if s := os.Getenv("INTACT_ANTIGRAVITY_CLIENT_SECRET"); s != "" {
 		return s
 	}
 	var s string
 	a.store.DB.QueryRow(`SELECT client_secret FROM connections WHERE provider = 'antigravity' AND client_secret <> '' LIMIT 1`).Scan(&s)
+	if s == "" {
+		s = antigravityInstalledSecret
+	}
 	return s
 }
 

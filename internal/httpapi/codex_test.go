@@ -43,14 +43,14 @@ func TestCodexTranslatesChatAndPassesResponsesThrough(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"codex/gpt-5.5","max_tokens":10,"stream":true,"messages":[{"role":"user","content":"hi"}]}`)))
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"codex/gpt-5.5","max_tokens":10,"stream":true,"messages":[{"role":"user","content":"hi"}]}`)))
 	if b := rec.Body.String(); !strings.Contains(b, "event: message_start") || !strings.Contains(b, `"text":"OK"`) {
 		t.Errorf("anthropic caller got %s", b)
 	}
 
 	// A Responses caller gets the provider's bytes, every field included.
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{"model":"codex/gpt-5.5","input":"hi","stream":true}`)))
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/responses", strings.NewReader(`{"model":"codex/gpt-5.5","input":"hi","stream":true}`)))
 	if b := rec.Body.String(); !strings.Contains(b, `"extra":"kept"`) || gotBody != `{"model":"gpt-5.5","input":"hi","stream":true}` {
 		t.Errorf("passthrough: body sent %s, got %s", gotBody, b)
 	}

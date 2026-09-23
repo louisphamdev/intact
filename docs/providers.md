@@ -69,7 +69,7 @@ domain. Each flow therefore ends with you pasting what the page gave you.
 | --- | --- | --- |
 | Claude Code | PKCE; the page is Anthropic's code page | the `code#state` string it shows |
 | Codex | PKCE; redirects to `http://localhost:1455/auth/callback` | the full redirect URL from the address bar (the page itself fails to load, which is expected) |
-| Antigravity | PKCE; redirects to `http://localhost:51121/oauth-callback` | the full redirect URL; needs `INTACT_ANTIGRAVITY_CLIENT_SECRET` |
+| Antigravity | PKCE; redirects to `http://localhost:51121/oauth-callback` | the full redirect URL (no Antigravity CLI needed) |
 | GitHub Copilot | Device flow | nothing: open the link, type the code shown, and intact polls until you approve |
 
 The steps:

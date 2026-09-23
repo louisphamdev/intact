@@ -47,12 +47,36 @@ func (a *api) migrateCustomEndpoints() {
 	}
 }
 
+// maskDef hides the credentials a declared provider carries: the OAuth client
+// secret, and the static header values, which hold an organisation key. It
+// copies what it changes, so the stored def and the registry keep their value.
+func maskDef(d provider.Def) provider.Def {
+	if d.OAuth != nil && d.OAuth.ClientSecret != "" {
+		o := *d.OAuth
+		o.ClientSecret = maskedValue
+		d.OAuth = &o
+	}
+	if len(d.Headers) > 0 {
+		h := make(map[string]string, len(d.Headers))
+		for k := range d.Headers {
+			h[k] = maskedValue
+		}
+		d.Headers = h
+	}
+	return d
+}
+
 // listDefs serves the declared providers.
 func (a *api) listDefs(w http.ResponseWriter, r *http.Request) {
 	defs, err := a.store.ProviderDefs()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "cannot read providers")
 		return
+	}
+	if !principalOf(r).admin {
+		for i := range defs {
+			defs[i] = maskDef(defs[i])
+		}
 	}
 	writeJSON(w, map[string]any{"providers": defs})
 }
@@ -63,6 +87,9 @@ func (a *api) getDef(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeError(w, http.StatusNotFound, "no declared provider of that id")
 		return
+	}
+	if !principalOf(r).admin {
+		d = maskDef(d)
 	}
 	writeJSON(w, d)
 }

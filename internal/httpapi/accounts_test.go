@@ -20,7 +20,7 @@ func TestAccountsListsWithoutSecrets(t *testing.T) {
 
 	h := New(s, nil)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/accounts", nil))
+	h.ServeHTTP(rec, loopbackRequest("GET", "/accounts", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
@@ -49,7 +49,7 @@ func TestAccountsReturnsEmptyListNotNull(t *testing.T) {
 	defer s.Close()
 
 	rec := httptest.NewRecorder()
-	New(s, nil).ServeHTTP(rec, httptest.NewRequest("GET", "/accounts", nil))
+	New(s, nil).ServeHTTP(rec, loopbackRequest("GET", "/accounts", nil))
 
 	if !strings.Contains(rec.Body.String(), `"accounts":[]`) {
 		t.Errorf("body = %s, want an empty array", strings.TrimSpace(rec.Body.String()))
@@ -62,7 +62,7 @@ func TestDashboardIsServedFromTheBinary(t *testing.T) {
 	h := New(s, nil)
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	h.ServeHTTP(rec, loopbackRequest("GET", "/", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
@@ -85,7 +85,7 @@ func TestUnknownPathIsNotTheDashboard(t *testing.T) {
 	defer s.Close()
 
 	rec := httptest.NewRecorder()
-	New(s, nil).ServeHTTP(rec, httptest.NewRequest("GET", "/no-such-page", nil))
+	New(s, nil).ServeHTTP(rec, loopbackRequest("GET", "/no-such-page", nil))
 
 	if rec.Code == http.StatusOK && strings.Contains(rec.Body.String(), "<html") {
 		t.Error("an unknown path returned the dashboard; the root route is a catch-all")

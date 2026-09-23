@@ -4,6 +4,8 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -38,6 +40,16 @@ CREATE TABLE IF NOT EXISTS usage_daily (
 // WAL keeps a reader from blocking the writer, which matters because the
 // dashboard reads while requests are being served.
 func Open(path string) (*Store, error) {
+	if path != ":memory:" && !strings.HasPrefix(path, "file:") {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+		if err != nil {
+			return nil, fmt.Errorf("open database file: %w", err)
+		}
+		_ = f.Close()
+		if err := os.Chmod(path, 0o600); err != nil {
+			return nil, fmt.Errorf("chmod database file: %w", err)
+		}
+	}
 	db, err := sql.Open("sqlite", path+"?_journal=WAL&_timeout=5000&_sync=NORMAL")
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
@@ -57,6 +69,10 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(errorsSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply errors schema: %w", err)
+	}
+	if err := (&Store{DB: db}).migrateErrors(); err != nil {
+		db.Close()
+		return nil, err
 	}
 	if _, err := db.Exec(errorVerdictsSchema); err != nil {
 		db.Close()
@@ -98,6 +114,16 @@ func Open(path string) (*Store, error) {
 	if err := st.seedFilters(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("seed filters: %w", err)
+	}
+	if path != ":memory:" && !strings.HasPrefix(path, "file:") {
+		for _, p := range []string{path + "-wal", path + "-shm"} {
+			if _, err := os.Stat(p); err == nil {
+				if err := os.Chmod(p, 0o600); err != nil {
+					db.Close()
+					return nil, fmt.Errorf("chmod database sidecar: %w", err)
+				}
+			}
+		}
 	}
 	return st, nil
 }

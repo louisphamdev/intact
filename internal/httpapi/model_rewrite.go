@@ -28,6 +28,35 @@ func setModel(body []byte, model string) (out []byte, ok bool) {
 	return out, true
 }
 
+// topLevelCount counts how often key appears at the top level of a JSON object.
+// JSON allows a repeated key and readers disagree on which one wins, so the
+// model path refuses a body that names the model twice.
+func topLevelCount(body []byte, key string) int {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	tok, err := dec.Token()
+	if err != nil {
+		return 0
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return 0
+	}
+	n := 0
+	for dec.More() {
+		kt, err := dec.Token()
+		if err != nil {
+			return n
+		}
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return n
+		}
+		if k, _ := kt.(string); k == key {
+			n++
+		}
+	}
+	return n
+}
+
 // topLevelValue finds the byte range of the value of key in a JSON object,
 // looking at the top level only (a "model" nested in a message is not it).
 func topLevelValue(body []byte, key string) (start, end int, err error) {

@@ -144,6 +144,11 @@ func (d *Def) Normalize() error {
 		if !httpURL(o.TokenURL) {
 			return errors.New("oauth.tokenUrl: an http(s) URL")
 		}
+		// verifyUrl becomes the href of the device sign-in link, so a
+		// javascript: or data: value would be executable in the dashboard.
+		if o.VerifyURL != "" && !httpURL(o.VerifyURL) {
+			return errors.New("oauth.verifyUrl: an http(s) URL, or none")
+		}
 		if d.Kind == KindOAuthCode {
 			if !httpURL(o.AuthorizeURL) {
 				return errors.New("oauth.authorizeUrl: an http(s) URL")

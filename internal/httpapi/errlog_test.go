@@ -65,9 +65,43 @@ func TestErrorsAreKeptAndServed(t *testing.T) {
 	}
 	for _, path := range []string{"/errors", "/errors/stats"} {
 		rec = httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest("GET", path+"?provider=groq", nil))
+		h.ServeHTTP(rec, loopbackRequest("GET", path+"?provider=groq", nil))
 		if rec.Code != 200 || !strings.Contains(rec.Body.String(), "unknown field anti_cheat") && !strings.Contains(rec.Body.String(), "Unknown field anti_cheat") {
 			t.Errorf("%s: %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// A window of a longer model name must win: 'gemini-3.8-flash' is a prefix of
+// 'gemini-3.8-flash-lite', and reading the wrong window turns a real
+// exhaustion into a fake 429 the review can act on.
+func TestQuotaLeftTakesTheLongestPrefix(t *testing.T) {
+	flash := QuotaWindow{Name: "model gemini-3.8-flash", UsedPct: 4}
+	lite := QuotaWindow{Name: "model gemini-3.8-flash-lite", UsedPct: 100}
+	for _, ws := range [][]QuotaWindow{{flash, lite}, {lite, flash}} {
+		if l := quotaLeft(AccountQuota{Windows: ws}, "gemini-3.8-flash-lite"); l != 0 {
+			t.Errorf("windows %v: left = %v, want 0", ws, l)
+		}
+	}
+	// An exact or base match wins over any prefix match.
+	base := []QuotaWindow{{Name: "model gemini", UsedPct: 10}, {Name: "model gemini-3.8-flash", UsedPct: 50}}
+	if l := quotaLeft(AccountQuota{Windows: base}, "gemini-3.8-flash-high"); l < 0.49 || l > 0.51 {
+		t.Errorf("base match left = %v, want 0.5", l)
+	}
+	// Exact model match wins over base match regardless of slice order.
+	baseWin := QuotaWindow{Name: "model gemini-3.8-flash", UsedPct: 10}
+	exactWin := QuotaWindow{Name: "model gemini-3.8-flash-high", UsedPct: 100}
+	for _, ws := range [][]QuotaWindow{{baseWin, exactWin}, {exactWin, baseWin}} {
+		if l := quotaLeft(AccountQuota{Windows: ws}, "gemini-3.8-flash-high"); l != 0 {
+			t.Errorf("windows %v: left = %v, want 0 (exact model match over base)", ws, l)
+		}
+	}
+	// Among prefix matches alone, the longest prefix wins in either order.
+	pre1 := QuotaWindow{Name: "model gemini", UsedPct: 10}
+	pre2 := QuotaWindow{Name: "model gemini-3.8", UsedPct: 70}
+	for _, ws := range [][]QuotaWindow{{pre1, pre2}, {pre2, pre1}} {
+		if l := quotaLeft(AccountQuota{Windows: ws}, "gemini-3.8-flash-lite"); l < 0.29 || l > 0.31 {
+			t.Errorf("windows %v: longest prefix left = %v, want 0.3", ws, l)
 		}
 	}
 }

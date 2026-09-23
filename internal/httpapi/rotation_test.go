@@ -52,7 +52,7 @@ func TestRotationStickyFallbackAndOrder(t *testing.T) {
 	}
 	set := func(body string) string {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest("POST", "/providers/groq/rotation", strings.NewReader(body)))
+		h.ServeHTTP(rec, loopbackRequest("POST", "/providers/groq/rotation", strings.NewReader(body)))
 		return rec.Body.String()
 	}
 	// Default: round-robin, a turn per request.

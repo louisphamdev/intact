@@ -44,7 +44,7 @@ func (f *fakeProvider) start(t *testing.T) string {
 
 func postV1(h http.Handler, body string) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body)))
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/chat/completions", strings.NewReader(body)))
 	return rec
 }
 
@@ -142,7 +142,7 @@ func TestCreateAccountFillsCloudflareAccountID(t *testing.T) {
 	defer s.Close()
 	h := New(s, nil)
 	form := "provider=cloudflare-ai&label=cf&secret=k&account_id=abc123"
-	req := httptest.NewRequest("POST", "/accounts", strings.NewReader(form))
+	req := loopbackRequest("POST", "/accounts", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -156,7 +156,7 @@ func TestCreateAccountFillsCloudflareAccountID(t *testing.T) {
 	}
 
 	// A custom provider without a base URL is refused.
-	req = httptest.NewRequest("POST", "/accounts", strings.NewReader("provider=mine&secret=k"))
+	req = loopbackRequest("POST", "/accounts", strings.NewReader("provider=mine&secret=k"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -178,7 +178,7 @@ func TestSystemOnePassesThroughToTypeSafe(t *testing.T) {
 	c, _ := s.CreateConnection("typesafe", "ts", "k")
 	h := New(s, map[string]string{"typesafe": up.URL})
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/systemone", strings.NewReader(`{"model":"typesafe/jev-latest","state":"x","questions":{"u":{"type":"noul","instructions":"?"}}}`)))
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/systemone", strings.NewReader(`{"model":"typesafe/jev-latest","state":"x","questions":{"u":{"type":"noul","instructions":"?"}}}`)))
 	if gotPath != "/systemone" || gotBody != `{"model":"jev-latest","state":"x","questions":{"u":{"type":"noul","instructions":"?"}}}` {
 		t.Errorf("upstream got %s %s", gotPath, gotBody)
 	}
@@ -203,7 +203,7 @@ func TestCustomAnthropicProviderUsesXAPIKeyAndMessages(t *testing.T) {
 	defer s.Close()
 	h := New(s, nil)
 	form := "provider=mygw&label=gw&secret=sk-1&api=anthropic&base_url=" + up.URL + "/v1"
-	req := httptest.NewRequest("POST", "/accounts", strings.NewReader(form))
+	req := loopbackRequest("POST", "/accounts", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	h.ServeHTTP(httptest.NewRecorder(), req)
 

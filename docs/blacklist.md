@@ -47,3 +47,16 @@ On first start the blacklist is seeded with fixes found against real providers:
 [Drift](drift.md) records when a client starts sending a field it did not send
 before. That is the usual moment a provider starts refusing requests, and the
 change record shows the path to block.
+
+### Reasoning effort on non-reasoning targets
+
+When intact translates an Anthropic Messages request containing extended
+thinking to an OpenAI-compatible target, it maps the thinking budget to
+`reasoning_effort`. Non-reasoning OpenAI targets (such as Groq) reject this
+field with an error. To fix this, add a per-provider field filter for
+`reasoning_effort`:
+
+```bash
+curl https://intact.example/api/filters -H "Authorization: Bearer $INTACT_KEY" \
+  -d '{"provider":"groq","kind":"field","pattern":"reasoning_effort","note":"groq rejects reasoning_effort"}'
+```

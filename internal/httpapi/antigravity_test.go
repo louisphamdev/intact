@@ -33,7 +33,7 @@ func TestAntigravityWrapsAndTranslates(t *testing.T) {
 
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
-	c, _ := s.CreateConnection("antigravity", "ag", "ya29.tok")
+	c, _ := s.CreateConnection("antigravity", "ag", "fake-access-token")
 	h := New(s, map[string]string{"antigravity": up.URL})
 
 	rec := postV1(h, `{"model":"antigravity/gemini-3-flash","messages":[{"role":"system","content":"sys"},{"role":"user","content":"hi"}]}`)
@@ -58,7 +58,7 @@ func TestAntigravityWrapsAndTranslates(t *testing.T) {
 		t.Errorf("usage = %+v", rows)
 	}
 	mrec := httptest.NewRecorder()
-	h.ServeHTTP(mrec, httptest.NewRequest("GET", "/v1/models", nil))
+	h.ServeHTTP(mrec, loopbackRequest("GET", "/v1/models", nil))
 	if b := mrec.Body.String(); !strings.Contains(b, `"antigravity/gemini-3-flash"`) || strings.Contains(b, "internal-x") {
 		t.Errorf("models = %s", b)
 	}

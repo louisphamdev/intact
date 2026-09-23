@@ -156,7 +156,7 @@ func (a *api) runChatTest(ctx context.Context, prov, model string) modelTest {
 		"messages": []any{map[string]any{"role": "user", "content": "Reply with the single word OK."}}})
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/chat/completions", strings.NewReader(string(body)))
+	req := withPrincipal(httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/chat/completions", strings.NewReader(string(body))), intactJob)
 	req.SetPathValue("path", "chat/completions")
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

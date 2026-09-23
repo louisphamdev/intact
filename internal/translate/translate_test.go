@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/louisphamdev/intact/internal/filter"
 )
 
 func mustJSON(t *testing.T, b []byte) map[string]any {
@@ -268,5 +270,203 @@ func TestGeminiStreamToOpenAI(t *testing.T) {
 	}
 	if sigs["fc1"] != "S" {
 		t.Errorf("signature not recorded for the call: %v", sigs)
+	}
+}
+
+// T3-5: the tool_calls index comes from upstream JSON. A negative index panicked
+// and a huge one grew the slice until the process ran out of memory.
+func TestCollectOpenAIStreamToolCallIndexIsBounded(t *testing.T) {
+	for _, idx := range []string{"-1", "1000000000"} {
+		src := `data: {"id":"c","model":"m","choices":[{"delta":{"tool_calls":[{"index":` + idx +
+			`,"id":"t","type":"function","function":{"name":"f","arguments":"{\"a\":1}"}}]}}]}` + "\n\n" +
+			`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}` + "\n\n" +
+			"data: [DONE]\n\n"
+		m := mustJSON(t, CollectOpenAIStream(strings.NewReader(src)))
+		msg := m["choices"].([]any)[0].(map[string]any)["message"].(map[string]any)
+		tcs, _ := msg["tool_calls"].([]any)
+		if len(tcs) > 1 {
+			t.Errorf("index %s gave %d tool calls, want at most 1: %s", idx, len(tcs), j(tcs))
+		}
+	}
+}
+
+// An index inside the bound still collects, and the arguments of one call never
+// land on another call.
+func TestCollectOpenAIStreamKeepsEachToolCallSeparate(t *testing.T) {
+	src := `data: {"id":"c","model":"m","choices":[{"delta":{"tool_calls":[` +
+		`{"index":0,"id":"t0","type":"function","function":{"name":"f0","arguments":"{\"a\":1}"}},` +
+		`{"index":2,"id":"t2","type":"function","function":{"name":"f2","arguments":"{\"b\""}}]}}]}` + "\n\n" +
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":2,"function":{"arguments":":2}"}}]},"finish_reason":"tool_calls"}]}` + "\n\n" +
+		"data: [DONE]\n\n"
+	m := mustJSON(t, CollectOpenAIStream(strings.NewReader(src)))
+	msg := m["choices"].([]any)[0].(map[string]any)["message"].(map[string]any)
+	tcs, _ := msg["tool_calls"].([]any)
+	if len(tcs) != 2 {
+		t.Fatalf("tool_calls = %s, want 2 calls", j(tcs))
+	}
+	if got := j(tcs[0]); !strings.Contains(got, `"name":"f0"`) || !strings.Contains(got, `"arguments":"{\"a\":1}"`) {
+		t.Errorf("first call = %s", got)
+	}
+	if got := j(tcs[1]); !strings.Contains(got, `"name":"f2"`) || !strings.Contains(got, `"arguments":"{\"b\":2}"`) {
+		t.Errorf("second call = %s", got)
+	}
+}
+
+// T3-6: tool_choice in its object form must force the named tool.
+func TestOpenAIToGeminiToolChoice(t *testing.T) {
+	req := func(choice string) string {
+		return `{"model":"gemini-3-flash","messages":[{"role":"user","content":"hi"}],
+		 "tools":[{"type":"function","function":{"name":"get_weather","parameters":{"type":"object"}}},
+		          {"type":"function","function":{"name":"2fa","parameters":{"type":"object"}}}],
+		 "tool_choice":` + choice + `}`
+	}
+	out, err := OpenAIToGemini([]byte(req(`{"type":"function","function":{"name":"2fa"}}`)), memSigs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := j(mustJSON(t, out)["toolConfig"])
+	want := `{"functionCallingConfig":{"allowedFunctionNames":["_2fa"],"mode":"ANY"}}`
+	if got != want {
+		t.Errorf("toolConfig = %s, want %s", got, want)
+	}
+	for choice, mode := range map[string]string{`"required"`: "ANY", `"none"`: "NONE", `"auto"`: "VALIDATED"} {
+		out, err := OpenAIToGemini([]byte(req(choice)), memSigs{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `{"functionCallingConfig":{"mode":"` + mode + `"}}`
+		if got := j(mustJSON(t, out)["toolConfig"]); got != want {
+			t.Errorf("tool_choice %s gave %s, want %s", choice, got, want)
+		}
+	}
+}
+
+// T3-7: reasoning crosses the OpenAI and Anthropic request shapes.
+func TestOpenAIToAnthropicReasoning(t *testing.T) {
+	mb := mustBytes(t)
+	req := func(extra string) string {
+		return `{"model":"m","temperature":0.2,"top_p":0.9,` + extra +
+			`"messages":[{"role":"user","content":"hi"}]}`
+	}
+	m := mustJSON(t, mb(OpenAIToAnthropic([]byte(req(`"max_tokens":16000,"reasoning_effort":"high",`)))))
+	th, _ := m["thinking"].(map[string]any)
+	if th == nil || th["type"] != "enabled" {
+		t.Fatalf("thinking = %s, want an enabled block", j(m["thinking"]))
+	}
+	b, ok := th["budget_tokens"].(float64)
+	if !ok || b < 1024 || b >= 16000 {
+		t.Errorf("budget_tokens = %s, want 1024 <= b < 16000", j(th["budget_tokens"]))
+	}
+	if _, ok := m["temperature"]; ok {
+		t.Errorf("temperature kept with thinking on: %s", j(m))
+	}
+	if _, ok := m["top_p"]; ok {
+		t.Errorf("top_p kept with thinking on: %s", j(m))
+	}
+
+	// max_tokens too small to hold a thinking budget: no thinking block.
+	small := mustJSON(t, mb(OpenAIToAnthropic([]byte(req(`"max_tokens":500,"reasoning_effort":"high",`)))))
+	if _, ok := small["thinking"]; ok {
+		t.Errorf("max_tokens 500 produced a thinking block: %s", j(small))
+	}
+
+	// No reasoning_effort, and effort "none", stay exactly as they are today.
+	base := mb(OpenAIToAnthropic([]byte(req(`"max_tokens":16000,`))))
+	none := mb(OpenAIToAnthropic([]byte(req(`"max_tokens":16000,"reasoning_effort":"none",`))))
+	if !bytes.Equal(base, none) {
+		t.Errorf("effort none changed the request:\n%s\n%s", base, none)
+	}
+	if bm := mustJSON(t, base); bm["temperature"] == nil || bm["thinking"] != nil {
+		t.Errorf("plain request changed: %s", base)
+	}
+
+	// Forced tool_choice (required or named tool) turns thinking off to avoid Anthropic 400.
+	forcedReq := mustJSON(t, mb(OpenAIToAnthropic([]byte(req(`"max_tokens":16000,"reasoning_effort":"high","tool_choice":"required",`)))))
+	if _, ok := forcedReq["thinking"]; ok {
+		t.Errorf("forced tool_choice (required) kept thinking on: %s", j(forcedReq))
+	}
+	if tc, ok := forcedReq["tool_choice"].(map[string]any); !ok || tc["type"] != "any" {
+		t.Errorf("forced tool_choice (required) not translated properly: %s", j(forcedReq))
+	}
+	if _, ok := forcedReq["temperature"]; !ok {
+		t.Errorf("temperature removed when thinking turned off for forced tool: %s", j(forcedReq))
+	}
+
+	forcedNamedReq := mustJSON(t, mb(OpenAIToAnthropic([]byte(req(`"max_tokens":16000,"reasoning_effort":"high","tool_choice":{"type":"function","function":{"name":"my_tool"}},`)))))
+	if _, ok := forcedNamedReq["thinking"]; ok {
+		t.Errorf("forced tool_choice (named tool) kept thinking on: %s", j(forcedNamedReq))
+	}
+	if tc, ok := forcedNamedReq["tool_choice"].(map[string]any); !ok || tc["type"] != "tool" || tc["name"] != "my_tool" {
+		t.Errorf("forced tool_choice (named tool) not translated properly: %s", j(forcedNamedReq))
+	}
+
+	// Unforced tool_choice (auto or none) allows thinking.
+	autoReq := mustJSON(t, mb(OpenAIToAnthropic([]byte(req(`"max_tokens":16000,"reasoning_effort":"high","tool_choice":"auto",`)))))
+	if th, _ := autoReq["thinking"].(map[string]any); th == nil || th["type"] != "enabled" {
+		t.Errorf("tool_choice:auto did not enable thinking: %s", j(autoReq))
+	}
+	if tc, ok := autoReq["tool_choice"].(map[string]any); !ok || tc["type"] != "auto" {
+		t.Errorf("tool_choice:auto not preserved: %s", j(autoReq))
+	}
+}
+
+func TestAnthropicToOpenAIReasoning(t *testing.T) {
+	mb := mustBytes(t)
+	req := func(thinking string) string {
+		return `{"model":"m","max_tokens":20000,"thinking":` + thinking +
+			`,"messages":[{"role":"user","content":"hi"}]}`
+	}
+	for _, c := range []struct {
+		budget string
+		want   string
+	}{{"1500", "low"}, {"6000", "medium"}, {"10000", "high"}} {
+		m := mustJSON(t, mb(AnthropicToOpenAI([]byte(req(`{"type":"enabled","budget_tokens":`+c.budget+`}`)))))
+		if m["reasoning_effort"] != c.want {
+			t.Errorf("budget %s gave reasoning_effort %s, want %q", c.budget, j(m["reasoning_effort"]), c.want)
+		}
+	}
+	m := mustJSON(t, mb(AnthropicToOpenAI([]byte(req(`{"type":"disabled"}`)))))
+	if _, ok := m["reasoning_effort"]; ok {
+		t.Errorf("disabled thinking set reasoning_effort: %s", j(m))
+	}
+}
+
+func TestReasoningEffortFilterRemovesFieldFromTranslatedRequest(t *testing.T) {
+	mb := mustBytes(t)
+	anthropicReq := `{"model":"m","max_tokens":20000,"thinking":{"type":"enabled","budget_tokens":10000},"messages":[{"role":"user","content":"hi"}]}`
+	openaiReqBytes := mb(AnthropicToOpenAI([]byte(anthropicReq)))
+
+	m := mustJSON(t, openaiReqBytes)
+	if m["reasoning_effort"] != "high" {
+		t.Fatalf("expected reasoning_effort: high in translated request, got %v", m["reasoning_effort"])
+	}
+
+	rule, err := filter.Compile(filter.Field, "reasoning_effort")
+	if err != nil {
+		t.Fatalf("filter.Compile: %v", err)
+	}
+
+	filteredBytes, changed := filter.Apply(openaiReqBytes, []filter.Rule{rule})
+	if !changed {
+		t.Fatalf("filter.Apply returned changed=false; want true")
+	}
+
+	filteredJSON := mustJSON(t, filteredBytes)
+	if _, ok := filteredJSON["reasoning_effort"]; ok {
+		t.Errorf("reasoning_effort was not removed by the filter: %s", string(filteredBytes))
+	}
+	if filteredJSON["model"] != "m" {
+		t.Errorf("expected model to remain 'm', got %v", filteredJSON["model"])
+	}
+}
+
+// mustBytes returns a translator's body, or fails the test on its error.
+func mustBytes(t *testing.T) func([]byte, error) []byte {
+	return func(b []byte, err error) []byte {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
 	}
 }

@@ -37,7 +37,57 @@ var dataParents = map[string]bool{
 	"extra_body": true, "headers": true,
 }
 
-var idLike = regexp.MustCompile(`^([a-z]{2,6}_[A-Za-z0-9]{8,}|[0-9a-fA-F-]{16,}|.*\d.*\d.*\d.*)$`)
+// A generated id is a hex blob, a name with three or more digits, or the
+// "prefix_random" shape. The last one also describes ordinary API field names
+// such as top_logprobs, so a real field name is exempt from it.
+var (
+	idRandom   = regexp.MustCompile(`^([0-9a-fA-F-]{16,}|.*\d.*\d.*\d.*)$`)
+	idPrefixed = regexp.MustCompile(`^[a-z]{2,6}_[A-Za-z0-9]{8,}$`)
+	fieldName  = regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+)+$`)
+	digitRun   = regexp.MustCompile(`[0-9]{4,}`)
+)
+
+// generatedID reports whether an object key is a name a client or a provider
+// made up, rather than a field of the API.
+func generatedID(k string) bool {
+	if idRandom.MatchString(k) {
+		return true
+	}
+	return idPrefixed.MatchString(k) && !realFieldName(k)
+}
+
+// realFieldName reports whether a key reads as a documented snake_case field:
+// lower case, at least one underscore, no long digit run and no long part.
+func realFieldName(k string) bool {
+	if !fieldName.MatchString(k) || digitRun.MatchString(k) {
+		return false
+	}
+	for _, part := range strings.Split(k, "_") {
+		if len(part) > 20 {
+			return false
+		}
+	}
+	return true
+}
+
+// legacyPath returns the path the code before this fix would have learned for
+// p: every real field name that the old rule took for a generated id becomes
+// "{*}" again. It returns p when the two rules agree.
+func legacyPath(p string) string {
+	segs := strings.Split(p, ".")
+	changed := false
+	for i, seg := range segs {
+		base := strings.TrimRight(seg, "[]")
+		if idPrefixed.MatchString(base) && !idRandom.MatchString(base) && realFieldName(base) {
+			segs[i] = "{*}" + seg[len(base):]
+			changed = true
+		}
+	}
+	if !changed {
+		return p
+	}
+	return strings.Join(segs, ".")
+}
 
 // Paths returns the field paths of a JSON document and the JSON type found at
 // each: "messages[].content[].type" → "string". Object keys that are names
@@ -104,7 +154,7 @@ func walk(v any, path, parentKey string, depth int, out map[string]string) {
 		dynamic := dynamicParents[parentKey] || len(n) > 96
 		for k, c := range n {
 			seg := k
-			if dynamic || idLike.MatchString(k) {
+			if dynamic || generatedID(k) {
 				seg = "{*}"
 			}
 			walk(c, join(path, seg), k, depth+1, out)

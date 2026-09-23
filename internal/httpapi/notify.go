@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/louisphamdev/intact/internal/store"
@@ -155,22 +156,83 @@ func blockedHost(raw string) bool {
 	return false
 }
 
+// errPrivateTarget marks a webhook target inside the host or the local
+// network. It travels as the cause of sendError, never as its text.
+var errPrivateTarget = errors.New("webhook target is a private or loopback address")
+
+// dialGuard refuses an address that blockedHost cannot see, because it runs
+// after the name is resolved and on every redirect hop. Tests swap it.
+var dialGuard = func(network, address string, c syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return errPrivateTarget
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsMulticast() || ip.IsUnspecified() {
+		return errPrivateTarget
+	}
+	return nil
+}
+
+// guardedTransport dials through dialGuard. Proxy is nil, or the check would
+// run against the proxy and not the target. Connections are not kept, so every
+// request is checked again.
+func guardedTransport() http.RoundTripper {
+	return &http.Transport{
+		Proxy: nil,
+		DialContext: (&net.Dialer{Timeout: 10 * time.Second,
+			Control: func(network, address string, c syscall.RawConn) error { return dialGuard(network, address, c) },
+		}).DialContext,
+		DisableKeepAlives:   true,
+		TLSHandshakeTimeout: 10 * time.Second,
+	}
+}
+
+// webhookClient sends every webhook. A redirect is returned, never followed:
+// the answer of the declared address is the answer.
+var webhookClient = &http.Client{
+	Timeout:       15 * time.Second,
+	Transport:     guardedTransport(),
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
+// withoutURL strips the address from a transport error. For Slack, Discord,
+// ntfy and n8n the webhook url IS the credential, and a *url.Error prints it
+// in full. The cause is kept, so errors.Is can still tell the failures apart.
+func withoutURL(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return ue.Err
+	}
+	return err
+}
+
+// sendError hides why a webhook did not answer. A refused address, a closed
+// port and a timeout must read the same, or the channel test turns into a port
+// scanner. errors.Is still reaches the cause.
+type sendError struct{ cause error }
+
+func (e sendError) Error() string { return "webhook target could not be reached" }
+
+func (e sendError) Unwrap() error { return e.cause }
+
 func sendWebhook(ctx context.Context, cfg map[string]string, m notifyMsg) error {
 	if blockedHost(cfg["url"]) {
-		return errors.New("webhook target is a private or loopback address")
+		return sendError{errPrivateTarget}
 	}
 	body, _ := json.Marshal(m)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg["url"], bytes.NewReader(body))
 	if err != nil {
-		return err
+		return sendError{withoutURL(err)}
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if cfg["secret"] != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg["secret"])
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := webhookClient.Do(req)
 	if err != nil {
-		return err
+		return sendError{withoutURL(err)}
 	}
 	resp.Body.Close()
 	if resp.StatusCode >= 300 {
@@ -240,14 +302,17 @@ func (a *api) sendTo(c store.NotifyChannel, m notifyMsg) error {
 
 // ---- API
 
+// maskedValue stands in for a credential that a caller may not read.
+const maskedValue = "••••"
+
 func maskSecret(v string) string {
 	if v == "" {
 		return ""
 	}
 	if len(v) <= 8 {
-		return "••••"
+		return maskedValue
 	}
-	return "••••" + v[len(v)-4:]
+	return maskedValue + v[len(v)-4:]
 }
 
 func masked(c store.NotifyChannel) store.NotifyChannel {
@@ -321,8 +386,14 @@ func (a *api) saveChannel(c store.NotifyChannel) (store.NotifyChannel, error) {
 	cfg := map[string]string{}
 	for _, f := range t.Fields {
 		v := strings.TrimSpace(c.Config[f.ID])
-		if f.Secret && (v == "" || strings.HasPrefix(v, "••••")) && old.Type == c.Type && !destChanged {
-			v = old.Config[f.ID]
+		if f.Secret && (v == "" || strings.HasPrefix(v, maskedValue)) {
+			// The caller sent the mask, not the credential. Carry the stored one
+			// only to the same type and the same destination. Never store the
+			// mask itself: it would be sent as the credential.
+			v = ""
+			if old.Type == c.Type && !destChanged {
+				v = old.Config[f.ID]
+			}
 		}
 		switch {
 		case v == "" && f.Required:

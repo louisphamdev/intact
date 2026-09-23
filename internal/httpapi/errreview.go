@@ -9,7 +9,6 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"strings"
 	"time"
 
@@ -177,7 +176,7 @@ func (a *api) replay(ctx context.Context, e store.UpstreamError, body []byte) (i
 	defer cancel()
 	// The stored endpoint carries its own query; the request must not add it
 	// again.
-	r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/replay", nil)
+	r := withPrincipal(httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/replay", nil), intactJob)
 	resp, err := a.send(r, p, conn.Provider, e.Endpoint, secret, body)
 	if err != nil {
 		return 0, "", err
@@ -275,7 +274,7 @@ func (a *api) chatOnce(ctx context.Context, model, system, user string, maxToken
 		"messages": []any{map[string]any{"role": "system", "content": system}, map[string]any{"role": "user", "content": user}}})
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
-	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/chat/completions", strings.NewReader(string(body)))
+	req := withPrincipal(httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/chat/completions", strings.NewReader(string(body))), intactJob)
 	req.SetPathValue("path", "chat/completions")
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -327,15 +326,14 @@ func (a *api) errFacts(g ErrorGroup, e store.UpstreamError, reproduced string) m
 	}
 }
 
-// protectedPattern reports a rule that would strip what a request needs.
+// protectedPattern reports a rule that would strip what a request needs. The
+// body kinds ask the shared content guard; only the header list is its own.
 func protectedPattern(kind, pattern string) bool {
 	switch kind {
 	case filter.Field:
-		p := strings.TrimPrefix(pattern, "request.")
-		return protectedFields[p] || p == "systemInstruction" || p == "generationConfig" || p == "*"
+		return essentialField(pattern)
 	case filter.System:
-		re, err := regexp.Compile("(?m)" + pattern)
-		return err != nil || re.MatchString("") || re.MatchString("x")
+		return catchAllSystem(pattern)
 	case filter.Header:
 		h := strings.ToLower(pattern)
 		return h == "authorization" || h == "content-type" || h == "x-api-key" || h == "host"
@@ -346,6 +344,12 @@ func protectedPattern(kind, pattern string) bool {
 // reviewErrorGroup judges one group and acts on the verdict.
 func (a *api) reviewErrorGroup(ctx context.Context, cfg ErrorReviewConfig, g ErrorGroup) (store.ErrorVerdict, error) {
 	v := store.ErrorVerdict{Provider: g.Provider, Signature: g.Signature, Errors: g.Count, LastError: g.Last}
+	// Another pass may have judged this group since pendingGroups read it.
+	if verdicts, err := a.store.ErrorVerdicts(); err == nil {
+		if last, ok := verdicts[g.Provider+"|"+g.Signature]; ok && g.Last <= last.At {
+			return v, errGroupJudged
+		}
+	}
 	e, err := a.store.GetUpstreamError(g.LastID)
 	if err != nil {
 		return v, err
@@ -387,16 +391,18 @@ func (a *api) reviewErrorGroup(ctx context.Context, cfg ErrorReviewConfig, g Err
 		return v, fmt.Errorf("%s answered no verdict: %.120s", cfg.Model, text)
 	}
 	v.By, v.Cause, v.Reason, v.Action = cfg.Model, p.Cause, p.Reason, p.Action
-	switch p.Action {
-	case "blacklist":
-		a.tryBlacklist(ctx, &v, e, p, canReplay)
-	case "disable_model":
-		a.tryDisableModel(&v, g, e)
-	case "disable_account":
-		a.tryDisableAccount(&v, g, cfg)
-	case "ignore":
-	default:
+	switch {
+	case p.Action == "ignore":
+	case p.Action != "blacklist" && p.Action != "disable_model" && p.Action != "disable_account":
 		v.Action, v.Note = "ignore", "unknown action "+p.Action
+	case needsOwnerApproval(e):
+		v.Note = "the owner must approve: the failing request was sent by a dashboard key, so its text can steer the model"
+	case p.Action == "blacklist":
+		a.tryBlacklist(ctx, &v, e, p, canReplay)
+	case p.Action == "disable_model":
+		a.tryDisableModel(&v, g, e)
+	default:
+		a.tryDisableAccount(&v, g, cfg)
 	}
 	saved, err := a.store.AddErrorVerdict(v)
 	if err == nil && v.Action != "ignore" {
@@ -447,6 +453,11 @@ func (a *api) tryBlacklist(ctx context.Context, v *store.ErrorVerdict, e store.U
 				notes = append(notes, name+": not checked, and the provider's message does not name it")
 				continue
 			}
+		}
+		if a.filterInPlace(e.Provider, c.Kind, rule.Pattern) {
+			v.Applied, v.Verified, v.Detail = true, verified, c.Kind+": "+rule.Pattern
+			notes = append(notes, name+": the rule is already in place")
+			break
 		}
 		if _, err := a.putFilter(store.Filter{Provider: e.Provider, Kind: c.Kind, Pattern: rule.Pattern,
 			Note: "error review: " + truncate(e.Signature, 80), Enabled: true}); err != nil {
@@ -585,6 +596,10 @@ func pnameOf(id string) string {
 // reviewErrors judges the groups due. It stops at the first failure of the
 // model.
 func (a *api) reviewErrors(ctx context.Context) (int, error) {
+	if !a.errReview.run.TryLock() {
+		return 0, errReviewRunning
+	}
+	defer a.errReview.run.Unlock()
 	cfg := a.errReviewConfig()
 	if !cfg.Enabled {
 		return 0, nil
@@ -595,12 +610,27 @@ func (a *api) reviewErrors(ctx context.Context) (int, error) {
 	}
 	n := 0
 	for _, g := range groups {
-		if _, err := a.reviewErrorGroup(ctx, cfg, g); err != nil {
+		_, err := a.reviewErrorGroup(ctx, cfg, g)
+		if errors.Is(err, errGroupJudged) {
+			continue
+		}
+		if err != nil {
 			return n, err
 		}
 		n++
 	}
 	return n, nil
+}
+
+// errGroupJudged reports a group another pass settled first. The group is
+// skipped, not counted, and it is not a failure.
+var errGroupJudged = errors.New("the group was judged by another pass")
+
+// needsOwnerApproval reports an error whose request text can steer the model: a
+// dashboard key sent it, or it came from the review's own model call. The
+// verdict is stored, and nothing acts on it.
+func needsOwnerApproval(e store.UpstreamError) bool {
+	return e.ClientKeyID != "" || e.Client == intactJob.name
 }
 
 // alertBursts tells the channels of a group of errors growing fast, once in
@@ -635,16 +665,25 @@ func (a *api) errorReviewLoop() {
 		paused := time.Now().Before(a.errReview.pauseTill)
 		a.errReview.mu.Unlock()
 		if !paused {
-			if n, err := a.reviewErrors(context.Background()); err != nil {
-				a.pauseErrReview(err)
-			} else if n > 0 {
-				a.errReview.mu.Lock()
-				a.errReview.lastError = ""
-				a.errReview.mu.Unlock()
-				log.Printf("error review: judged %d group(s)", n)
-			}
+			a.errorReviewOnce()
 		}
 		time.Sleep(reviewEvery)
+	}
+}
+
+// errorReviewOnce runs one pass and records a failure of the model. A pass
+// that is already running is not a failure, so it neither pauses nor alerts.
+func (a *api) errorReviewOnce() {
+	n, err := a.reviewErrors(context.Background())
+	switch {
+	case errors.Is(err, errReviewRunning):
+	case err != nil:
+		a.pauseErrReview(err)
+	case n > 0:
+		a.errReview.mu.Lock()
+		a.errReview.lastError = ""
+		a.errReview.mu.Unlock()
+		log.Printf("error review: judged %d group(s)", n)
 	}
 }
 
@@ -697,6 +736,10 @@ func (a *api) errorReview(w http.ResponseWriter, r *http.Request) {
 		a.store.SetSetting(errReviewKey, string(raw))
 		if b.Run {
 			n, err := a.reviewErrors(r.Context())
+			if errors.Is(err, errReviewRunning) {
+				writeError(w, http.StatusConflict, err.Error())
+				return
+			}
 			if err != nil {
 				writeError(w, http.StatusBadGateway, err.Error())
 				return

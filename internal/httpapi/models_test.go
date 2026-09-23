@@ -26,7 +26,7 @@ func TestModelsForAccountReturnsProviderList(t *testing.T) {
 	ck := loginCookie(t, h, cfg)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/accounts/"+c.ID+"/models", nil)
+	req := loopbackRequest("GET", "/accounts/"+c.ID+"/models", nil)
 	req.AddCookie(ck)
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "m1") {
@@ -40,7 +40,7 @@ func TestModelsNeedsSession(t *testing.T) {
 	c, _ := s.CreateConnection("groq", "x", "gsk")
 	h := NewWithAuth(s, nil, authConfig())
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/accounts/"+c.ID+"/models", nil))
+	h.ServeHTTP(rec, loopbackRequest("GET", "/accounts/"+c.ID+"/models", nil))
 	if rec.Code != http.StatusFound {
 		t.Errorf("unauth models code=%d, want 302", rec.Code)
 	}

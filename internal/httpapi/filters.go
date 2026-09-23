@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 
 	"github.com/louisphamdev/intact/internal/filter"
@@ -46,8 +45,8 @@ func (a *api) reloadFilters() {
 			continue
 		}
 		// A body-wiping rule stored before the guard existed must not apply now.
-		if riskyFieldPattern(f.Kind, f.Pattern) {
-			log.Printf("skip unsafe filter %s (%s %q): would strip an essential field", f.ID, f.Kind, f.Pattern)
+		if why := unsafeFilter(f.Kind, f.Pattern); why != "" {
+			log.Printf("skip unsafe filter %s (%s %q): %s", f.ID, f.Kind, f.Pattern, why)
 			continue
 		}
 		r, err := filter.Compile(f.Kind, f.Pattern)
@@ -83,8 +82,8 @@ func (a *api) saveFilter(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if riskyFieldPattern(f.Kind, f.Pattern) {
-		writeError(w, http.StatusBadRequest, "this pattern would strip an essential field from every request; narrow it")
+	if why := unsafeFilter(f.Kind, f.Pattern); why != "" {
+		writeError(w, http.StatusBadRequest, why)
 		return
 	}
 	saved, err := a.putFilter(f)
@@ -109,17 +108,18 @@ func (a *api) deleteFilter(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-// riskyFieldPattern reports a field rule that would break every request: a bare
-// "*" clears the whole body, and a single essential top-level key drops the
-// content or the routing model. A deeper path (messages.*.cache_control) is
-// fine; only these top-level strips are refused.
-func riskyFieldPattern(kind, pattern string) bool {
-	if kind != filter.Field {
+// filterInPlace reports an enabled rule already stored for that provider. A
+// review asks before it installs: a second row doubles the alert and grows the
+// table on every pass.
+func (a *api) filterInPlace(provider, kind, pattern string) bool {
+	list, err := a.store.ListFilters()
+	if err != nil {
 		return false
 	}
-	switch strings.TrimSpace(pattern) {
-	case "*", "messages", "model", "input", "contents", "prompt", "request":
-		return true
+	for _, f := range list {
+		if f.Enabled && f.Provider == provider && f.Kind == kind && f.Pattern == pattern {
+			return true
+		}
 	}
 	return false
 }

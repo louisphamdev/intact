@@ -103,22 +103,6 @@ func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, path
 	return out, nil
 }
 
-// relay streams the upstream response to the caller unchanged and records the
-// usage for connID.
-func (a *api) relay(w http.ResponseWriter, resp *http.Response, connID string) {
-	for k, vs := range resp.Header {
-		if hopByHop[k] {
-			continue
-		}
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	tapped := streamBody(w, resp)
-	a.recordUsage(connID, tapped, resp.Header.Get("Content-Encoding"))
-}
-
 // relayObserved relays a passthrough answer and shows it to the drift observer.
 func (a *api) relayObserved(w http.ResponseWriter, resp *http.Response, connID, provider, path string) {
 	a.rate.capture(connID, resp.Header)
@@ -208,6 +192,11 @@ func streamBody(w http.ResponseWriter, resp *http.Response) []byte {
 			_ = rc.Flush()
 		}
 		if readErr != nil {
+			if !errors.Is(readErr, io.EOF) {
+				// A stream cut in the middle still reaches the caller as a 200
+				// with a short body, so only this line says why it stopped.
+				log.Printf("upstream stream ended early: %v", readErr)
+			}
 			return tap.bytes()
 		}
 	}

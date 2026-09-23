@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/louisphamdev/intact/internal/oauth"
+	"github.com/louisphamdev/intact/internal/store"
 )
 
 // refreshLocks serializes token refreshes per connection. Without it, several
@@ -14,8 +15,17 @@ import (
 // rotates its refresh token invalidates every copy but one, which loses the
 // account. One refresh at a time, and the others read the stored result.
 type refreshLocks struct {
-	mu sync.Mutex
-	m  map[string]*sync.Mutex
+	mu        sync.Mutex
+	m         map[string]*sync.Mutex
+	overrides map[string]tokenOverride
+}
+
+// tokenOverride holds a refreshed token whose store write failed. It is served
+// until a later write succeeds, so the rotated refresh token is not lost.
+type tokenOverride struct {
+	accessToken  string
+	refreshToken string
+	expiresAt    string
 }
 
 func (r *refreshLocks) lock(id string) *sync.Mutex {
@@ -33,34 +43,132 @@ func (r *refreshLocks) lock(id string) *sync.Mutex {
 	return l
 }
 
+func (r *refreshLocks) getOverride(id string) (tokenOverride, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.overrides == nil {
+		return tokenOverride{}, false
+	}
+	ov, ok := r.overrides[id]
+	return ov, ok
+}
+
+func (r *refreshLocks) setOverride(id string, ov tokenOverride) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.overrides == nil {
+		r.overrides = map[string]tokenOverride{}
+	}
+	r.overrides[id] = ov
+}
+
+func (r *refreshLocks) clearOverride(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.overrides != nil {
+		delete(r.overrides, id)
+	}
+}
+
+func (a *api) applyOverride(creds *store.OAuthCreds, connID string) {
+	if ov, ok := a.refresh.getOverride(connID); ok && ov.accessToken != "" {
+		creds.ExpiresAt = ov.expiresAt
+		if ov.refreshToken != "" {
+			creds.RefreshToken = ov.refreshToken
+		}
+	}
+}
+
+func (a *api) currentSecret(connID string) (string, error) {
+	if ov, ok := a.refresh.getOverride(connID); ok && ov.accessToken != "" {
+		return ov.accessToken, nil
+	}
+	return a.store.Secret(connID)
+}
+
 // secretFor returns the credential to use for a connection. For an OAuth
 // connection whose access token is at or near expiry, it refreshes the token,
-// stores the new one, and returns it. A refresh failure falls back to the token
-// on file, which may still work for a short while.
+// stores the new one, and returns it. A failed exchange falls back to the token
+// on file; a failed write retains the new token in memory under refreshLocks.
 func (a *api) secretFor(ctx context.Context, connID string) (string, error) {
 	creds, err := a.store.OAuth(connID)
-	if err != nil || creds.TokenURL == "" || !needsRefresh(creds.ExpiresAt) {
-		return a.store.Secret(connID)
+	if err != nil || creds.TokenURL == "" {
+		return a.currentSecret(connID)
+	}
+	a.applyOverride(&creds, connID)
+	if !needsRefresh(creds.ExpiresAt) {
+		return a.currentSecret(connID)
 	}
 	l := a.refresh.lock(connID)
 	defer l.Unlock()
 	// Re-read under the lock: another request may have refreshed while this one
 	// waited, so it must not refresh again and reuse a rotated token.
-	if creds, err = a.store.OAuth(connID); err != nil || !needsRefresh(creds.ExpiresAt) {
-		return a.store.Secret(connID)
+	if creds, err = a.store.OAuth(connID); err != nil {
+		return a.currentSecret(connID)
 	}
-	tok, newRT, exp, rerr := oauth.Refresh(ctx, creds.TokenURL, creds.ClientID, creds.ClientSecret, creds.RefreshToken)
+	a.applyOverride(&creds, connID)
+	if !needsRefresh(creds.ExpiresAt) {
+		return a.currentSecret(connID)
+	}
+	rctx, cancel := refreshContext(ctx)
+	defer cancel()
+	tok, newRT, exp, rerr := oauth.Refresh(rctx, creds.TokenURL, creds.ClientID, creds.ClientSecret,
+		creds.RefreshToken, jsonTokenBody(a.providerOf(connID)))
 	if rerr != nil {
 		log.Printf("refresh oauth for connection %s: %v", connID, rerr)
 		go a.notify(EventAccountAuth, "auth|"+connID, 6*time.Hour, notifyMsg{Title: "An account's sign-in failed to renew",
 			Lines: []string{"Account: " + connID, "Error: " + truncate(rerr.Error(), 200), "Sign in again on the provider's page."},
 			Path:  "#/providers"})
-	} else if uerr := a.store.UpdateAfterRefresh(connID, tok, newRT, exp.UTC().Format(time.RFC3339)); uerr != nil {
-		log.Printf("store refreshed token for connection %s: %v", connID, uerr)
-	} else {
-		return tok, nil
+		return a.currentSecret(connID)
 	}
-	return a.store.Secret(connID)
+	effRT := newRT
+	if effRT == "" {
+		effRT = creds.RefreshToken
+	}
+	expStr := exp.UTC().Format(time.RFC3339)
+	if uerr := a.store.UpdateAfterRefresh(connID, tok, newRT, expStr); uerr != nil {
+		a.refresh.setOverride(connID, tokenOverride{
+			accessToken:  tok,
+			refreshToken: effRT,
+			expiresAt:    expStr,
+		})
+		a.alertUnsavedToken(connID, uerr)
+	} else {
+		a.refresh.clearOverride(connID)
+	}
+	return tok, nil
+}
+
+// refreshContext detaches a token exchange from the caller. A client that
+// disconnects mid-exchange must not cancel it: the provider may have rotated the
+// refresh token already, and dropping the answer loses the account.
+func refreshContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+}
+
+// providerOf returns the provider id of a connection, or "" when it is unknown.
+func (a *api) providerOf(connID string) string {
+	list, err := a.store.ListConnections()
+	if err != nil {
+		return ""
+	}
+	for _, c := range list {
+		if c.ID == connID {
+			return c.Provider
+		}
+	}
+	return ""
+}
+
+// alertUnsavedToken reports a refresh that the store did not keep. This process
+// holds the only copy of the new token, so a restart loses the account.
+func (a *api) alertUnsavedToken(connID string, err error) {
+	log.Printf("store refreshed token for connection %s: %v", connID, err)
+	go a.notify(EventAccountAuth, "authsave|"+connID, 6*time.Hour, notifyMsg{
+		Title: "An account renewed its sign-in, but the new token was not saved",
+		Lines: []string{"Account: " + connID, "Error: " + truncate(err.Error(), 200),
+			"intact uses the new token now. A restart loses it. Sign in again on the provider's page."},
+		Path: "#/providers"})
 }
 
 // needsRefresh reports whether an access token should be refreshed. An unknown
@@ -91,25 +199,40 @@ func (a *api) forceRefresh(ctx context.Context, connID string) (string, bool) {
 	if err != nil || c.TokenURL == "" {
 		return "", false
 	}
-	prev, _ := a.store.Secret(connID)
+	prev, _ := a.currentSecret(connID)
 	l := a.refresh.lock(connID)
 	defer l.Unlock()
 	// Another request that met the same 401 may have refreshed while this one
 	// waited: use its token rather than refresh again and rotate twice.
-	if cur, _ := a.store.Secret(connID); cur != "" && cur != prev {
+	if cur, _ := a.currentSecret(connID); cur != "" && cur != prev {
 		return cur, true
 	}
 	if c, err = a.store.OAuth(connID); err != nil || c.TokenURL == "" {
 		return "", false
 	}
-	tok, newRT, exp, rerr := oauth.Refresh(ctx, c.TokenURL, c.ClientID, c.ClientSecret, c.RefreshToken)
+	a.applyOverride(&c, connID)
+	rctx, cancel := refreshContext(ctx)
+	defer cancel()
+	tok, newRT, exp, rerr := oauth.Refresh(rctx, c.TokenURL, c.ClientID, c.ClientSecret,
+		c.RefreshToken, jsonTokenBody(a.providerOf(connID)))
 	if rerr != nil {
 		log.Printf("force refresh oauth for connection %s: %v", connID, rerr)
 		return "", false
 	}
-	if uerr := a.store.UpdateAfterRefresh(connID, tok, newRT, exp.UTC().Format(time.RFC3339)); uerr != nil {
-		log.Printf("store force-refreshed token for connection %s: %v", connID, uerr)
-		return "", false
+	effRT := newRT
+	if effRT == "" {
+		effRT = c.RefreshToken
+	}
+	expStr := exp.UTC().Format(time.RFC3339)
+	if uerr := a.store.UpdateAfterRefresh(connID, tok, newRT, expStr); uerr != nil {
+		a.refresh.setOverride(connID, tokenOverride{
+			accessToken:  tok,
+			refreshToken: effRT,
+			expiresAt:    expStr,
+		})
+		a.alertUnsavedToken(connID, uerr)
+	} else {
+		a.refresh.clearOverride(connID)
 	}
 	return tok, true
 }

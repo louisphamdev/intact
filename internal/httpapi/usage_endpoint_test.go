@@ -19,7 +19,7 @@ func TestUsageEndpointReturnsDailyRows(t *testing.T) {
 
 	h := New(s, nil)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/usage", nil))
+	h.ServeHTTP(rec, loopbackRequest("GET", "/usage", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())

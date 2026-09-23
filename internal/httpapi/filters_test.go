@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/louisphamdev/intact/internal/filter"
 	"github.com/louisphamdev/intact/internal/store"
 )
 
@@ -31,13 +32,13 @@ func TestFiltersApplyToTheOutgoingRequest(t *testing.T) {
 		`{"provider":"groq","kind":"field","pattern":"temperature","enabled":true}`,
 	} {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest("POST", "/filters", strings.NewReader(f)))
+		h.ServeHTTP(rec, loopbackRequest("POST", "/filters", strings.NewReader(f)))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("save %s: code=%d body=%s", f, rec.Code, rec.Body.String())
 		}
 	}
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/messages",
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/messages",
 		strings.NewReader(`{"model":"claude/x","context_management":{"a":1},"temperature":0.5,"messages":[]}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
@@ -54,7 +55,7 @@ func TestFiltersApplyToTheOutgoingRequest(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/filters", strings.NewReader(`{"kind":"system","pattern":"("}`)))
+	h.ServeHTTP(rec, loopbackRequest("POST", "/filters", strings.NewReader(`{"kind":"system","pattern":"("}`)))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("bad regex accepted: code=%d", rec.Code)
 	}
@@ -68,7 +69,7 @@ func TestFilterRejectsBodyWipingPatterns(t *testing.T) {
 	h := New(s, nil)
 	for _, pat := range []string{"*", "messages", "model", "input"} {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest("POST", "/filters",
+		h.ServeHTTP(rec, loopbackRequest("POST", "/filters",
 			strings.NewReader(`{"provider":"*","kind":"field","pattern":"`+pat+`","enabled":true}`)))
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("pattern %q accepted: code=%d", pat, rec.Code)
@@ -76,7 +77,7 @@ func TestFilterRejectsBodyWipingPatterns(t *testing.T) {
 	}
 	// A deeper, non-essential path is still allowed.
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/filters",
+	h.ServeHTTP(rec, loopbackRequest("POST", "/filters",
 		strings.NewReader(`{"provider":"*","kind":"field","pattern":"messages.*.cache_control","enabled":true}`)))
 	if rec.Code != http.StatusOK {
 		t.Errorf("safe deep path refused: code=%d body=%s", rec.Code, rec.Body.String())
@@ -97,5 +98,45 @@ func TestDefaultFiltersAreSeededOnce(t *testing.T) {
 	again, _ := s.ListFilters()
 	if len(again) != len(list)-1 {
 		t.Errorf("filters after reopen = %d, want %d: a deleted default came back", len(again), len(list)-1)
+	}
+}
+
+// saveFilter (the dashboard and the API) answers 400 for the same rules that
+// putFilter (MCP, and both reviews) refuses.
+func TestSaveFilterAndPutFilterShareTheGuard(t *testing.T) {
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	a, h := newServer(s, nil, nil)
+	post := func(kind, pattern string) int {
+		rec := httptest.NewRecorder()
+		body := `{"provider":"*","kind":"` + kind + `","pattern":` + quote(pattern) + `,"enabled":true}`
+		h.ServeHTTP(rec, loopbackRequest("POST", "/filters", strings.NewReader(body)))
+		return rec.Code
+	}
+	for _, p := range refusedFieldRules {
+		if code := post(filter.Field, p); code != http.StatusBadRequest {
+			t.Errorf("POST field %q = %d, want 400", p, code)
+		}
+		if _, err := a.putFilter(store.Filter{Provider: "*", Kind: filter.Field, Pattern: p, Enabled: true}); err == nil {
+			t.Errorf("putFilter field %q was accepted", p)
+		}
+	}
+	for _, re := range refusedSystemRules {
+		if code := post(filter.System, re); code != http.StatusBadRequest {
+			t.Errorf("POST system %q = %d, want 400", re, code)
+		}
+		if _, err := a.putFilter(store.Filter{Provider: "*", Kind: filter.System, Pattern: re, Enabled: true}); err == nil {
+			t.Errorf("putFilter system %q was accepted", re)
+		}
+	}
+	for _, p := range acceptedFieldRules {
+		if code := post(filter.Field, p); code != http.StatusOK {
+			t.Errorf("POST field %q = %d, want 200", p, code)
+		}
+	}
+	for _, re := range acceptedSystemRules {
+		if code := post(filter.System, re); code != http.StatusOK {
+			t.Errorf("POST system %q = %d, want 200", re, code)
+		}
 	}
 }

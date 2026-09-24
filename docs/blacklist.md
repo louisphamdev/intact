@@ -27,6 +27,35 @@ On first start the blacklist is seeded with fixes found against real providers:
 - the Claude Code billing line, for Antigravity: its presence in the system
   prompt makes Google answer 429 while quota remains.
 
+## Rules found in production
+
+The error review found these rules on a live install and proved each one by
+replay. A new install does not have them. Add the rules for the providers that
+you use, from the dashboard or with the API below.
+
+| Provider | Kind | Pattern | Why |
+| --- | --- | --- | --- |
+| `antigravity` | `system` | `\bYou\s+are\s+Codex,\s+an\b` | Codex system prompt. Google answers a false 429 to "You are Codex, an agent based on GPT-5". |
+| `antigravity` | `system` | `\bYou\s+are\s+Codex,\s+a\b` | The same fingerprint in the variant "You are Codex, a coding agent based on GPT-5". |
+| `antigravity` | `system` | `\ba\s+Claude\s+agent,` | Claude Code system prompt (`claude -p`). Google answers a false 429 to "You are a Claude agent, built on Anthropic's Claude Agent SDK". |
+
+The rule removes only the matched words. The rest of the system prompt stays.
+
+To add all three at once:
+
+```bash
+for p in '\bYou\s+are\s+Codex,\s+an\b' '\bYou\s+are\s+Codex,\s+a\b' '\ba\s+Claude\s+agent,'; do
+  jq -n --arg p "$p" '{provider:"antigravity",kind:"system",pattern:$p,note:"false 429: client fingerprint",enabled:true}' |
+    curl -s https://intact.example/api/filters -H "Authorization: Bearer $INTACT_API_TOKEN" \
+      -H "Content-Type: application/json" -d @-
+done
+```
+
+`INTACT_API_TOKEN` is the master token: only an admin can add a rule.
+
+If Google refuses a new fingerprint later, the error review finds it and adds
+the rule by itself. See [Errors](errors.md).
+
 ## Managing rules
 
 - **Dashboard**: **Blacklist** has one tab per kind. **Block** adds a rule.

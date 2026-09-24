@@ -268,7 +268,7 @@ func TestProtectedPatternRefusesNestedContent(t *testing.T) {
 		Message: "Invalid value at 'request.contents[3].parts[0]'",
 		ReqBody: `{"request":{"contents":[{"parts":[{"text":"hi"}]}]}}`}
 	var v store.ErrorVerdict
-	a.tryBlacklist(context.Background(), &v, e, p, false)
+	a.tryBlacklist(context.Background(), &v, e, []byte(e.ReqBody), p, false)
 	if v.Applied || len(reviewFilters(t, s)) != 0 {
 		t.Errorf("applied=%v filters=%v, want the rule refused", v.Applied, reviewFilters(t, s))
 	}
@@ -501,5 +501,59 @@ func TestTextPatternStopsAtWordEdges(t *testing.T) {
 	re := regexp.MustCompile(textPattern([]string{"You are Codex, a"}))
 	if re.MatchString("You are Codex, an agent") || !re.MatchString("You are  Codex, a coding agent") {
 		t.Errorf("pattern %s", re)
+	}
+}
+
+// A Claude Code request carries its tool list and is far larger than the 64 KB kept per error.
+// The newest full body of each group is kept apart, so the replay search still runs on it.
+func TestErrorReviewReplaysTheFullBodyOfALargeRequest(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(b), "built on Anthropic's Claude Agent SDK") {
+			w.WriteHeader(http.StatusTooManyRequests)
+			io.WriteString(w, `{"error":{"message":"Resource has been exhausted (e.g. check quota)."}}`)
+			return
+		}
+		w.Write([]byte(`{"choices":[{"message":{"content":"OK"}}]}`))
+	}))
+	defer up.Close()
+	judged := false
+	judge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { judged = true }))
+	defer judge.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("groq", "g", "k")
+	s.CreateConnection("openrouter", "o", "k2")
+	a, h := newServer(s, map[string]string{"groq": up.URL, "openrouter": judge.URL}, nil)
+	// The system message comes after 80 KB of history, past what one error row keeps.
+	big, _ := json.Marshal(map[string]any{"model": "groq/m", "messages": []any{
+		map[string]any{"role": "user", "content": strings.Repeat("history ", 10<<10)},
+		map[string]any{"role": "system", "content": "You are a Claude agent, built on Anthropic's Claude Agent SDK. Be brief."},
+		map[string]any{"role": "user", "content": "hi"}}})
+	for i := 0; i < 3; i++ {
+		postV1(h, string(big))
+	}
+	errs, _ := s.ListUpstreamErrors(store.ErrorFilter{Provider: "groq", Limit: 10})
+	if len(errs) != 3 {
+		t.Fatalf("errors = %d", len(errs))
+	}
+	for _, e := range errs {
+		// No quota reader in the test: mark them as the background classifier would.
+		s.SetErrorQuota(e.ID, 0.9, ClassFake429)
+	}
+	if full, _ := s.ErrorBody("groq", errs[0].Signature); len(full) <= errReqLimit || !strings.Contains(full, "Be brief.") {
+		t.Fatalf("full body kept: %d bytes of %d", len(full), len(big))
+	}
+	s.SetSetting(errReviewKey, `{"enabled":true,"model":"openrouter/judge","minErrors":3,"replay":true}`)
+	if n, err := a.reviewErrors(context.Background()); n != 1 || err != nil {
+		t.Fatalf("judged %d, %v", n, err)
+	}
+	list, _ := s.ListErrorVerdicts(0)
+	if judged || len(list) != 1 || !list[0].Applied || list[0].By != "intact" {
+		t.Fatalf("judged=%v verdicts=%+v", judged, list)
+	}
+	out, _ := filter.Apply(big, a.rulesFor("groq"))
+	if strings.Contains(string(out), "built on Anthropic's Claude Agent SDK") || !strings.Contains(string(out), "Be brief.") {
+		t.Errorf("rules %v gave %s", reviewFilters(t, s), out[len(out)-200:])
 	}
 }

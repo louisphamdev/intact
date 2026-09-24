@@ -51,7 +51,14 @@ CREATE TABLE IF NOT EXISTS upstream_errors (
 	req_body    TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS upstream_errors_at ON upstream_errors (at);
-CREATE INDEX IF NOT EXISTS upstream_errors_prov ON upstream_errors (provider, at);`
+CREATE INDEX IF NOT EXISTS upstream_errors_prov ON upstream_errors (provider, at);
+CREATE TABLE IF NOT EXISTS upstream_error_bodies (
+	provider  TEXT NOT NULL,
+	signature TEXT NOT NULL,
+	error_id  INTEGER NOT NULL,
+	body      TEXT NOT NULL,
+	PRIMARY KEY (provider, signature)
+);`
 
 // migrateErrors adds the columns a database written by an older version has
 // not got. A second run is a no-op.
@@ -158,8 +165,30 @@ func (s *Store) PruneUpstreamErrors(days, max int) error {
 	if _, err := s.DB.Exec(`DELETE FROM upstream_errors WHERE at < ?`, cut); err != nil {
 		return err
 	}
-	_, err := s.DB.Exec(`DELETE FROM upstream_errors WHERE id <= (SELECT id FROM upstream_errors ORDER BY id DESC LIMIT 1 OFFSET ?)`, max)
+	if _, err := s.DB.Exec(`DELETE FROM upstream_errors WHERE id <= (SELECT id FROM upstream_errors ORDER BY id DESC LIMIT 1 OFFSET ?)`, max); err != nil {
+		return err
+	}
+	_, err := s.DB.Exec(`DELETE FROM upstream_error_bodies WHERE error_id NOT IN (SELECT id FROM upstream_errors)`)
 	return err
+}
+
+// SaveErrorBody keeps the full request of a group's newest error. An error row
+// keeps only the start of a large request, which cannot be replayed.
+func (s *Store) SaveErrorBody(provider, signature string, errorID int64, body string) error {
+	_, err := s.DB.Exec(`INSERT INTO upstream_error_bodies (provider, signature, error_id, body) VALUES (?, ?, ?, ?)
+		ON CONFLICT (provider, signature) DO UPDATE SET error_id = excluded.error_id, body = excluded.body`,
+		provider, signature, errorID, body)
+	return err
+}
+
+// ErrorBody returns the full request kept for a group, or "".
+func (s *Store) ErrorBody(provider, signature string) (string, error) {
+	var body string
+	err := s.DB.QueryRow(`SELECT body FROM upstream_error_bodies WHERE provider = ? AND signature = ?`, provider, signature).Scan(&body)
+	if err != nil && strings.Contains(err.Error(), "no rows") {
+		return "", nil
+	}
+	return body, err
 }
 
 // CountUpstreamErrorsSince counts a provider's errors since a time.

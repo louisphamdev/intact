@@ -191,6 +191,16 @@ func replayable(e store.UpstreamError) bool {
 	return e.ReqBody != "" && !(len(e.ReqBody) >= errReqLimit && strings.HasSuffix(e.ReqBody, "…"))
 }
 
+// replayBody is the request to replay: the error's own when it was kept whole,
+// else the full request kept for its group.
+func (a *api) replayBody(e store.UpstreamError) string {
+	if replayable(e) {
+		return e.ReqBody
+	}
+	full, _ := a.store.ErrorBody(e.Provider, e.Signature)
+	return full
+}
+
 // sketchJSON shortens a request for a prompt: long strings cut, long
 // arrays reduced to their first and last items.
 func sketchJSON(raw string, limit int) string {
@@ -355,10 +365,11 @@ func (a *api) reviewErrorGroup(ctx context.Context, cfg ErrorReviewConfig, g Err
 	if err != nil {
 		return v, err
 	}
-	canReplay := cfg.Replay && replayable(e) && (g.Classes[ClassRejected] > 0 || g.Classes[ClassFake429] > 0)
+	body := a.replayBody(e)
+	canReplay := cfg.Replay && body != "" && (g.Classes[ClassRejected] > 0 || g.Classes[ClassFake429] > 0)
 	reproduced := "not replayed"
 	if canReplay {
-		req := []byte(e.ReqBody)
+		req := []byte(body)
 		if now, changed := filter.Apply(req, a.rulesFor(g.Provider)); changed {
 			if st, _, err := a.replay(ctx, e, now); err == nil && st < 400 {
 				v.Action, v.By, v.Verified = "ignore", "intact", true
@@ -406,7 +417,7 @@ func (a *api) reviewErrorGroup(ctx context.Context, cfg ErrorReviewConfig, g Err
 	case needsOwnerApproval(e):
 		v.Note = "the owner must approve: the failing request was sent by a dashboard key, so its text can steer the model"
 	case p.Action == "blacklist":
-		a.tryBlacklist(ctx, &v, e, p, canReplay)
+		a.tryBlacklist(ctx, &v, e, []byte(body), p, canReplay)
 	case p.Action == "disable_model":
 		a.tryDisableModel(&v, g, e)
 	default:
@@ -419,8 +430,7 @@ func (a *api) reviewErrorGroup(ctx context.Context, cfg ErrorReviewConfig, g Err
 	return saved, err
 }
 
-func (a *api) tryBlacklist(ctx context.Context, v *store.ErrorVerdict, e store.UpstreamError, p errProposal, canReplay bool) {
-	req := []byte(e.ReqBody)
+func (a *api) tryBlacklist(ctx context.Context, v *store.ErrorVerdict, e store.UpstreamError, req []byte, p errProposal, canReplay bool) {
 	var notes []string
 	for n, c := range p.Candidates {
 		if n == 3 {

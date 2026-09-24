@@ -26,6 +26,7 @@ const (
 	errKeepRows   = 20000
 	errRespLimit  = 64 << 10
 	errReqLimit   = 64 << 10
+	errBodyLimit  = 8 << 20 // the full request kept per group, for the replay
 	fakeFastMs    = 800
 	fakeQuotaLeft = 0.10
 )
@@ -160,6 +161,9 @@ func (a *api) sendLogged(r *http.Request, p provider.Provider, conn store.Connec
 	}
 	e.Signature = errSignature(e.Status, e.Message)
 	id, aerr := a.store.AddUpstreamError(e)
+	if aerr == nil && e.Status >= 400 && len(body) > errReqLimit && len(body) <= errBodyLimit {
+		a.store.SaveErrorBody(e.Provider, e.Signature, id, string(body))
+	}
 	if aerr == nil && e.Status == http.StatusTooManyRequests {
 		go a.classify429(id, conn, model, ms)
 	}

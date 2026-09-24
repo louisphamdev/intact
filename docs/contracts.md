@@ -14,7 +14,7 @@ intact reduces both halves to structural shape records and executes a diff.
 ## Privacy and Storage
 
 intact does not store raw prompt text or answer text.
-From llm-switcher 1.1.4, the half that the switcher uploads carries no client content either: the switcher replaces each prompt, answer, tool argument, tool result, file and user id with `x` of the same length before it sends the half. Keys, types, roles, model names, tool names and numbers stay. As a result, intact matches a field that the converter moved by its path or by an approved mapping, not by its value.
+From llm-switcher 1.1.5, the half that the switcher uploads carries no client content either: the switcher replaces every string value with `x` of the same length, except the enum values that this reducer reads (`type`, `role`, `object`, `model`, `status`, `event`, `finish_reason`, `stop_reason`). Keys, numbers and flags stay; keys under user data are masked, as the reducer collapses them anyway. As a result, intact matches a field that the converter moved by its path or by an approved mapping, not by its value.
 Every string value is reduced to its byte length and a truncated HMAC-SHA256 hash.
 The HMAC key is unique to the server and never leaves the host.
 Known enum values on an allowlist keep their string value.

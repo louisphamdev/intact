@@ -91,6 +91,11 @@ func (p Provider) WithAccount(accountID string) string {
 	return strings.ReplaceAll(p.BaseURL, "{accountId}", accountID)
 }
 
+// ClaudeInteractiveUserAgent names the interactive Claude Code CLI. Anthropic offers quota
+// resets only to this surface: the "sdk-cli" surface below gets ineligible:surface, and an
+// old version gets ineligible:cli_version. Measured on 2026-09-24 with Claude Code 2.1.281.
+const ClaudeInteractiveUserAgent = "claude-cli/2.1.281 (external, cli)"
+
 // Captured from Claude Code 2.1.278 on 2026-09-20. The upstream rejects an OAuth
 // token without claude-code-20250219 and oauth-2025-04-20, so this list is part
 // of the credential, not decoration. Details: docs/class-a-claude.md.

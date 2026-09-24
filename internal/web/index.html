@@ -389,7 +389,7 @@
 const VI={
 // menu, frame
 'Endpoint':'Endpoint','Providers':'Nhà cung cấp','Blacklist':'Blacklist','Drift':'Drift','Docs':'Tài liệu','Quota':'Hạn mức','Usage':'Sử dụng',
-'Sign out':'Đăng xuất','Collapse':'Thu gọn','Collapse menu':'Thu gọn menu','Expand menu':'Mở rộng menu','credential proxy':'proxy tài khoản LLM','intact home':'Trang chủ intact','Close':'Đóng',
+'Sign out':'Đăng xuất','Not available':'Chưa dùng được','Valid from':'Hiệu lực từ','Expires':'Hết hạn','Next available':'Lượt tiếp theo','extra usage':'mức dùng thêm','now':'ngay bây giờ','in {0}':'sau {0}','1 per week':'1 lần/tuần','Clears':'Xoá giới hạn','{0} window':'khung {0}','5-hour limit reset':'Reset giới hạn 5 giờ','Available once you hit the 5-hour limit':'Dùng được khi bạn chạm giới hạn 5 giờ','Not offered to this client':'Không áp dụng cho client này','Needs a newer Claude Code version in intact':'Cần intact dùng Claude Code bản mới hơn','Available once you hit the limit':'Dùng được khi bạn chạm giới hạn','Already used':'Đã dùng','Cooling down':'Đang chờ hồi','Paused':'Tạm dừng','Not started yet':'Chưa bắt đầu','Expired':'Hết hạn','Not available ({0})':'Chưa dùng được ({0})','Collapse':'Thu gọn','Collapse menu':'Thu gọn menu','Expand menu':'Mở rộng menu','credential proxy':'proxy tài khoản LLM','intact home':'Trang chủ intact','Close':'Đóng',
 'Auto':'Tự động','Follow the system':'Theo hệ thống','Light':'Sáng','Dark':'Tối',
 // common
 'Copy':'Sao chép','Copy {0}':'Sao chép {0}','Copied {0}':'Đã sao chép {0}','Cancel':'Huỷ','Save':'Lưu','Saved':'Đã lưu','Continue':'Tiếp tục',
@@ -2300,28 +2300,50 @@ function showConfirmClaimDialog(conn,r,onConfirm){
   document.body.append(ov);
 }
 
+// The server reports why a reset cannot be claimed as a short code; the owner needs a sentence.
+const BLOCKED_TEXT={
+  'ineligible:not_at_wall':'Available once you hit the 5-hour limit',
+  'ineligible:surface':'Not offered to this client',
+  'ineligible:cli_version':'Needs a newer Claude Code version in intact',
+  not_at_limit:'Available once you hit the limit',used:'Already used',cooldown:'Cooling down',
+  paused:'Paused',not_started:'Not started yet',expired:'Expired',bad_id:'Not available'};
+// A reset names the windows it clears; "5h" and "7d" read as windows, the rest are Anthropic names.
+const CLEAR_TEXT={'7d overage_included':'extra usage'};
+function clearText(c){return CLEAR_TEXT[c]?t(CLEAR_TEXT[c]):/^\d+[hd]$/.test(c)?t('{0} window',c):c}
+// untilText reads as a window reset; a date that ends or starts something reads as "in 3d 4h".
+function inText(iso){
+  const at=Date.parse(iso);if(!at)return iso||'';
+  let d=Math.round((at-Date.now())/60000);if(d<=0)return t('now');
+  const days=Math.floor(d/1440);d-=days*1440;const h=Math.floor(d/60),m=d%60;
+  return t('in {0}',(days?days+'d ':'')+(h?h+'h ':'')+(days?'':m+'m')).trim();
+}
+function blockedText(code){
+  if(!code)return t('Not available');
+  if(BLOCKED_TEXT[code])return t(BLOCKED_TEXT[code]);
+  return code.startsWith('ineligible:')?t('Not available ({0})',code.slice(11)):t(code);
+}
 function quotaResetRow(conn,r,onRequestQuota){
   const key=conn.connectionId+':'+r.id;
   const cs=claimState.get(key);
 
-  const title=el('b',{text:r.title||r.id});
-  const kind=el('span',{class:'badge',style:'margin-left:.4rem',text:t(r.kind||'')});
-  const leftTotal=el('span',{class:'muted small',style:'margin-left:auto',text:r.left+' / '+r.total});
+  const title=el('b',{style:'flex:1;min-width:0',text:r.title||r.id});
+  const kind=el('span',{class:'badge',style:'margin-left:.4rem',text:t(r.kind==='weekly'?'1 per week':(r.kind||''))});
+  const leftTotal=el('span',{class:'muted small',style:'flex:none;white-space:nowrap',text:r.left+' / '+r.total});
 
-  const headerRow=el('div',{style:'display:flex;align-items:center;gap:.3rem'},title,kind,leftTotal);
+  const headerRow=el('div',{style:'display:flex;align-items:flex-start;gap:.4rem'},title,kind,leftTotal);
 
   const details=[];
   if(r.clears&&r.clears.length){
-    details.push(el('div',{class:'faint small'},t('Refills')+': '+r.clears.join(', ')));
+    details.push(el('div',{class:'faint small'},t('Clears')+': '+r.clears.map(clearText).join(', ')));
   }
   if(r.validFrom){
     details.push(el('div',{class:'faint small'},t('Valid from')+': '+quotaFormatDate(r.validFrom)));
   }
   if(r.expiresAt){
-    details.push(el('div',{class:'faint small',title:r.expiresAt},t('Expires')+': '+untilText(r.expiresAt)));
+    details.push(el('div',{class:'faint small',title:r.expiresAt},t('Expires')+': '+inText(r.expiresAt)));
   }
   if(r.nextAt&&!r.usable){
-    details.push(el('div',{class:'faint small',title:r.nextAt},t('Next available')+': '+untilText(r.nextAt)));
+    details.push(el('div',{class:'faint small',title:r.nextAt},t('Next available')+': '+inText(r.nextAt)));
   }
   if(r.status){
     details.push(el('div',{class:'faint small'},t('Status')+': '+t(r.status)));
@@ -2415,7 +2437,7 @@ function quotaResetRow(conn,r,onRequestQuota){
 
   if(!r.usable){
     if(!cs||cs.phase!=='done'||!cs.outcome){
-      const blockedReason=r.blocked?t(r.blocked):t('Not available');
+      const blockedReason=blockedText(r.blocked);
       actionBox.append(el('span',{class:'faint small',text:blockedReason}));
     }
   }else if(holdActive){

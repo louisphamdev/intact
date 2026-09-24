@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"github.com/louisphamdev/intact/internal/provider"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -238,8 +239,9 @@ func TestQuotaClaudeReadPathIdentityAndResets(t *testing.T) {
 	if gotQuery.Load() == nil || !strings.Contains(*gotQuery.Load(), "at_wall=1") || !strings.Contains(*gotQuery.Load(), "skip_spend=1") {
 		t.Errorf("query = %v, want at_wall=1&skip_spend=1", gotQuery.Load())
 	}
-	if gotUA.Load() == nil || !strings.Contains(*gotUA.Load(), "claude-cli/2.1.278") {
-		t.Errorf("User-Agent = %v, want claude-cli Identity UA", gotUA.Load())
+	// Anthropic offers resets only to the interactive CLI surface; "sdk-cli" gets ineligible:surface.
+	if gotUA.Load() == nil || *gotUA.Load() != provider.ClaudeInteractiveUserAgent || !strings.HasSuffix(*gotUA.Load(), "(external, cli)") {
+		t.Errorf("User-Agent = %v, want the interactive CLI UA", gotUA.Load())
 	}
 	if len(q.Windows) != 1 || q.Windows[0].Name != "5h" {
 		t.Errorf("Windows mismatch: %+v", q.Windows)

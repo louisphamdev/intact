@@ -228,6 +228,7 @@ func quotaClaude(a *api, ctx context.Context, c store.Connection, token string) 
 			h[k] = v
 		}
 	}
+	h["User-Agent"] = provider.ClaudeInteractiveUserAgent
 	u := claudeUsageURL + "?at_wall=1&skip_spend=1"
 	if over, ok := a.baseOverride["claude"]; ok {
 		u = over + "/api/oauth/usage?at_wall=1&skip_spend=1"

@@ -105,6 +105,9 @@ func TestClaimConcurrencyLock(t *testing.T) {
 			return
 		}
 		if strings.Contains(r.URL.Path, "/reset_rate_limits") {
+			if ua := r.Header.Get("User-Agent"); !strings.HasSuffix(ua, "(external, cli)") {
+				t.Errorf("claim User-Agent = %q, want the interactive CLI surface", ua)
+			}
 			claimCalls.Add(1)
 			close(claimStarted)
 			<-holdClaim

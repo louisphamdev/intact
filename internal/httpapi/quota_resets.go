@@ -84,7 +84,7 @@ func claudeResetRows(usage map[string]any, now time.Time) []QuotaReset {
 		w := QuotaReset{
 			ID:     "weekly",
 			Kind:   "weekly",
-			Title:  "Weekly reset",
+			Title:  "5-hour limit reset",
 			Clears: []string{"5h"},
 			Left:   left,
 			Total:  total,
@@ -382,6 +382,7 @@ func (a *api) claudeOrgID(ctx context.Context, c store.Connection, token string)
 			h[k] = v
 		}
 	}
+	h["User-Agent"] = provider.ClaudeInteractiveUserAgent
 
 	pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
 	defer cancel()
@@ -473,6 +474,7 @@ func claimClaude(ctx context.Context, a *api, c store.Connection, token string, 
 			h[k] = v
 		}
 	}
+	h["User-Agent"] = provider.ClaudeInteractiveUserAgent
 
 	var reqBody any
 	if r.Kind == "weekly" {

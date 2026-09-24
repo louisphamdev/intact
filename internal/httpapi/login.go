@@ -103,6 +103,12 @@ func (a *api) loginStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "this provider has no sign-in")
 		return
 	}
+	// Google refuses the code exchange without it; say so before the user signs in.
+	if prov == "antigravity" && a.antigravityClientSecret() == "" {
+		writeError(w, http.StatusBadRequest, "the Antigravity sign-in needs the client secret of the Antigravity app: "+
+			"set INTACT_ANTIGRAVITY_CLIENT_SECRET and restart intact (see docs/providers.md)")
+		return
+	}
 	var in struct {
 		Label string `json:"label"`
 	}
@@ -346,22 +352,14 @@ func (a *api) saveOAuthAccount(prov, label string, t tokenAnswer, tokenURL, clie
 	return c, nil
 }
 
-// antigravityInstalledSecret ships inside the Antigravity desktop app. Google's
-// installed-app flow does not treat it as confidential, and PKCE protects the
-// exchange, so a fresh install needs no imported account and no Antigravity CLI.
-const antigravityInstalledSecret = "GOCSPX-REDACTED"
-
 // antigravityClientSecret is the Antigravity app's installed-client secret: the
-// environment, then an imported account, then the secret the app ships.
+// environment, then an imported account. The source carries none.
 func (a *api) antigravityClientSecret() string {
 	if s := os.Getenv("INTACT_ANTIGRAVITY_CLIENT_SECRET"); s != "" {
 		return s
 	}
 	var s string
 	a.store.DB.QueryRow(`SELECT client_secret FROM connections WHERE provider = 'antigravity' AND client_secret <> '' LIMIT 1`).Scan(&s)
-	if s == "" {
-		s = antigravityInstalledSecret
-	}
 	return s
 }
 

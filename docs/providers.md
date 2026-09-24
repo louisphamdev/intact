@@ -45,6 +45,8 @@ See [Quota and usage](quota-and-usage.md).
   - Level variants are folded (see [Routing](routing.md#antigravity-level-variants)).
   - The Claude Code billing line is blacklisted by default: Google answers a
     false 429 when it is present.
+  - The sign-in needs the Google OAuth client secret of the Antigravity app.
+    intact does not ship it. See [The Antigravity client secret](#the-antigravity-client-secret).
 - **GitHub Copilot.**
   - The stored GitHub token is exchanged for a short-lived Copilot token,
     cached and exchanged again on 401.
@@ -71,6 +73,20 @@ domain. Each flow therefore ends with you pasting what the page gave you.
 | Codex | PKCE; redirects to `http://localhost:1455/auth/callback` | the full redirect URL from the address bar (the page itself fails to load, which is expected) |
 | Antigravity | PKCE; redirects to `http://localhost:51121/oauth-callback` | the full redirect URL (no Antigravity CLI needed) |
 | GitHub Copilot | Device flow | nothing: open the link, type the code shown, and intact polls until you approve |
+
+### The Antigravity client secret
+
+Google refuses the Antigravity sign-in without the client secret of the
+Antigravity desktop app. The secret starts with `GOCSPX-`, and it is in the
+files of the installed app. intact does not ship it.
+
+1. Install the Antigravity app on any computer.
+2. Search the files of the app for the text `GOCSPX-`. For example, on macOS:
+   `grep -rao 'GOCSPX-[A-Za-z0-9_-]*' /Applications/Antigravity.app | head -1`
+3. Put `INTACT_ANTIGRAVITY_CLIENT_SECRET=<the secret>` in the environment file of intact.
+4. Restart intact, then sign in to Antigravity from the dashboard.
+
+After the first sign-in, intact keeps the secret with the account.
 
 The steps:
 1. **Login** asks for a name for the account.

@@ -40,7 +40,7 @@ gate, intact answers a loopback `Host` header only.
 | `INTACT_SESSION_TTL` | Session lifetime in seconds (default 43200). |
 | `INTACT_OWNER_LOOPBACK` | `1` gives a loopback sign-in with no forwarding header an unlimited budget. Off by default. Read `docs/security.md` before you set it. |
 | `INTACT_ARENA_URL` | A mirror of the Hugging Face datasets server `/rows` API for the LMArena rankings (default `https://datasets-server.huggingface.co`). |
-| `INTACT_ANTIGRAVITY_CLIENT_SECRET` | Optional. Overrides the Google OAuth client secret of the Antigravity sign-in. intact ships the secret of the Antigravity app, so you do not need the Antigravity CLI or this variable. |
+| `INTACT_ANTIGRAVITY_CLIENT_SECRET` | The Google OAuth client secret of the Antigravity app. The Antigravity sign-in needs it, and intact does not ship it. See [The Antigravity client secret](providers.md#the-antigravity-client-secret). |
 
 ### Enroll the sign-in
 

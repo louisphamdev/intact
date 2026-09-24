@@ -1,6 +1,6 @@
 {
   "name": "intact-proxy",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "intact: a credential proxy for LLM providers, one base URL for every account",
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/louisphamdev/intact.git" },
@@ -10,11 +10,11 @@
   "files": ["bin", "README.md", "LICENSE"],
   "engines": { "node": ">=18" },
   "optionalDependencies": {
-    "intact-proxy-linux-x64": "0.1.1",
-    "intact-proxy-linux-arm64": "0.1.1",
-    "intact-proxy-darwin-x64": "0.1.1",
-    "intact-proxy-darwin-arm64": "0.1.1",
-    "intact-proxy-windows-x64": "0.1.1",
-    "intact-proxy-win32-arm64": "0.1.1"
+    "intact-proxy-linux-x64": "0.1.2",
+    "intact-proxy-linux-arm64": "0.1.2",
+    "intact-proxy-darwin-x64": "0.1.2",
+    "intact-proxy-darwin-arm64": "0.1.2",
+    "intact-proxy-windows-x64": "0.1.2",
+    "intact-proxy-win32-arm64": "0.1.2"
   }
 }

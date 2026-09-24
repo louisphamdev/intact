@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>intact</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="icon" href="/favicon.ico" sizes="32x32"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="theme-color" content="#7c6cf6">
-<script>try{const t=localStorage.getItem('intact-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+<script>try{const t=localStorage.getItem('intact-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t;if(localStorage.getItem('intact-nav')==='collapsed')document.documentElement.dataset.nav='collapsed'}catch(e){}</script>
 <style>
   :root{color-scheme:dark;--bg:#0c1017;--side:#10151e;--card:#141a25;--card2:#1b2331;--line:#232d3d;--fg:#e4e9f1;
         --muted:#95a0b3;--faint:#8b94a7;--accent:#8b80f9;--accent-strong:#6c5ce7;--accent-soft:rgba(139,128,249,.15);
@@ -23,11 +23,13 @@
         --warn-soft:rgba(180,83,9,.08);--err:#e11d48;--err-soft:rgba(225,29,72,.08);--code:#0f766e;--shadow:0 20px 50px rgba(20,26,37,.14)}
   :root[data-theme=dark]{color-scheme:dark}
   *{box-sizing:border-box}
-  html,body{height:100%}
+  /* body grows with the page: a sticky aside cannot outlive a body capped at 100vh. */
+  html{height:100%}
+  body{min-height:100%}
   body{font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:var(--bg);color:var(--fg);
        display:grid;grid-template-columns:15rem 1fr}
   aside{background:var(--side);border-right:1px solid var(--line);padding:1.1rem .75rem;display:flex;flex-direction:column;
-        gap:.25rem;position:sticky;top:0;height:100vh}
+        gap:.25rem;position:sticky;top:0;height:100vh;overflow-y:auto;overflow-x:hidden}
   .brand{display:flex;align-items:center;gap:.7rem;padding:.35rem .5rem 1.25rem;margin-bottom:.5rem;border-bottom:1px solid var(--line);text-decoration:none}
   .logo{width:40px;height:40px;flex:none;filter:drop-shadow(0 4px 14px rgba(124,108,246,.45))}
   .logo svg{width:100%;height:100%;display:block}
@@ -42,6 +44,23 @@
   aside nav{display:grid;gap:.25rem}
   aside .spacer{flex:1}
   aside form button{width:100%;justify-content:flex-start}
+  .navtoggle{width:100%;justify-content:flex-start}
+  .navtoggle svg{transition:transform .15s}
+  @media (width > 820px){
+    html[data-nav=collapsed] body{grid-template-columns:3.75rem 1fr}
+    html[data-nav=collapsed] aside{padding:1.1rem .4rem}
+    html[data-nav=collapsed] aside a{justify-content:center;gap:0;padding:.55rem 0;font-size:0}
+    html[data-nav=collapsed] aside a .ct{display:none}
+    html[data-nav=collapsed] .brand{padding:.35rem 0 1.25rem}
+    html[data-nav=collapsed] .brand div{display:none}
+    html[data-nav=collapsed] .logo{width:32px;height:32px}
+    html[data-nav=collapsed] .prefs{flex-direction:column;align-items:center;padding:.25rem 0 .6rem}
+    html[data-nav=collapsed] .prefs .seg{flex-direction:column;max-width:100%}
+    html[data-nav=collapsed] .prefs .seg button{padding:.1rem .15rem;font-size:.66rem}
+    html[data-nav=collapsed] aside form button,html[data-nav=collapsed] .navtoggle{justify-content:center}
+    html[data-nav=collapsed] aside form button span,html[data-nav=collapsed] .navtoggle span{display:none}
+    html[data-nav=collapsed] .navtoggle svg{transform:rotate(180deg)}
+  }
   svg.i{width:18px;height:18px;flex:none}
   svg.s{width:14px;height:14px;flex:none}
   .page{min-width:0;display:flex;flex-direction:column}
@@ -252,6 +271,7 @@
     aside .spacer{flex:1}
     aside form button{width:auto}
     aside form button span{display:none}
+    .navtoggle{display:none}
     .ph{padding:1rem;flex-wrap:wrap}
     .content{padding:1rem 1rem 2.5rem}
     .row{padding:.7rem 1rem;flex-wrap:wrap}
@@ -263,7 +283,7 @@
 <body>
 <aside>
   <a class="brand" href="#/providers" aria-label="intact home"><span class="logo"><svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c6cf6"/><stop offset="1" stop-color="#2dd4bf"/></linearGradient></defs><rect width="32" height="32" rx="9" fill="url(#lg)"/><path d="M16 6.5 24 9.6v6.1c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V9.6Z" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/><path d="m12.4 16.2 2.6 2.6 4.8-5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div><b>intact</b><small>credential proxy</small></div></a>
-  <nav>
+  <nav id="sideNav">
   <a href="#/endpoint" data-nav="endpoint"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h16M12 4v16"/><circle cx="12" cy="12" r="8"/></svg>Endpoint</a>
   <a href="#/providers" data-nav="providers"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/></svg>Providers<span class="ct" id="ctProv"></span></a>
   <a href="#/blacklist" data-nav="blacklist"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="m6 6 12 12"/></svg>Blacklist<span class="ct" id="ctFilter"></span></a>
@@ -276,8 +296,9 @@
   <a href="#/usage" data-nav="usage"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Usage</a>
   </nav>
   <div class="spacer"></div>
+  <button class="plain navtoggle" type="button" id="navToggle" aria-controls="sideNav" aria-expanded="true" aria-label="Collapse menu" title="Collapse menu"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg><span>Collapse</span></button>
   <div class="prefs" id="prefs"></div>
-  <form method="post" action="/logout"><button class="plain" type="submit"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 12H4m0 0 4-4m-4 4 4 4M13 4h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5"/></svg><span>Sign out</span></button></form>
+  <form method="post" action="/logout"><button class="plain" type="submit" aria-label="Sign out" title="Sign out"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 12H4m0 0 4-4m-4 4 4 4M13 4h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5"/></svg><span>Sign out</span></button></form>
 </aside>
 
 <div class="page">
@@ -368,7 +389,7 @@
 const VI={
 // menu, frame
 'Endpoint':'Endpoint','Providers':'Nhà cung cấp','Blacklist':'Blacklist','Drift':'Drift','Docs':'Tài liệu','Quota':'Hạn mức','Usage':'Sử dụng',
-'Sign out':'Đăng xuất','credential proxy':'proxy tài khoản LLM','intact home':'Trang chủ intact','Close':'Đóng',
+'Sign out':'Đăng xuất','Collapse':'Thu gọn','Collapse menu':'Thu gọn menu','Expand menu':'Mở rộng menu','credential proxy':'proxy tài khoản LLM','intact home':'Trang chủ intact','Close':'Đóng',
 'Auto':'Tự động','Follow the system':'Theo hệ thống','Light':'Sáng','Dark':'Tối',
 // common
 'Copy':'Sao chép','Copy {0}':'Sao chép {0}','Copied {0}':'Đã sao chép {0}','Cancel':'Huỷ','Save':'Lưu','Saved':'Đã lưu','Continue':'Tiếp tục',
@@ -2851,6 +2872,19 @@ function viewUsage(v){
 }
 
 translateStatic(document.body);paintPrefs();
+// The collapsed menu shows icons only, so every link carries its name as a tooltip.
+for(const a of document.querySelectorAll('#sideNav a'))a.title=[...a.childNodes].filter(n=>n.nodeType===3).map(n=>n.nodeValue).join('').trim();
+function paintNavToggle(){
+  const collapsed=document.documentElement.dataset.nav==='collapsed',b=$('navToggle'),label=t(collapsed?'Expand menu':'Collapse menu');
+  b.setAttribute('aria-expanded',String(!collapsed));b.setAttribute('aria-label',label);b.title=label;
+}
+$('navToggle').addEventListener('click',()=>{
+  const collapsed=document.documentElement.dataset.nav!=='collapsed';
+  if(collapsed)document.documentElement.dataset.nav='collapsed';else delete document.documentElement.dataset.nav;
+  try{localStorage.setItem('intact-nav',collapsed?'collapsed':'open')}catch(e){}
+  paintNavToggle();
+});
+paintNavToggle();
 load();
 </script>
 </body>

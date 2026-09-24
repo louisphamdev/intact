@@ -11,11 +11,11 @@ tools) and wants to use them all from any client.
 
 ## Install
 
-intact is on npm as [`intact-proxy`](https://www.npmjs.com/package/intact-proxy).
+intact is on npm as [`intact-gateway`](https://www.npmjs.com/package/intact-gateway).
 The package installs one binary for your platform: Linux, macOS or Windows, x64 or arm64.
 
 ```bash
-npm install -g intact-proxy
+npm install -g intact-gateway
 intact -db ./intact.db -addr 127.0.0.1:20142
 ```
 
@@ -98,7 +98,7 @@ To build from source, see [Getting started](docs/getting-started.md).
 ## Quick start
 
 ```bash
-npm install -g intact-proxy           # or: CGO_ENABLED=0 go build -o intact ./cmd/intact
+npm install -g intact-gateway           # or: CGO_ENABLED=0 go build -o intact ./cmd/intact
 intact -db ./intact.db -addr 127.0.0.1:20142
 ```
 

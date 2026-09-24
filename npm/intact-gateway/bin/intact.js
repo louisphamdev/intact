@@ -4,9 +4,9 @@
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 
-// npm refused the name intact-proxy-win32-x64 as spam, so that one platform has another name.
-const RENAMED = { 'win32-x64': 'intact-proxy-windows-x64' };
-const pkg = RENAMED[`${process.platform}-${process.arch}`] || `intact-proxy-${process.platform}-${process.arch}`;
+// npm refused the name intact-proxy-win32-x64 as spam, so Windows x64 keeps a separate name.
+const RENAMED = { 'win32-x64': 'intact-gateway-windows-x64' };
+const pkg = RENAMED[`${process.platform}-${process.arch}`] || `intact-gateway-${process.platform}-${process.arch}`;
 const exe = process.platform === 'win32' ? 'intact.exe' : 'intact';
 let binary;
 try {

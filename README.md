@@ -86,13 +86,16 @@ tools) and wants to use them all from any client.
 ## Quick start
 
 ```bash
-CGO_ENABLED=0 go build -o intact ./cmd/intact
-./intact -enroll                      # prints INTACT_TOTP_SECRET and an otpauth:// URI
-export INTACT_TOTP_SECRET=...         # add the URI to an authenticator app
-./intact -db ./intact.db -addr 127.0.0.1:20142
+npm install -g intact-proxy           # or: CGO_ENABLED=0 go build -o intact ./cmd/intact
+intact -db ./intact.db -addr 127.0.0.1:20142
 ```
 
-Open the dashboard, sign in with the code, add an account under **Providers**,
+On its first start, intact makes a new TOTP secret for this install and prints
+it with the steps to add it to an authenticator app. Each install gets its own
+secret, kept in its database. To print the steps again, run
+`intact -db ./intact.db -show-totp`.
+
+Open the dashboard, sign in with the code from the app, add an account under **Providers**,
 create an API key under **Endpoint → API keys**, then:
 
 ```bash
@@ -103,6 +106,32 @@ curl http://127.0.0.1:20142/v1/chat/completions \
 
 [Getting started](docs/getting-started.md) covers configuration and a systemd
 and Cloudflare Tunnel deployment.
+
+## Self-improvement with llm-switcher
+
+[llm-switcher](https://github.com/louisphamdev/llm-switcher) runs on each
+developer machine. It lets Claude Code and Codex use intact as their provider,
+and it converts each request to the format of the target model. The two tools
+find and correct their own faults, in two loops.
+
+- **intact corrects what providers refuse.** Drift learns the structure of
+  requests. The error review groups recurring errors. For a fake 429, intact
+  replays the failing request and removes the system prompt text in halves. It
+  keeps the smallest text that the provider refuses as a filter in its database.
+  All clients get the fix at once, with no client update. Two examples: the
+  sentence "You are Codex, an agent based on GPT-5" and the sentence
+  "You are a Claude agent, built on Anthropic's Claude Agent SDK". Antigravity
+  answered both with a fake 429.
+- **llm-switcher corrects what its converter loses.** When the contract lab is
+  on, llm-switcher sends a sample of complete exchanges to intact. It masks the
+  client content on the machine first. intact compares the two halves of each
+  exchange and records each field that the conversion lost.
+  `switch contract-check` then writes one failing test for each finding, and
+  the fix goes into the converter.
+
+The rules stay in configuration, not in code. A person reads the alerts and
+the verdicts, and does not find each fault by hand.
+[Errors](docs/errors.md) · [Contracts](docs/contracts.md)
 
 ## Documentation
 

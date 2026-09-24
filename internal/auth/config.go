@@ -104,6 +104,12 @@ func FromEnv() (*Config, error) {
 	if secret == "" {
 		return nil, nil
 	}
+	return FromSecret(secret)
+}
+
+// FromSecret builds a Config for a TOTP secret; the other values come from the
+// environment as in FromEnv.
+func FromSecret(secret string) (*Config, error) {
 	if err := ValidateSecret(secret); err != nil {
 		return nil, fmt.Errorf("INTACT_TOTP_SECRET: %w", err)
 	}

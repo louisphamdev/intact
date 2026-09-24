@@ -54,6 +54,7 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:20130", "listen address")
 	dbPath := flag.String("db", "intact.db", "path to the database file")
 	enroll := flag.Bool("enroll", false, "print a new TOTP secret and otpauth URI, then exit")
+	showTOTP := flag.Bool("show-totp", false, "print this install's TOTP secret and how to add it to an authenticator app, then exit")
 	insecure := flag.Bool("insecure-no-auth", false, "start with no sign-in gate; every caller reaches every stored credential")
 	flag.Parse()
 
@@ -73,11 +74,25 @@ func main() {
 	}
 	defer s.Close()
 
-	authCfg, err := auth.FromEnv()
-	if err != nil {
-		log.Fatal(err)
+	noAuth := *insecure || os.Getenv("INTACT_INSECURE_NO_AUTH") == "1"
+	var authCfg *auth.Config
+	if !noAuth || os.Getenv("INTACT_TOTP_SECRET") != "" || *showTOTP {
+		secret, fresh, err := totpSecret(s, os.Getenv("INTACT_TOTP_SECRET"))
+		if err != nil {
+			log.Fatal(err)
+		}
+		if *showTOTP {
+			fmt.Print(enrollmentGuide(secret))
+			return
+		}
+		if authCfg, err = auth.FromSecret(secret); err != nil {
+			log.Fatal(err)
+		}
+		if fresh {
+			log.Print("\n" + enrollmentGuide(secret))
+		}
 	}
-	if err := authDecision(authCfg, *insecure || os.Getenv("INTACT_INSECURE_NO_AUTH") == "1"); err != nil {
+	if err := authDecision(authCfg, noAuth); err != nil {
 		log.Fatal(err)
 	}
 	if authCfg == nil {
@@ -94,6 +109,36 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+const totpSetting = "totp_secret"
+
+// totpSecret returns the sign-in secret: the environment's, else the one this
+// install created on its first start, else a new one that is saved (fresh).
+func totpSecret(s *store.Store, env string) (secret string, fresh bool, err error) {
+	if env != "" {
+		return env, false, nil
+	}
+	if saved, _ := s.GetSetting(totpSetting); saved != "" {
+		return saved, false, nil
+	}
+	secret = auth.GenerateTOTPSecret()
+	if err := s.SetSetting(totpSetting, secret); err != nil {
+		return "", false, fmt.Errorf("save the TOTP secret: %w", err)
+	}
+	return secret, true, nil
+}
+
+// enrollmentGuide tells the owner how to add the secret to an authenticator app.
+func enrollmentGuide(secret string) string {
+	uri := fmt.Sprintf("otpauth://totp/intact?secret=%s&issuer=intact", secret)
+	return "Dashboard sign-in: add this install's TOTP secret to an authenticator app.\n" +
+		"  Setup key: " + secret + "\n" +
+		"  Or open this URI on the phone: " + uri + "\n" +
+		"  1. In the authenticator app (Google Authenticator, 1Password, Aegis), add an account.\n" +
+		"  2. Choose \"Enter a setup key\". Type the name intact and the setup key above. Keep \"Time based\".\n" +
+		"  3. Open the dashboard and type the 6-digit code that the app shows.\n" +
+		"Run `intact -db <file> -show-totp` to print this again. Keep the key secret.\n"
 }
 
 // authDecision refuses to start an ungated server. The reference deployment

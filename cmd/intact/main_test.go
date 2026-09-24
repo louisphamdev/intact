@@ -71,3 +71,37 @@ func TestC17ContractResetCLI(t *testing.T) {
 		t.Fatalf("expected 0 learned rows after key reset, got %d", len(learned))
 	}
 }
+
+// Each new install gets its own TOTP secret on its first start, kept in its database and
+// shown once with the steps to add it to an authenticator app. An environment secret wins.
+func TestTOTPSecretIsCreatedOncePerInstall(t *testing.T) {
+	open := func(name string) *store.Store {
+		s, err := store.Open(filepath.Join(t.TempDir(), name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { s.Close() })
+		return s
+	}
+	a, b := open("a.db"), open("b.db")
+	secretA, fresh, err := totpSecret(a, "")
+	if err != nil || !fresh || auth.ValidateSecret(secretA) != nil {
+		t.Fatalf("first start: %q fresh=%v %v", secretA, fresh, err)
+	}
+	again, fresh, _ := totpSecret(a, "")
+	if again != secretA || fresh {
+		t.Errorf("restart: %q fresh=%v, want the same secret, not fresh", again, fresh)
+	}
+	if secretB, _, _ := totpSecret(b, ""); secretB == secretA {
+		t.Error("two installs share one secret")
+	}
+	if got, fresh, _ := totpSecret(a, "JBSWY3DPEHPK3PXP"); got != "JBSWY3DPEHPK3PXP" || fresh {
+		t.Errorf("the environment secret: %q fresh=%v", got, fresh)
+	}
+	guide := enrollmentGuide(secretA)
+	for _, want := range []string{secretA, "otpauth://totp/intact?secret=" + secretA, "authenticator", "-show-totp"} {
+		if !strings.Contains(guide, want) {
+			t.Errorf("the guide misses %q:\n%s", want, guide)
+		}
+	}
+}

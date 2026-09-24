@@ -14,8 +14,11 @@ master token are admin. A key is not, and no key name makes it one.
 The API key is never forwarded to a provider. intact removes `Authorization`
 and `x-api-key` from the incoming request and sets the account's own credential.
 
-Without `INTACT_TOTP_SECRET`, intact does not start. A loopback bind is not a
-gate: the reference deployment sends tunnel traffic to that same loopback port.
+intact always has a sign-in gate. Without `INTACT_TOTP_SECRET`, it makes a
+secret for the install on the first start and keeps it in the database. It
+never shows the secret on a web page: the first visitor would take the gate.
+A loopback bind is not a gate: the reference deployment sends tunnel traffic
+to that same loopback port.
 To start an ungated server, pass `-insecure-no-auth` or set
 `INTACT_INSECURE_NO_AUTH=1`. With no gate, intact answers 403 to every request
 whose `Host` header is not `127.0.0.1`, `localhost` or `[::1]`, which stops DNS

@@ -18,20 +18,22 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o intact-linux 
 | --- | --- | --- |
 | `-addr` | `127.0.0.1:20130` | Listen address. |
 | `-db` | `intact.db` | SQLite file. It is created with its tables on first start and migrated on later starts. |
-| `-enroll` | | Print a new TOTP secret and its `otpauth://` URI, then exit. |
+| `-show-totp` | | Print the TOTP secret of this install and the steps to add it to an authenticator app, then exit. |
+| `-enroll` | | Print a new TOTP secret and its `otpauth://` URI for `INTACT_TOTP_SECRET`, then exit. |
 | `-insecure-no-auth` | | Start with no sign-in gate. Every caller then reaches every stored credential. |
 
-intact refuses to start when `INTACT_TOTP_SECRET` is not set. A loopback bind
-does not protect the server, because the reference deployment sends tunnel
-traffic to that same loopback port. If you accept an ungated server, pass
-`-insecure-no-auth` or set `INTACT_INSECURE_NO_AUTH=1`. With no gate, intact
-answers a loopback `Host` header only.
+intact always starts with a sign-in gate. When `INTACT_TOTP_SECRET` is not
+set, intact uses the secret that it made on the first start of this install.
+A loopback bind does not protect the server, because the reference deployment
+sends tunnel traffic to that same loopback port. If you accept an ungated
+server, pass `-insecure-no-auth` or set `INTACT_INSECURE_NO_AUTH=1`. With no
+gate, intact answers a loopback `Host` header only.
 
 ## Environment
 
 | Variable | Meaning |
 | --- | --- |
-| `INTACT_TOTP_SECRET` | Base32 TOTP secret for the dashboard sign-in. intact does not start when it is empty. |
+| `INTACT_TOTP_SECRET` | Base32 TOTP secret for the dashboard sign-in. Optional: when it is empty, intact uses the secret of this install, which it keeps in its database. |
 | `INTACT_INSECURE_NO_AUTH` | Set it to `1` to start with no sign-in gate. It does the same as `-insecure-no-auth`. |
 | `INTACT_API_TOKEN` | The master token. A machine sends it to `/v1`, `/api` and `/mcp`, and it reaches every route. A key made in the dashboard reaches less: see [Security](security.md#what-a-dashboard-key-cannot-do). Optional. |
 | `INTACT_SESSION_KEY` | Key that signs the session cookie. When empty, a random key is made at start, so a restart ends every session. |
@@ -42,9 +44,23 @@ answers a loopback `Host` header only.
 
 ### Enroll the sign-in
 
-1. Run `./intact -enroll`.
-2. Add the printed `otpauth://` URI to an authenticator app.
-3. Put the printed `INTACT_TOTP_SECRET=…` line in the environment file.
+On its first start, intact makes a new TOTP secret for this install. It keeps
+the secret in its database and prints it once, with these steps:
+
+1. In an authenticator app (Google Authenticator, 1Password, Aegis), add an account.
+2. Choose "Enter a setup key".
+3. Type the name `intact` and the printed setup key. Keep "Time based".
+4. Open the dashboard and type the six-digit code that the app shows.
+
+To print the key again, run `intact -db <file> -show-totp`. With systemd, the
+first print is also in `journalctl -u intact`.
+
+CAUTION: Keep the database file private. It holds the TOTP secret and every
+account credential.
+
+To use your own secret instead, run `intact -enroll` and put the printed
+`INTACT_TOTP_SECRET=…` line in the environment file. The environment secret
+takes priority over the secret in the database.
 
 ## First account and first call
 

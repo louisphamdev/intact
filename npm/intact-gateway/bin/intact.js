@@ -4,9 +4,11 @@
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 
+// Platform packages share this package's name, scope included (npm or GitHub Packages).
 // npm refused the name intact-proxy-win32-x64 as spam, so Windows x64 keeps a separate name.
-const RENAMED = { 'win32-x64': 'intact-gateway-windows-x64' };
-const pkg = RENAMED[`${process.platform}-${process.arch}`] || `intact-gateway-${process.platform}-${process.arch}`;
+const self = require('../package.json').name;
+const target = `${process.platform}-${process.arch}`;
+const pkg = `${self}-${target === 'win32-x64' ? 'windows-x64' : target}`;
 const exe = process.platform === 'win32' ? 'intact.exe' : 'intact';
 let binary;
 try {

@@ -1,0 +1,32 @@
+# Publishes the npm packages to GitHub Packages as @<owner>/intact-gateway, so the
+# repository page lists them. npmjs.com gets the same packages without a scope.
+name: GitHub Packages
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.x'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@${{ github.repository_owner }}'
+      - name: Build
+        run: NPM_SCOPE="@${{ github.repository_owner }}/" ./scripts/npm-build.sh dist/npm
+      - name: Publish, platforms first
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for d in dist/npm/intact-gateway-*/ dist/npm/intact-gateway/; do
+            npm publish "$d"
+          done

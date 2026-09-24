@@ -19,7 +19,10 @@ const (
 	bisectMinWords   = 3
 )
 
-var sentenceRe = regexp.MustCompile(`[^\n.!?]+[.!?]*`)
+var (
+	sentenceRe = regexp.MustCompile(`[^\n.!?]+[.!?]*`)
+	wordRe     = regexp.MustCompile(`\w`)
+)
 
 var errBisectBudget = errors.New("the search needs more replays than it may spend")
 
@@ -49,6 +52,13 @@ func textPattern(texts []string) string {
 			words[j] = regexp.QuoteMeta(w)
 		}
 		alts[i] = strings.Join(words, `\s+`)
+		// A text found by halving words can end inside a word: "Codex, a" must not eat the "a" of "an".
+		if wordRe.MatchString(t[:1]) {
+			alts[i] = `\b` + alts[i]
+		}
+		if wordRe.MatchString(t[len(t)-1:]) {
+			alts[i] += `\b`
+		}
 	}
 	if len(alts) == 1 {
 		return alts[0]

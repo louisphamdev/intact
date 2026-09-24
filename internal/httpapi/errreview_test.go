@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -493,5 +494,12 @@ func TestErrorReviewFindsTheSystemTextBehindAFake429ByReplay(t *testing.T) {
 	}
 	if replays > 16 {
 		t.Errorf("%d replays; the search must stay bounded", replays)
+	}
+}
+
+func TestTextPatternStopsAtWordEdges(t *testing.T) {
+	re := regexp.MustCompile(textPattern([]string{"You are Codex, a"}))
+	if re.MatchString("You are Codex, an agent") || !re.MatchString("You are  Codex, a coding agent") {
+		t.Errorf("pattern %s", re)
 	}
 }

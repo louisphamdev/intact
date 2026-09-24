@@ -34,7 +34,8 @@ import (
 //
 // Before asking the model, intact replays the request: when it now succeeds
 // (a passing failure) or the blacklist in place already fixes it, the group
-// is closed without a model call.
+// is closed without a model call. A false 429 that the replay reproduces is
+// searched by replay in the system prompt (see bisectSystem) before the model.
 
 const (
 	errReviewKey      = "error-review-config"
@@ -378,6 +379,13 @@ func (a *api) reviewErrorGroup(ctx context.Context, cfg ErrorReviewConfig, g Err
 			return a.store.AddErrorVerdict(v)
 		default:
 			reproduced = fmt.Sprintf("the same request fails again: %d %s", st, msg)
+			if g.Classes[ClassFake429] > 0 && a.settleFake429(ctx, &v, g, e, req) {
+				saved, err := a.store.AddErrorVerdict(v)
+				if err == nil {
+					a.alertVerdict(saved, g)
+				}
+				return saved, err
+			}
 		}
 	}
 	facts, _ := json.Marshal(a.errFacts(g, e, reproduced))

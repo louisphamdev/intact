@@ -242,10 +242,21 @@ func dropKey(v any, key string) bool {
 	return changed
 }
 
+// SystemTexts returns the system prompt texts of a request, in every shape a
+// system rule reads.
+func SystemTexts(body []byte) []string {
+	var m map[string]any
+	if json.Unmarshal(body, &m) != nil || m == nil {
+		return nil
+	}
+	var out []string
+	walkSystem(m, func(s string) (string, bool) { out = append(out, s); return s, false })
+	return out
+}
+
 // cleanSystem removes the lines re matches from the system prompt.
 func cleanSystem(m map[string]any, re *regexp.Regexp) bool {
-	changed := false
-	clean := func(s string) (string, bool) {
+	return walkSystem(m, func(s string) (string, bool) {
 		out := re.ReplaceAllString(s, "")
 		if out == s {
 			return s, false
@@ -255,7 +266,12 @@ func cleanSystem(m map[string]any, re *regexp.Regexp) bool {
 			out = strings.ReplaceAll(out, "\n\n\n", "\n\n")
 		}
 		return strings.TrimLeft(out, "\n"), true
-	}
+	})
+}
+
+// walkSystem passes each system prompt text to clean and keeps what it returns.
+func walkSystem(m map[string]any, clean func(string) (string, bool)) bool {
+	changed := false
 	cleanContent := func(c any) any {
 		switch v := c.(type) {
 		case string:

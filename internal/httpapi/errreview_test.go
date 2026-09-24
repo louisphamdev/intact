@@ -432,3 +432,66 @@ func TestErrorReviewLoopTreatsABusyPassAsNoError(t *testing.T) {
 		}
 	}
 }
+
+// A false 429 on one system sentence is found by replaying the request with parts of its
+// system prompt removed, not by a model's guess, and the fix is a filter in the database.
+// It is installed for key traffic too: the rule can only remove text the provider refuses.
+func TestErrorReviewFindsTheSystemTextBehindAFake429ByReplay(t *testing.T) {
+	var mu sync.Mutex
+	replays := 0
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		replays++
+		mu.Unlock()
+		if strings.Contains(string(b), "Codex, an agent based on GPT-5") {
+			w.WriteHeader(http.StatusTooManyRequests)
+			io.WriteString(w, `{"error":{"message":"Resource has been exhausted (e.g. check quota)."}}`)
+			return
+		}
+		w.Write([]byte(`{"choices":[{"message":{"content":"OK"}}]}`))
+	}))
+	defer up.Close()
+	judged := false
+	judge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { judged = true }))
+	defer judge.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	c, _ := s.CreateConnection("groq", "g", "k")
+	s.CreateConnection("openrouter", "o", "k2")
+	a, _ := newServer(s, map[string]string{"groq": up.URL, "openrouter": judge.URL}, nil)
+	k, _ := s.CreateAPIKey("cty")
+	system := "You are Codex, an agent based on GPT-5. You and the user share one workspace.\n\n# Personality\n\nYou match the tone of the user. Keep answers short.\nNever run destructive commands without asking."
+	body, _ := json.Marshal(map[string]any{"model": "m", "messages": []any{
+		map[string]any{"role": "system", "content": system}, map[string]any{"role": "user", "content": "hi"}}})
+	for i := 0; i < 3; i++ {
+		s.AddUpstreamError(store.UpstreamError{Provider: "groq", Connection: c.ID, Model: "m", Client: "cty", ClientKeyID: k.ID,
+			Endpoint: "chat/completions", Status: 429, Class: ClassFake429, Signature: "429 resource has been exhausted",
+			Message: "Resource has been exhausted (e.g. check quota).", ReqBody: string(body), QuotaLeft: 0.95})
+	}
+	s.SetSetting(errReviewKey, `{"enabled":true,"model":"openrouter/judge","minErrors":3,"replay":true}`)
+	if n, err := a.reviewErrors(context.Background()); n != 1 || err != nil {
+		t.Fatalf("judged %d, %v", n, err)
+	}
+	list, _ := s.ListErrorVerdicts(0)
+	if judged || len(list) != 1 || !list[0].Applied || !list[0].Verified || list[0].By != "intact" || list[0].Action != "blacklist" {
+		t.Fatalf("judged=%v verdicts=%+v", judged, list)
+	}
+	got := reviewFilters(t, s)
+	if len(got) != 1 {
+		t.Fatalf("filters = %v", got)
+	}
+	rules := a.rulesFor("groq")
+	out, _ := filter.Apply(body, rules)
+	for _, keep := range []string{"You and the user share one workspace.", "# Personality", "Keep answers short.", "Never run destructive commands"} {
+		if !strings.Contains(string(out), keep) {
+			t.Errorf("the rule %v removed %q too: %s", got, keep, out)
+		}
+	}
+	if strings.Contains(string(out), "Codex, an agent based on GPT-5") {
+		t.Errorf("the trigger survives: %s", out)
+	}
+	if replays > 16 {
+		t.Errorf("%d replays; the search must stay bounded", replays)
+	}
+}

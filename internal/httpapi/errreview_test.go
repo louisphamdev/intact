@@ -612,8 +612,8 @@ func TestErrorReviewRetriesAGuessOnceTheRequestCanBeReplayed(t *testing.T) {
 		t.Fatalf("second pass judged %d, %v: the guess held the group", n, err)
 	}
 	list, _ := s.ListErrorVerdicts(0)
-	if list[len(list)-1].Action == "ignore" {
-		t.Errorf("the model's ignore on a false 429 was kept as a verdict: %+v", list[len(list)-1])
+	if list[len(list)-1].Replayed {
+		t.Errorf("the first verdict was made without a replay: %+v", list[len(list)-1])
 	}
 	if len(list) != 2 || list[0].By != "intact" || !list[0].Applied || len(prompts) != 1 {
 		t.Fatalf("verdicts = %+v, judge calls %d", list, len(prompts))
@@ -631,7 +631,55 @@ func TestErrorFactsListTheSystemSentences(t *testing.T) {
 	if !strings.Contains(string(got), "You are Codex, an agent based on GPT-5.") {
 		t.Errorf("system_prompt_sentences = %s", got)
 	}
-	if !strings.Contains(errReviewPrompt, "never ignore") {
-		t.Error("the prompt must forbid ignore for fake_rate_limit")
+	if !strings.Contains(errReviewPrompt, "system_prompt_sentences") {
+		t.Error("the prompt must point the model at the system sentences")
+	}
+}
+
+// A shared free pool answers 429 fast with the account's credit untouched. The replay fails
+// again and no system text helps: the model's "real limit" stands, and new errors in the
+// same day ask the model nothing more.
+func TestErrorReviewKeepsAReplayedRealLimit(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		io.WriteString(w, `{"error":{"message":"Provider returned error"}}`)
+	}))
+	defer up.Close()
+	calls := 0
+	judge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		answer := `{"cause":"upstream rate limit","action":"ignore","candidates":[],"reason":"the free pool is rate-limited"}`
+		out, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": answer}}}})
+		w.Write(out)
+	}))
+	defer judge.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	c, _ := s.CreateConnection("groq", "g", "k")
+	s.CreateConnection("openrouter", "o", "k2")
+	a, _ := newServer(s, map[string]string{"groq": up.URL, "openrouter": judge.URL}, nil)
+	body := `{"model":"m","messages":[{"role":"system","content":"Be brief."},{"role":"user","content":"hi"}]}`
+	add := func() {
+		s.AddUpstreamError(store.UpstreamError{Provider: "groq", Connection: c.ID, Model: "m", Client: "cty",
+			Endpoint: "chat/completions", Status: 429, Class: ClassFake429, Signature: "429 provider returned error",
+			Message: "Provider returned error", ReqBody: body, QuotaLeft: 1})
+	}
+	for i := 0; i < 3; i++ {
+		add()
+	}
+	s.SetSetting(errReviewKey, `{"enabled":true,"model":"openrouter/judge","minErrors":3,"replay":true}`)
+	if n, err := a.reviewErrors(context.Background()); n != 1 || err != nil {
+		t.Fatalf("judged %d, %v", n, err)
+	}
+	list, _ := s.ListErrorVerdicts(0)
+	if len(list) != 1 || list[0].Action != "ignore" || !list[0].Replayed || list[0].Applied {
+		t.Fatalf("verdict = %+v", list)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	for i := 0; i < 3; i++ {
+		add()
+	}
+	if n, _ := a.reviewErrors(context.Background()); n != 0 || calls != 1 {
+		t.Errorf("judged %d again, judge calls %d: a replayed verdict is snoozed", n, calls)
 	}
 }

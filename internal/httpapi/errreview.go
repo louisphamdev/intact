@@ -152,7 +152,7 @@ func (a *api) pendingGroups(cfg ErrorReviewConfig) ([]ErrorGroup, error) {
 // guessCanBeChecked reports a false 429 that a model judged without a replay,
 // while its newest error can now be replayed: the snooze would keep a guess.
 func (a *api) guessCanBeChecked(g ErrorGroup, v store.ErrorVerdict) bool {
-	if g.Classes[ClassFake429] == 0 || v.Applied || v.By == "intact" {
+	if g.Classes[ClassFake429] == 0 || v.Applied || v.Replayed || v.By == "intact" {
 		return false
 	}
 	e, err := a.store.GetUpstreamError(g.LastID)
@@ -273,7 +273,7 @@ Choose one action:
 - disable_account: this account's credentials are revoked, or the account is suspended; not a passing sign-in hiccup.
 - ignore: nothing intact should change: the client sent a request only the client can fix (a malformed tool schema, a prompt too long), a passing failure, or a real rate limit.
 
-class fake_rate_limit is a 429 answered at once while the account's quota was left: the provider refused the content, and it is not a rate limit. For it, never ignore. Most often the provider refuses a sentence of the system prompt that names the client, its maker or its model, such as "You are Codex, an agent based on GPT-5." or "You are a Claude agent, built on Anthropic's Claude Agent SDK."; system_prompt_sentences lists them. Give system candidates that match only the smallest part of that sentence that names the client, words joined by \s+, such as "\\bbuilt\\s+on\\s+Anthropic's\\b"; never a pattern that matches ordinary instructions. Otherwise it is an unknown field or header.
+class fake_rate_limit is a 429 answered at once while the account's quota was left: often the provider refused the content, not a rate limit. When the replay says the request fails again and the rules below find nothing, it can still be a real limit that the provider names (a shared pool, an upstream provider). Most often the provider refuses a sentence of the system prompt that names the client, its maker or its model, such as "You are Codex, an agent based on GPT-5." or "You are a Claude agent, built on Anthropic's Claude Agent SDK."; system_prompt_sentences lists them. Give system candidates that match only the smallest part of that sentence that names the client, words joined by \s+, such as "\\bbuilt\\s+on\\s+Anthropic's\\b"; never a pattern that matches ordinary instructions. Otherwise it is an unknown field or header.
 intact checks you: a blacklist rule is kept only if the replayed request is accepted without it.
 
 Answer with one JSON object and nothing else: {"cause":"<a few words>","action":"blacklist"|"disable_model"|"disable_account"|"ignore","candidates":[{"kind":"...","pattern":"..."}],"reason":"<one short sentence>"}`
@@ -410,6 +410,7 @@ func (a *api) reviewErrorGroup(ctx context.Context, cfg ErrorReviewConfig, g Err
 			}
 		}
 	}
+	v.Replayed = canReplay
 	facts, _ := json.Marshal(a.errFacts(g, e, body, reproduced))
 	text, err := a.chatOnce(ctx, cfg.Model, errReviewPrompt, string(facts), reviewMaxTokens)
 	if err != nil {
@@ -422,9 +423,6 @@ func (a *api) reviewErrorGroup(ctx context.Context, cfg ErrorReviewConfig, g Err
 	}
 	v.By, v.Cause, v.Reason, v.Action = cfg.Model, p.Cause, p.Reason, p.Action
 	switch {
-	case p.Action == "ignore" && g.Classes[ClassFake429] > 0:
-		// A false 429 is refused content by definition; "a real limit" would silence it for a day.
-		v.Action, v.Note = "blacklist", "not settled: the model chose ignore for a false 429, and the replay search found nothing"
 	case p.Action == "ignore":
 	case p.Action != "blacklist" && p.Action != "disable_model" && p.Action != "disable_account":
 		v.Action, v.Note = "ignore", "unknown action "+p.Action

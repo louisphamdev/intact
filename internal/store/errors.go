@@ -216,6 +216,9 @@ type ErrorVerdict struct {
 	By        string `json:"by"`
 	Errors    int    `json:"errors"` // errors of the group when judged
 	LastError string `json:"lastError"`
+	// Replayed: the failing request was replayed before the verdict. A verdict
+	// without one is a guess that a later replay may overturn.
+	Replayed bool `json:"replayed"`
 }
 
 const errorVerdictsSchema = `
@@ -237,14 +240,23 @@ CREATE TABLE IF NOT EXISTS error_verdicts (
 );
 CREATE INDEX IF NOT EXISTS error_verdicts_group ON error_verdicts (provider, signature, id);`
 
+// migrateVerdicts adds the columns an older database has not got.
+func (s *Store) migrateVerdicts() error {
+	if _, err := s.DB.Exec(`ALTER TABLE error_verdicts ADD COLUMN replayed INTEGER NOT NULL DEFAULT 0`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column") {
+		return fmt.Errorf("add column replayed: %w", err)
+	}
+	return nil
+}
+
 // AddErrorVerdict records a verdict.
 func (s *Store) AddErrorVerdict(v ErrorVerdict) (ErrorVerdict, error) {
 	if v.At == "" {
 		v.At = time.Now().UTC().Format(time.RFC3339)
 	}
 	res, err := s.DB.Exec(`INSERT INTO error_verdicts (at, provider, signature, action, applied, verified, detail, cause, reason,
-		note, by_model, errors, last_error) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, v.At, v.Provider, v.Signature, v.Action, v.Applied,
-		v.Verified, v.Detail, v.Cause, v.Reason, v.Note, v.By, v.Errors, v.LastError)
+		note, by_model, errors, last_error, replayed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, v.At, v.Provider, v.Signature, v.Action, v.Applied,
+		v.Verified, v.Detail, v.Cause, v.Reason, v.Note, v.By, v.Errors, v.LastError, v.Replayed)
 	if err != nil {
 		return v, err
 	}
@@ -256,7 +268,7 @@ func (s *Store) AddErrorVerdict(v ErrorVerdict) (ErrorVerdict, error) {
 // provider + "|" + signature.
 func (s *Store) ErrorVerdicts() (map[string]ErrorVerdict, error) {
 	rows, err := s.DB.Query(`SELECT id, at, provider, signature, action, applied, verified, detail, cause, reason, note, by_model,
-		errors, last_error FROM error_verdicts WHERE id IN (SELECT MAX(id) FROM error_verdicts GROUP BY provider, signature)`)
+		errors, last_error, replayed FROM error_verdicts WHERE id IN (SELECT MAX(id) FROM error_verdicts GROUP BY provider, signature)`)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +277,7 @@ func (s *Store) ErrorVerdicts() (map[string]ErrorVerdict, error) {
 	for rows.Next() {
 		var v ErrorVerdict
 		if err := rows.Scan(&v.ID, &v.At, &v.Provider, &v.Signature, &v.Action, &v.Applied, &v.Verified, &v.Detail, &v.Cause,
-			&v.Reason, &v.Note, &v.By, &v.Errors, &v.LastError); err != nil {
+			&v.Reason, &v.Note, &v.By, &v.Errors, &v.LastError, &v.Replayed); err != nil {
 			return nil, err
 		}
 		out[v.Provider+"|"+v.Signature] = v
@@ -279,7 +291,7 @@ func (s *Store) ListErrorVerdicts(limit int) ([]ErrorVerdict, error) {
 		limit = 200
 	}
 	rows, err := s.DB.Query(`SELECT id, at, provider, signature, action, applied, verified, detail, cause, reason, note, by_model,
-		errors, last_error FROM error_verdicts ORDER BY id DESC LIMIT ?`, limit)
+		errors, last_error, replayed FROM error_verdicts ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +300,7 @@ func (s *Store) ListErrorVerdicts(limit int) ([]ErrorVerdict, error) {
 	for rows.Next() {
 		var v ErrorVerdict
 		if err := rows.Scan(&v.ID, &v.At, &v.Provider, &v.Signature, &v.Action, &v.Applied, &v.Verified, &v.Detail, &v.Cause,
-			&v.Reason, &v.Note, &v.By, &v.Errors, &v.LastError); err != nil {
+			&v.Reason, &v.Note, &v.By, &v.Errors, &v.LastError, &v.Replayed); err != nil {
 			return nil, err
 		}
 		out = append(out, v)

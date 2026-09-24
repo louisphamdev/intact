@@ -137,7 +137,7 @@ func (a *api) pendingGroups(cfg ErrorReviewConfig) ([]ErrorGroup, error) {
 			}
 			at, _ := time.Parse(time.RFC3339, v.At)
 			fixed := v.Applied && v.Action != "ignore"
-			if n < cfg.MinErrors || (!fixed && time.Since(at) < errReviewSnooze) {
+			if n < cfg.MinErrors || (!fixed && time.Since(at) < errReviewSnooze && !a.guessCanBeChecked(g, v)) {
 				continue
 			}
 		}
@@ -147,6 +147,16 @@ func (a *api) pendingGroups(cfg ErrorReviewConfig) ([]ErrorGroup, error) {
 		}
 	}
 	return out, nil
+}
+
+// guessCanBeChecked reports a false 429 that a model judged without a replay,
+// while its newest error can now be replayed: the snooze would keep a guess.
+func (a *api) guessCanBeChecked(g ErrorGroup, v store.ErrorVerdict) bool {
+	if g.Classes[ClassFake429] == 0 || v.Applied || v.By == "intact" {
+		return false
+	}
+	e, err := a.store.GetUpstreamError(g.LastID)
+	return err == nil && a.replayBody(e) != ""
 }
 
 // replay sends a request body again, as it was sent, through the account
@@ -263,7 +273,7 @@ Choose one action:
 - disable_account: this account's credentials are revoked, or the account is suspended; not a passing sign-in hiccup.
 - ignore: nothing intact should change: the client sent a request only the client can fix (a malformed tool schema, a prompt too long), a passing failure, or a real rate limit.
 
-class fake_rate_limit is a 429 answered at once while the account's quota was left: the provider refused the content, often an unknown field or a system prompt line, and it is not a rate limit.
+class fake_rate_limit is a 429 answered at once while the account's quota was left: the provider refused the content, and it is not a rate limit. For it, never ignore. Most often the provider refuses a sentence of the system prompt that names the client, its maker or its model, such as "You are Codex, an agent based on GPT-5." or "You are a Claude agent, built on Anthropic's Claude Agent SDK."; system_prompt_sentences lists them. Give system candidates that match only the smallest part of that sentence that names the client, words joined by \s+, such as "\\bbuilt\\s+on\\s+Anthropic's\\b"; never a pattern that matches ordinary instructions. Otherwise it is an unknown field or header.
 intact checks you: a blacklist rule is kept only if the replayed request is accepted without it.
 
 Answer with one JSON object and nothing else: {"cause":"<a few words>","action":"blacklist"|"disable_model"|"disable_account"|"ignore","candidates":[{"kind":"...","pattern":"..."}],"reason":"<one short sentence>"}`
@@ -309,7 +319,7 @@ func (a *api) chatOnce(ctx context.Context, model, system, user string, maxToken
 }
 
 // errFacts is what intact knows of a group, for the model.
-func (a *api) errFacts(g ErrorGroup, e store.UpstreamError, reproduced string) map[string]any {
+func (a *api) errFacts(g ErrorGroup, e store.UpstreamError, body, reproduced string) map[string]any {
 	first, _ := time.Parse(time.RFC3339, g.First)
 	var drift []string
 	if list, err := a.store.ShapeChangesSince(first.Add(-48 * time.Hour).Format(time.RFC3339)); err == nil {
@@ -333,6 +343,7 @@ func (a *api) errFacts(g ErrorGroup, e store.UpstreamError, reproduced string) m
 		"endpoint": e.Endpoint, "message": e.Message, "answer": answer, "answer_headers": e.Headers,
 		"request_fields_new_to_this_provider_before_the_errors": drift, "blacklist_rules_already_in_place": rules,
 		"replay_of_the_failing_request": reproduced,
+		"system_prompt_sentences":       promptSentences(body),
 		"request_sent":                  sketchJSON(e.ReqBody, errPromptReqLimit),
 	}
 }
@@ -399,7 +410,7 @@ func (a *api) reviewErrorGroup(ctx context.Context, cfg ErrorReviewConfig, g Err
 			}
 		}
 	}
-	facts, _ := json.Marshal(a.errFacts(g, e, reproduced))
+	facts, _ := json.Marshal(a.errFacts(g, e, body, reproduced))
 	text, err := a.chatOnce(ctx, cfg.Model, errReviewPrompt, string(facts), reviewMaxTokens)
 	if err != nil {
 		return v, err
@@ -411,6 +422,9 @@ func (a *api) reviewErrorGroup(ctx context.Context, cfg ErrorReviewConfig, g Err
 	}
 	v.By, v.Cause, v.Reason, v.Action = cfg.Model, p.Cause, p.Reason, p.Action
 	switch {
+	case p.Action == "ignore" && g.Classes[ClassFake429] > 0:
+		// A false 429 is refused content by definition; "a real limit" would silence it for a day.
+		v.Action, v.Note = "blacklist", "not settled: the model chose ignore for a false 429, and the replay search found nothing"
 	case p.Action == "ignore":
 	case p.Action != "blacklist" && p.Action != "disable_model" && p.Action != "disable_account":
 		v.Action, v.Note = "ignore", "unknown action "+p.Action

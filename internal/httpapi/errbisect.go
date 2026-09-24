@@ -43,6 +43,19 @@ func systemSentences(body []byte) []string {
 	return out
 }
 
+// promptSentences is the start of the system prompt for the review's model:
+// the sentences a provider refuses sit at its top.
+func promptSentences(body string) []string {
+	out := systemSentences([]byte(body))
+	if len(out) > 40 {
+		out = out[:40]
+	}
+	for i, s := range out {
+		out[i] = truncate(s, 200)
+	}
+	return out
+}
+
 // textPattern matches any of the texts, with any run of spaces between words.
 func textPattern(texts []string) string {
 	alts := make([]string, len(texts))

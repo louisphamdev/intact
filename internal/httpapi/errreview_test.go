@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/louisphamdev/intact/internal/filter"
 	"github.com/louisphamdev/intact/internal/store"
@@ -555,5 +556,82 @@ func TestErrorReviewReplaysTheFullBodyOfALargeRequest(t *testing.T) {
 	out, _ := filter.Apply(big, a.rulesFor("groq"))
 	if strings.Contains(string(out), "built on Anthropic's Claude Agent SDK") || !strings.Contains(string(out), "Be brief.") {
 		t.Errorf("rules %v gave %s", reviewFilters(t, s), out[len(out)-200:])
+	}
+}
+
+// A model's guess made without a replay must not hold a false 429 for a day: once a failing
+// request can be replayed, the next errors are reviewed again and the replay search runs.
+func TestErrorReviewRetriesAGuessOnceTheRequestCanBeReplayed(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(b), "built on Anthropic's Claude Agent SDK") {
+			w.WriteHeader(http.StatusTooManyRequests)
+			io.WriteString(w, `{"error":{"message":"Resource has been exhausted (e.g. check quota)."}}`)
+			return
+		}
+		w.Write([]byte(`{"choices":[{"message":{"content":"OK"}}]}`))
+	}))
+	defer up.Close()
+	var prompts []string
+	judge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		prompts = append(prompts, string(b))
+		answer := `{"cause":"rate limit","action":"ignore","candidates":[],"reason":"a real limit"}`
+		out, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": answer}}}})
+		w.Write(out)
+	}))
+	defer judge.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	c, _ := s.CreateConnection("groq", "g", "k")
+	s.CreateConnection("openrouter", "o", "k2")
+	a, _ := newServer(s, map[string]string{"groq": up.URL, "openrouter": judge.URL}, nil)
+	body, _ := json.Marshal(map[string]any{"model": "m", "messages": []any{
+		map[string]any{"role": "system", "content": "You are a Claude agent, built on Anthropic's Claude Agent SDK. Be brief."},
+		map[string]any{"role": "user", "content": "hi"}}})
+	add := func(req string) int64 {
+		id, _ := s.AddUpstreamError(store.UpstreamError{Provider: "groq", Connection: c.ID, Model: "m", Client: "cty",
+			Endpoint: "chat/completions", Status: 429, Class: ClassFake429, Signature: "429 resource has been exhausted",
+			Message: "Resource has been exhausted (e.g. check quota).", ReqBody: req, QuotaLeft: 0.9})
+		return id
+	}
+	// Errors kept before full bodies existed: cut short, so nothing can be replayed and the model guesses.
+	cut := strings.Repeat("x", errReqLimit) + "…"
+	for i := 0; i < 3; i++ {
+		add(cut)
+	}
+	s.SetSetting(errReviewKey, `{"enabled":true,"model":"openrouter/judge","minErrors":3,"replay":true}`)
+	if n, err := a.reviewErrors(context.Background()); n != 1 || err != nil {
+		t.Fatalf("first pass judged %d, %v", n, err)
+	}
+	time.Sleep(1100 * time.Millisecond) // verdict and error times are kept to the second
+	for i := 0; i < 3; i++ {
+		add(string(body))
+	}
+	if n, err := a.reviewErrors(context.Background()); n != 1 || err != nil {
+		t.Fatalf("second pass judged %d, %v: the guess held the group", n, err)
+	}
+	list, _ := s.ListErrorVerdicts(0)
+	if list[len(list)-1].Action == "ignore" {
+		t.Errorf("the model's ignore on a false 429 was kept as a verdict: %+v", list[len(list)-1])
+	}
+	if len(list) != 2 || list[0].By != "intact" || !list[0].Applied || len(prompts) != 1 {
+		t.Fatalf("verdicts = %+v, judge calls %d", list, len(prompts))
+	}
+}
+
+// The model sees the system prompt as sentences: a false 429 is most often one of them.
+func TestErrorFactsListTheSystemSentences(t *testing.T) {
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	a, _ := newServer(s, nil, nil)
+	body := `{"model":"m","messages":[{"role":"system","content":"You are Codex, an agent based on GPT-5. Be brief."},{"role":"user","content":"hi"}]}`
+	facts := a.errFacts(ErrorGroup{Provider: "groq"}, store.UpstreamError{ReqBody: body}, body, "")
+	got, _ := json.Marshal(facts["system_prompt_sentences"])
+	if !strings.Contains(string(got), "You are Codex, an agent based on GPT-5.") {
+		t.Errorf("system_prompt_sentences = %s", got)
+	}
+	if !strings.Contains(errReviewPrompt, "never ignore") {
+		t.Error("the prompt must forbid ignore for fake_rate_limit")
 	}
 }

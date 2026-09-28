@@ -470,3 +470,46 @@ func mustBytes(t *testing.T) func([]byte, error) []byte {
 		return b
 	}
 }
+
+// A JSON schema the client asks the answer to follow crosses every translator.
+func TestStructuredOutputCrossesEveryTranslator(t *testing.T) {
+	schema := `{"additionalProperties":false,"properties":{"title":{"type":"string"}},"required":["title"],"type":"object"}` // keys sorted, as json.Marshal writes them
+	chat := `{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_schema","json_schema":{"name":"t","strict":true,"schema":` + schema + `}}}`
+
+	g, err := OpenAIToGemini([]byte(chat), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gen := mustJSON(t, g)["generationConfig"].(map[string]any)
+	if gen["responseMimeType"] != "application/json" || !strings.Contains(j(gen["responseSchema"]), `"title":{"type":"string"}`) ||
+		strings.Contains(j(gen["responseSchema"]), "additionalProperties") {
+		t.Errorf("gemini generationConfig = %s", j(gen))
+	}
+	a, _ := OpenAIToAnthropic([]byte(chat))
+	if got := j(mustJSON(t, a)["output_config"]); got != `{"format":{"schema":`+schema+`,"type":"json_schema"}}` {
+		t.Errorf("anthropic output_config = %s", got)
+	}
+	r, _ := OpenAIToResponses([]byte(strings.Replace(chat, `"model":"m",`, `"model":"m","verbosity":"low",`, 1)))
+	if got := j(mustJSON(t, r)["text"]); got != `{"format":{"name":"t","schema":`+schema+`,"strict":true,"type":"json_schema"},"verbosity":"low"}` {
+		t.Errorf("responses text = %s", got)
+	}
+	o, _ := AnthropicToOpenAI([]byte(`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"}],"output_config":{"format":{"type":"json_schema","schema":` + schema + `}}}`))
+	if got := j(mustJSON(t, o)["response_format"]); got != `{"json_schema":{"name":"response","schema":`+schema+`},"type":"json_schema"}` {
+		t.Errorf("openai response_format = %s", got)
+	}
+
+	// JSON mode without a schema: Gemini and Responses have it, Anthropic does not.
+	jm := `{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_object"}}`
+	g, _ = OpenAIToGemini([]byte(jm), nil)
+	if gen := mustJSON(t, g)["generationConfig"].(map[string]any); gen["responseMimeType"] != "application/json" || gen["responseSchema"] != nil {
+		t.Errorf("gemini json mode = %s", j(gen))
+	}
+	a, _ = OpenAIToAnthropic([]byte(jm))
+	if _, has := mustJSON(t, a)["output_config"]; has {
+		t.Errorf("anthropic json mode = %s", a)
+	}
+	r, _ = OpenAIToResponses([]byte(jm))
+	if got := j(mustJSON(t, r)["text"]); got != `{"format":{"type":"json_object"}}` {
+		t.Errorf("responses json mode = %s", got)
+	}
+}

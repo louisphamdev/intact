@@ -96,8 +96,27 @@ func OpenAIToResponses(body []byte) ([]byte, error) {
 			out[k] = v
 		}
 	}
+	text := obj{}
 	if v := str(in["verbosity"]); v != "" {
-		out["text"] = obj{"verbosity": v}
+		text["verbosity"] = v
+	}
+	switch rf := asObj(in["response_format"]); str(rf["type"]) {
+	case "json_schema":
+		js := asObj(rf["json_schema"])
+		name := str(js["name"])
+		if name == "" {
+			name = "response" // Responses requires a name
+		}
+		f := obj{"type": "json_schema", "name": name, "schema": js["schema"]}
+		if s, ok := js["strict"].(bool); ok {
+			f["strict"] = s
+		}
+		text["format"] = f
+	case "json_object":
+		text["format"] = obj{"type": "json_object"}
+	}
+	if len(text) > 0 {
+		out["text"] = text
 	}
 	return json.Marshal(out)
 }

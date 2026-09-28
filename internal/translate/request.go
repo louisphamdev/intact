@@ -139,6 +139,10 @@ func OpenAIToAnthropic(body []byte) ([]byte, error) {
 	if u := str(in["user"]); u != "" {
 		out["metadata"] = obj{"user_id": u}
 	}
+	// Anthropic has no JSON mode without a schema.
+	if s := asObj(asObj(asObj(in["response_format"])["json_schema"])["schema"]); s != nil {
+		out["output_config"] = obj{"format": obj{"type": "json_schema", "schema": s}}
+	}
 	if tools := list(in["tools"]); len(tools) > 0 {
 		var ts []any
 		for _, t := range tools {
@@ -410,6 +414,13 @@ func AnthropicToOpenAI(body []byte) ([]byte, error) {
 	}
 	if u := str(asObj(in["metadata"])["user_id"]); u != "" {
 		out["user"] = u
+	}
+	f := asObj(asObj(in["output_config"])["format"])
+	if f == nil {
+		f = asObj(in["output_format"]) // the field output_config.format replaced
+	}
+	if str(f["type"]) == "json_schema" && asObj(f["schema"]) != nil {
+		out["response_format"] = obj{"type": "json_schema", "json_schema": obj{"name": "response", "schema": f["schema"]}}
 	}
 	if tools := list(in["tools"]); len(tools) > 0 {
 		var ts []any

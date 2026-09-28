@@ -138,6 +138,12 @@ func OpenAIToGemini(body []byte, sigs Signatures) ([]byte, error) {
 	if maxOut > 0 {
 		gen["maxOutputTokens"] = maxOut
 	}
+	if rf := asObj(in["response_format"]); str(rf["type"]) == "json_schema" || str(rf["type"]) == "json_object" {
+		gen["responseMimeType"] = "application/json"
+		if s := asObj(asObj(rf["json_schema"])["schema"]); s != nil {
+			gen["responseSchema"] = CleanGeminiSchema(s)
+		}
+	}
 	if len(gen) > 0 {
 		out["generationConfig"] = gen
 	}

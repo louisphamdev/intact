@@ -43,8 +43,19 @@ When a key loses trusted status, open traces for that key move to `revoked`.
 ## Diff and Findings
 
 The diff compares input leaves against output leaves in both directions.
-It first matches on the same path, then on approved mappings, then on matching hashes.
-Unmatched leaves become candidates.
+Each rule runs over all input leaves before the next rule starts:
+
+1. The same path.
+2. An approved mapping.
+3. The same hash (values of 8 bytes or more).
+4. The same path under one renamed segment. For example, `tools[].input_schema.x` matches `tools[].function.parameters.x`.
+5. The same enum value on any path.
+
+The enum rule is last, because it must not take the counterpart of a field that a stricter rule matches.
+Unmatched leaves become candidates, with two exceptions:
+- An empty array or object carries no value, so a converter that drops it loses nothing.
+- The reducer cuts paths deeper than 12 levels. If the output was cut at a field, the absence of the field on the output side proves nothing.
+
 The judge evaluates new candidate signatures from trusted traces.
 Verdicts for `noise`, `normalized`, and `renamed` stay `proposed` until the owner approves them.
 A `lost` verdict or an approved `renamed` verdict opens or updates a finding.

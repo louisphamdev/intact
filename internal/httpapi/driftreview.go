@@ -276,40 +276,9 @@ func (a *api) resolveChange(ctx context.Context, cfg ReviewConfig, c store.Shape
 	}
 	desc := reviewDescription(c, facts)
 	desc["decision_model"] = map[string]any{"leaning": jev.Choice, "confidence": jevConf, "probabilities": jev.Probabilities}
-	in, _ := json.Marshal(desc)
-	body, _ := json.Marshal(map[string]any{"model": cfg.ResolverModel, "max_tokens": reviewMaxTokens,
-		"messages": []any{map[string]any{"role": "system", "content": resolverPrompt}, map[string]any{"role": "user", "content": string(in)}}})
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-	req := withPrincipal(httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/chat/completions", strings.NewReader(string(body))), intactJob)
-	req.SetPathValue("path", "chat/completions")
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	a.v1(rec, req)
-	raw, _ := io.ReadAll(rec.Body)
-	if rec.Code != http.StatusOK {
-		return store.Verdict{}, fmt.Errorf("%s: %d %s", cfg.ResolverModel, rec.Code, strings.TrimSpace(string(raw[:min(len(raw), 200)])))
-	}
-	var d struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	json.Unmarshal(raw, &d)
-	if len(d.Choices) == 0 {
-		return store.Verdict{}, fmt.Errorf("%s gave no answer", cfg.ResolverModel)
-	}
-	text := d.Choices[0].Message.Content
-	var out struct {
-		Cause  string `json:"cause"`
-		Action string `json:"action"`
-		Reason string `json:"reason"`
-	}
-	i, j := strings.Index(text, "{"), strings.LastIndex(text, "}")
-	if i < 0 || j <= i || json.Unmarshal([]byte(text[i:j+1]), &out) != nil || out.Cause == "" {
-		return store.Verdict{}, fmt.Errorf("%s answered no verdict: %.120s", cfg.ResolverModel, text)
+	out, err := a.askResolver(ctx, cfg.ResolverModel, resolverPrompt, desc)
+	if err != nil {
+		return store.Verdict{}, err
 	}
 	// The resolver's action is final: the change is closed either way.
 	v := store.Verdict{Cause: out.Cause, Conf: jevConf, By: cfg.ResolverModel, Note: out.Reason, Resolved: true, Ack: true}
@@ -321,6 +290,50 @@ func (a *api) resolveChange(ctx context.Context, cfg ReviewConfig, c store.Shape
 		}
 	}
 	return v, a.store.SetShapeVerdict(c.ID, v)
+}
+
+// resolverAnswer is a resolver's verdict: a cause, a final action and why.
+type resolverAnswer struct {
+	Cause  string `json:"cause"`
+	Action string `json:"action"`
+	Reason string `json:"reason"`
+}
+
+// askResolver sends one chat request through intact's own /v1, as a client
+// would, and reads the JSON verdict out of the answer.
+func (a *api) askResolver(ctx context.Context, model, prompt string, in any) (resolverAnswer, error) {
+	raw, _ := json.Marshal(in)
+	body, _ := json.Marshal(map[string]any{"model": model, "max_tokens": reviewMaxTokens,
+		"messages": []any{map[string]any{"role": "system", "content": prompt}, map[string]any{"role": "user", "content": string(raw)}}})
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	req := withPrincipal(httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/chat/completions", strings.NewReader(string(body))), intactJob)
+	req.SetPathValue("path", "chat/completions")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	a.v1(rec, req)
+	resp, _ := io.ReadAll(rec.Body)
+	if rec.Code != http.StatusOK {
+		return resolverAnswer{}, fmt.Errorf("%s: %d %s", model, rec.Code, strings.TrimSpace(string(resp[:min(len(resp), 200)])))
+	}
+	var d struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	json.Unmarshal(resp, &d)
+	if len(d.Choices) == 0 {
+		return resolverAnswer{}, fmt.Errorf("%s gave no answer", model)
+	}
+	text := d.Choices[0].Message.Content
+	var out resolverAnswer
+	i, j := strings.Index(text, "{"), strings.LastIndex(text, "}")
+	if i < 0 || j <= i || json.Unmarshal([]byte(text[i:j+1]), &out) != nil || out.Cause == "" {
+		return resolverAnswer{}, fmt.Errorf("%s answered no verdict: %.120s", model, text)
+	}
+	return out, nil
 }
 
 // autoBlacklist adds a field rule for a request field a provider refuses, when
@@ -353,9 +366,9 @@ func (a *api) autoBlacklist(c store.ShapeChange, facts map[string]any) string {
 	return "blacklisted " + pattern
 }
 
-// reviewPending judges the changes waiting for a verdict, then hands the
-// ones judged before a resolver was set to it. It stops at the first failure
-// of a model.
+// reviewPending judges the drift changes and the contract findings waiting
+// for a verdict, then hands the ones judged before a resolver was set to it.
+// It stops at the first failure of a model.
 func (a *api) reviewPending(ctx context.Context) (int, error) {
 	if !a.review.run.TryLock() {
 		return 0, errReviewRunning
@@ -368,6 +381,16 @@ func (a *api) reviewPending(ctx context.Context) (int, error) {
 	if !a.reviewReady(cfg) {
 		return 0, fmt.Errorf("no active account serves the decision model %s", cfg.DecisionModel)
 	}
+	n, err := a.reviewDrift(ctx, cfg)
+	if err != nil {
+		return n, err
+	}
+	m, err := a.reviewFindings(ctx, cfg)
+	return n + m, err
+}
+
+// reviewDrift judges the drift changes of one pass.
+func (a *api) reviewDrift(ctx context.Context, cfg ReviewConfig) (int, error) {
 	pending, err := a.store.UnreviewedShapeChanges(reviewBatch)
 	if err != nil {
 		return 0, err

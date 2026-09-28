@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -58,6 +59,12 @@ type ContractFinding struct {
 	CleanTraces       int     `json:"cleanTraces"`
 	CreatedAt         int64   `json:"createdAt"`
 	UpdatedAt         int64   `json:"updatedAt"`
+	ReviewCause       string  `json:"reviewCause"`
+	ReviewConf        float64 `json:"reviewConf"`
+	ReviewBy          string  `json:"reviewBy"`
+	ReviewNote        string  `json:"reviewNote"`
+	ReviewResolved    bool    `json:"reviewResolved"`
+	ReviewedAt        int64   `json:"reviewedAt"`
 }
 
 // ContractFindingHistory logs status transitions on a finding.
@@ -443,6 +450,7 @@ func (s *Store) UpsertContractFinding(f ContractFinding) error {
 		exempt_trace=CASE WHEN excluded.exempt_trace != '' THEN excluded.exempt_trace ELSE contract_findings.exempt_trace END,
 		count=contract_findings.count + 1,
 		status=CASE WHEN contract_findings.status = 'fixed' AND excluded.status = 'open' THEN 'open' ELSE contract_findings.status END,
+		reviewed_at=CASE WHEN contract_findings.status = 'fixed' AND excluded.status = 'open' THEN 0 ELSE contract_findings.reviewed_at END,
 		updated_at=excluded.updated_at`,
 		f.ID, f.Model, f.ClientFormat, f.Direction, f.Path, f.ReducerVersion, f.Tool, f.Class,
 		f.Mapping, f.Confidence, f.FirstTrace, tr, f.LastTrace,
@@ -453,48 +461,20 @@ func (s *Store) UpsertContractFinding(f ContractFinding) error {
 
 // GetContractFinding loads a finding by id.
 func (s *Store) GetContractFinding(id string) (ContractFinding, error) {
-	var f ContractFinding
-	var tr int
-	err := s.DB.QueryRow(`SELECT id, model, client_format, direction, path, reducer_version,
-		tool, class, mapping, confidence, first_trace, first_trace_trusted, last_trace,
-		exempt_trace, count, status, fixed_in, clean_traces, created_at, updated_at
-		FROM contract_findings WHERE id = ?`, id).Scan(
-		&f.ID, &f.Model, &f.ClientFormat, &f.Direction, &f.Path, &f.ReducerVersion,
-		&f.Tool, &f.Class, &f.Mapping, &f.Confidence, &f.FirstTrace, &tr, &f.LastTrace,
-		&f.ExemptTrace, &f.Count, &f.Status, &f.FixedIn, &f.CleanTraces, &f.CreatedAt, &f.UpdatedAt,
-	)
-	if err != nil {
-		return ContractFinding{}, err
-	}
-	f.FirstTraceTrusted = tr != 0
-	return f, nil
+	return scanFinding(s.DB.QueryRow(`SELECT `+findingCols+`
+		FROM contract_findings WHERE id = ?`, id))
 }
 
 // GetContractFindingByPath loads a finding by its unique composite path.
 func (s *Store) GetContractFindingByPath(model, clientFormat, direction, path string) (ContractFinding, error) {
-	var f ContractFinding
-	var tr int
-	err := s.DB.QueryRow(`SELECT id, model, client_format, direction, path, reducer_version,
-		tool, class, mapping, confidence, first_trace, first_trace_trusted, last_trace,
-		exempt_trace, count, status, fixed_in, clean_traces, created_at, updated_at
+	return scanFinding(s.DB.QueryRow(`SELECT `+findingCols+`
 		FROM contract_findings WHERE model = ? AND client_format = ? AND direction = ? AND path = ?`,
-		model, clientFormat, direction, path).Scan(
-		&f.ID, &f.Model, &f.ClientFormat, &f.Direction, &f.Path, &f.ReducerVersion,
-		&f.Tool, &f.Class, &f.Mapping, &f.Confidence, &f.FirstTrace, &tr, &f.LastTrace,
-		&f.ExemptTrace, &f.Count, &f.Status, &f.FixedIn, &f.CleanTraces, &f.CreatedAt, &f.UpdatedAt,
-	)
-	if err != nil {
-		return ContractFinding{}, err
-	}
-	f.FirstTraceTrusted = tr != 0
-	return f, nil
+		model, clientFormat, direction, path))
 }
 
 // ListContractFindings returns findings matching the given filters.
 func (s *Store) ListContractFindings(status string, since int64, trustedOnly bool) ([]ContractFinding, error) {
-	q := `SELECT id, model, client_format, direction, path, reducer_version,
-		tool, class, mapping, confidence, first_trace, first_trace_trusted, last_trace,
-		exempt_trace, count, status, fixed_in, clean_traces, created_at, updated_at
+	q := `SELECT ` + findingCols + `
 		FROM contract_findings WHERE 1=1`
 	var args []any
 	if status != "" {
@@ -510,27 +490,73 @@ func (s *Store) ListContractFindings(status string, since int64, trustedOnly boo
 	}
 	q += ` ORDER BY updated_at DESC`
 
+	return s.queryFindings(q, args...)
+}
+
+const findingCols = `id, model, client_format, direction, path, reducer_version,
+		tool, class, mapping, confidence, first_trace, first_trace_trusted, last_trace,
+		exempt_trace, count, status, fixed_in, clean_traces, created_at, updated_at,
+		review_cause, review_conf, review_by, review_note, review_resolved, reviewed_at`
+
+func scanFinding(row interface{ Scan(...any) error }) (ContractFinding, error) {
+	var f ContractFinding
+	var tr, resolved int
+	if err := row.Scan(
+		&f.ID, &f.Model, &f.ClientFormat, &f.Direction, &f.Path, &f.ReducerVersion,
+		&f.Tool, &f.Class, &f.Mapping, &f.Confidence, &f.FirstTrace, &tr, &f.LastTrace,
+		&f.ExemptTrace, &f.Count, &f.Status, &f.FixedIn, &f.CleanTraces, &f.CreatedAt, &f.UpdatedAt,
+		&f.ReviewCause, &f.ReviewConf, &f.ReviewBy, &f.ReviewNote, &resolved, &f.ReviewedAt,
+	); err != nil {
+		return ContractFinding{}, err
+	}
+	f.FirstTraceTrusted, f.ReviewResolved = tr != 0, resolved != 0
+	return f, nil
+}
+
+func (s *Store) queryFindings(q string, args ...any) ([]ContractFinding, error) {
 	rows, err := s.DB.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var out []ContractFinding
 	for rows.Next() {
-		var f ContractFinding
-		var tr int
-		if err := rows.Scan(
-			&f.ID, &f.Model, &f.ClientFormat, &f.Direction, &f.Path, &f.ReducerVersion,
-			&f.Tool, &f.Class, &f.Mapping, &f.Confidence, &f.FirstTrace, &tr, &f.LastTrace,
-			&f.ExemptTrace, &f.Count, &f.Status, &f.FixedIn, &f.CleanTraces, &f.CreatedAt, &f.UpdatedAt,
-		); err != nil {
+		f, err := scanFinding(rows)
+		if err != nil {
 			return nil, err
 		}
-		f.FirstTraceTrusted = tr != 0
 		out = append(out, f)
 	}
 	return out, rows.Err()
+}
+
+// UnreviewedContractFindings returns the open findings of trusted traces that
+// no reviewer has judged since they opened, oldest first.
+func (s *Store) UnreviewedContractFindings(limit int) ([]ContractFinding, error) {
+	return s.queryFindings(`SELECT `+findingCols+` FROM contract_findings
+		WHERE status = 'open' AND first_trace_trusted = 1 AND reviewed_at = 0 ORDER BY created_at LIMIT ?`, limit)
+}
+
+// UnresolvedContractFindings returns the open findings a decision model judged
+// but left open, that no resolver has settled yet.
+func (s *Store) UnresolvedContractFindings(limit int) ([]ContractFinding, error) {
+	return s.queryFindings(`SELECT `+findingCols+` FROM contract_findings
+		WHERE status = 'open' AND reviewed_at > 0 AND review_resolved = 0 ORDER BY created_at LIMIT ?`, limit)
+}
+
+// SetContractFindingReview records a reviewer's verdict on a finding. It does
+// not change the status.
+func (s *Store) SetContractFindingReview(id string, v Verdict) error {
+	if len(v.Note) > 500 {
+		v.Note = v.Note[:500]
+	}
+	r := 0
+	if v.Resolved {
+		r = 1
+	}
+	_, err := s.DB.Exec(`UPDATE contract_findings SET review_cause = ?, review_conf = ?, review_by = ?, review_note = ?,
+		review_resolved = ?, reviewed_at = ? WHERE id = ?`, v.Cause, v.Conf, v.By, v.Note, r, time.Now().UnixMilli(), id)
+	return err
 }
 
 // UpdateContractFindingStatus performs a conditional CAS update on finding status and logs history.
@@ -542,8 +568,10 @@ func (s *Store) UpdateContractFindingStatus(id, oldStatus, newStatus, who, note,
 	}
 	defer tx.Rollback()
 
-	res, err := tx.Exec(`UPDATE contract_findings SET status = ?, fixed_in = CASE WHEN ? != '' THEN ? ELSE fixed_in END, updated_at = ?
-		WHERE id = ? AND status = ?`, newStatus, fixedIn, fixedIn, now, id, oldStatus)
+	// A finding that opens again is judged again.
+	res, err := tx.Exec(`UPDATE contract_findings SET status = ?, fixed_in = CASE WHEN ? != '' THEN ? ELSE fixed_in END, updated_at = ?,
+		reviewed_at = CASE WHEN ? = 'open' THEN 0 ELSE reviewed_at END, review_resolved = CASE WHEN ? = 'open' THEN 0 ELSE review_resolved END
+		WHERE id = ? AND status = ?`, newStatus, fixedIn, fixedIn, now, newStatus, newStatus, id, oldStatus)
 	if err != nil {
 		return false, err
 	}
@@ -898,6 +926,13 @@ func (s *Store) MigrateContract() error {
 	if !hasCleanTraces {
 		if _, err := s.DB.Exec(`ALTER TABLE contract_findings ADD COLUMN clean_traces INTEGER NOT NULL DEFAULT 0`); err != nil {
 			return err
+		}
+	}
+	for _, col := range []string{"review_cause TEXT NOT NULL DEFAULT ''", "review_conf REAL NOT NULL DEFAULT 0",
+		"review_by TEXT NOT NULL DEFAULT ''", "review_note TEXT NOT NULL DEFAULT ''",
+		"review_resolved INTEGER NOT NULL DEFAULT 0", "reviewed_at INTEGER NOT NULL DEFAULT 0"} {
+		if _, err := s.DB.Exec("ALTER TABLE contract_findings ADD COLUMN " + col); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("migrate contract_findings: %w", err)
 		}
 	}
 	return nil

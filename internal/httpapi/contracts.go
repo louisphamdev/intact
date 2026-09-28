@@ -401,6 +401,10 @@ func (a *api) formatFindingsJSON(findings []store.ContractFinding) []map[string]
 			"cleanTraces":         f.CleanTraces,
 			"created_at":          f.CreatedAt,
 			"updated_at":          f.UpdatedAt,
+			"reviewCause":         f.ReviewCause,
+			"reviewConf":          f.ReviewConf,
+			"reviewBy":            f.ReviewBy,
+			"reviewNote":          f.ReviewNote,
 		})
 	}
 	return out

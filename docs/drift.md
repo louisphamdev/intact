@@ -130,6 +130,8 @@ Operation:
   so on the page.
 - **Back-review:** changes judged before a resolver was set are handed to it
   once one is.
+- **Contract findings:** the same pass also judges the open findings of
+  Contract Lab. See [Contract Lab](contracts.md#automatic-review-of-findings).
 
 ### Why a decision model, and why only the cause (decision, 2026-09-22)
 

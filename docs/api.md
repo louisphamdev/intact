@@ -137,7 +137,7 @@ its `scores` per board: `rating`, `rank`, `votes`, `tier`) and `arenaMeta`.
 | `GET /api/contracts/models/{model}` | Learned contract and golden tool contracts. Omits hash and string length. |
 | `GET /api/contracts/traces/{id}` | Status of one trace. Visible to opener or trusted callers. |
 | `POST /api/contracts/traces/{id}/half` | Upload client half. Visible to opener. Second upload returns 409. |
-| `GET /api/contracts/findings` (trusted) | Open or updated findings with evidence. Supports `?status=` and `?since=`. |
+| `GET /api/contracts/findings` (trusted) | Open or updated findings with evidence. Supports `?status=` and `?since=`. Each finding carries the automatic review: `reviewCause`, `reviewConf`, `reviewBy`, `reviewNote`. |
 | `GET /api/contracts/fixtures/{traceId}` (trusted) | Reduced halves of one trace with lengths and delta counts. Omits hash. |
 | `POST /api/contracts/findings/{id}/resolve` (trusted) | Resolve a finding with `{"status":"fixed"\|"wontfix","note":"…"}`. |
 | `GET /api/contracts/traces` (trusted) | List recent traces of the day and total dropped trace count. |

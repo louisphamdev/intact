@@ -59,6 +59,8 @@ To build from source, see [Getting started](docs/getting-started.md).
     - a configured resolver chat model (such as Gemini 3.8 Flash) settles
       the rest, acknowledging or blacklisting a field a provider refuses.
   - The switch needs a decision model.
+  - The same review closes Contract Lab findings that a converter drops by
+    design. Only a real loss stays open.
 
   The decisions and the trial behind them are in
   [Drift](docs/drift.md#automatic-review).

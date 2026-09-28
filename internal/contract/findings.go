@@ -11,6 +11,9 @@ import (
 	"github.com/louisphamdev/intact/internal/store"
 )
 
+// ReviewWho prefixes the history "who" of a status the automatic review set.
+const ReviewWho = "review:"
+
 // ErrConflict indicates an optimistic concurrency conflict.
 var ErrConflict = errors.New("conflict: finding status was modified concurrently")
 
@@ -125,9 +128,10 @@ func HandleLostCandidate(s *store.Store, trace store.ContractTrace, cand Candida
 			trace.ID, now, existing.ID)
 
 	case "wontfix":
-		// A wontfix set by the session or master token never reopens. Set by trusted key can reopen.
+		// A wontfix set by the session, the master token or the review never reopens. Set by trusted key can reopen.
+		// A newer switcher shows the review the same diff it already judged, so reopening would only ask again.
 		hist, err := s.GetLastFindingHistory(existing.ID)
-		if err == nil && (hist.Who == "session" || hist.Who == "master" || strings.HasPrefix(hist.Who, "session") || strings.HasPrefix(hist.Who, "master")) {
+		if err == nil && (hist.Who == "session" || hist.Who == "master" || strings.HasPrefix(hist.Who, "session") || strings.HasPrefix(hist.Who, "master") || strings.HasPrefix(hist.Who, ReviewWho)) {
 			// Never reopens
 			_, _ = s.DB.Exec(`UPDATE contract_findings SET count = count + 1, last_trace = ?, updated_at = ? WHERE id = ?`,
 				trace.ID, now, existing.ID)

@@ -49,6 +49,38 @@ The judge evaluates new candidate signatures from trusted traces.
 Verdicts for `noise`, `normalized`, and `renamed` stay `proposed` until the owner approves them.
 A `lost` verdict or an approved `renamed` verdict opens or updates a finding.
 
+## Automatic review of findings
+
+The drift review also judges each open finding.
+It uses the same settings: the switch, the decision model, the resolver model, and the confidence to act alone.
+See [Drift](drift.md#automatic-review).
+
+1. intact sends the model, the client format, the direction, the path, and these facts:
+   - whether the path lies in a tool definition schema;
+   - whether the path lies in user data (`{*}`, `#json`, tool arguments);
+   - how many times the field was lost;
+   - how many traces carried the field to the other side.
+2. The decision model chooses the cause:
+
+   | Cause | Meaning |
+   | --- | --- |
+   | `dropped_by_design` | The target format has no place for the field, so the converter must drop it. |
+   | `carried_in_another_form` | The converter moves the value to another path or another form, so a match by path fails. |
+   | `data_noise` | The path lies in user data, tool arguments, or free-form keys. |
+   | `real_loss` | The target format has a place for the value, and the converter loses it. |
+
+3. A benign cause (the first three) with the confidence to act alone closes the finding as `wontfix`.
+4. The resolver gets every other finding, with the leaning of the decision model.
+   Its action is final: `close` or `keep_open`.
+   A `close` closes the finding only when the cause is benign.
+5. Without a resolver, the other findings stay open with the verdict and the reason.
+   When you set a resolver later, it gets these findings.
+
+The history of a closed finding shows `review:<model>` and the reason.
+A newer switcher version does not open a finding that the review closed, because the diff is the same.
+A finding that opens again for another reason, for example after `expired`, gets a new review.
+Only `real_loss` findings stay open for a person.
+
 ## Change Detection and Sampling
 
 intact monitors trusted, untruncated records for provider changes.

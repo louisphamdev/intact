@@ -1803,6 +1803,10 @@ async function viewContracts(v,tab,sub){
         const stCls=f.status==='fixed'?'badge ok':(f.status==='wontfix'?'badge':'badge err');
         const histBtn=el('button',{class:'ghost',type:'button',onclick:()=>showFindingHistory(f.id)},'History');
         const resBtn=isClosed?null:el('button',{class:'primary',type:'button',onclick:()=>resolveFindingModal(f)},'Resolve');
+        const review=f.reviewCause?el('div',{},
+          el('span',{class:f.reviewCause==='real_loss'?'badge err':'badge',text:f.reviewCause}),
+          el('div',{class:'small faint',text:(f.reviewBy||'')+(f.reviewConf?' · '+Math.round(f.reviewConf*100)+'%':'')}),
+          f.reviewNote?el('div',{class:'small faint',text:f.reviewNote}):null):el('span',{class:'faint small',text:'—'});
         return el('tr',{},
           el('td',{},el('code',{class:'mono small',text:f.id})),
           el('td',{text:f.model}),
@@ -1810,13 +1814,14 @@ async function viewContracts(v,tab,sub){
           el('td',{},el('span',{class:'badge',text:f.class})),
           el('td',{},el('code',{class:'mono',text:f.path})),
           el('td',{},el('span',{class:stCls,text:f.status})),
+          el('td',{},review),
           el('td',{},el('code',{class:'mono small',text:f.fixed_in||f.fixedIn||'—'})),
           el('td',{class:'num',text:String(f.clean_traces||f.cleanTraces||0)}),
           el('td',{class:'num faint small',text:f.created_at?new Date(f.created_at).toLocaleString():'—'}),
           el('td',{style:'display:flex;gap:.35rem'},histBtn,resBtn));
       });
       const tbl=el('table',{},
-        el('thead',{},el('tr',{},el('th',{},'ID'),el('th',{},'Model'),el('th',{},'Direction'),el('th',{},'Class'),el('th',{},'Path'),el('th',{},'Status'),el('th',{},'Fixed in'),el('th',{class:'num'},'Clean traces'),el('th',{class:'num'},'Created'),el('th',{},'Actions'))),
+        el('thead',{},el('tr',{},el('th',{},'ID'),el('th',{},'Model'),el('th',{},'Direction'),el('th',{},'Class'),el('th',{},'Path'),el('th',{},'Status'),el('th',{},'Review'),el('th',{},'Fixed in'),el('th',{class:'num'},'Clean traces'),el('th',{class:'num'},'Created'),el('th',{},'Actions'))),
         el('tbody',{},rows));
       v.append(el('div',{class:'card scroll'},tbl));
     }catch(e){v.append(el('div',{class:'card empty'},el('b',{},e.message)))}
@@ -2702,6 +2707,7 @@ const DOCS=[
       dt('p','Each endpoint learns quietly for its first three documents, then every change is recorded with a sample of the document it was seen in.'),
       dt('h2','Automatic review'),
       dt('p','Auto-resolve drift settles every change with no person involved. A decision model (a System One model such as typesafe/jev-latest) is told what intact knows of the change (tool arguments or schema, the field came and went today, a client started streaming or tools that hour, which client, answers failed since) and chooses its cause; a benign cause at the set confidence (60%) with no failed answer is closed. A resolver model (any chat model, such as antigravity/gemini-3.8-flash) settles all the rest: acknowledge, or blacklist a request field the provider refuses, which it may only do when the provider refused requests since (per the error log) and the field is not one the request needs. Set both under ⚙; the switch needs a decision model. Without a resolver, the unsure changes wait here.'),
+      dt('p','The same review also judges the open findings of Contract Lab. A finding that the converter drops by design, carries in another form, or that lies in user data is closed as wontfix. Only a real loss stays open. The Review column of Contracts → Findings shows the cause, the model and the reason.'),
       dt('h2','Acting on a change'),
       dt('p','On the Drift page, Block adds the field to the blacklist for that provider (the path ',dc('messages[].x'),' becomes the pattern ',dc('messages.*.x'),'), and Ack marks the change as reviewed.'),
       dt('h2','Reference captures'),
@@ -2823,6 +2829,7 @@ const DOCS_VI={
       dt('p','Mỗi endpoint học lặng lẽ trong ba document đầu tiên, sau đó mọi thay đổi đều được ghi lại kèm một mẫu của document chứa nó.'),
       dt('h2','Tự xử lý drift'),
       dt('p','Tự xử lý drift giải quyết mọi thay đổi mà không cần người. Model quyết định (model System One như typesafe/jev-latest) nhận những gì intact biết chắc về thay đổi (tham số hay schema của tool, trường vừa mất rồi xuất hiện lại trong ngày, client bắt đầu dùng stream hoặc tool trong giờ đó, client nào, số response lỗi sau đó) rồi chọn nguyên nhân; nguyên nhân lành tính đạt độ tự tin đã đặt (60%) và không có lỗi thì tự khép. Model xử lý (model chat bất kỳ như antigravity/gemini-3.8-flash) giải quyết toàn bộ phần còn lại: đánh dấu đã xem, hoặc blacklist một trường request mà provider từ chối, việc này chỉ được làm khi provider đã từ chối request sau thay đổi (theo nhật ký lỗi) và trường đó không phải trường request bắt buộc. Đặt cả hai trong ⚙; công tắc cần có model quyết định. Không có model xử lý thì các ca chưa chắc nằm chờ ở đây.'),
+      dt('p','Cùng lượt đánh giá này cũng xét các finding đang mở của Contract Lab. Finding mà converter bỏ theo thiết kế, chuyển sang dạng khác, hoặc nằm trong dữ liệu người dùng được đóng là wontfix. Chỉ mất mát thật mới còn mở. Cột Review ở Contracts → Findings cho thấy nguyên nhân, model và lý do.'),
       dt('h2','Xử lý một thay đổi'),
       dt('p','Trên trang Drift, Chặn thêm field vào blacklist cho nhà cung cấp đó (đường dẫn ',dc('messages[].x'),' trở thành pattern ',dc('messages.*.x'),'), còn Đã xem đánh dấu thay đổi là đã xem xét.'),
       dt('h2','Capture tham chiếu'),

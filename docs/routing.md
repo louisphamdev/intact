@@ -47,6 +47,10 @@ Details worth knowing:
   so tool calls survive a round trip.
 - **Tool calls, images and reasoning** are carried across shapes where both
   sides support them.
+- **Structured output** is carried too. A JSON schema for the answer goes as
+  `response_format` (OpenAI), `text.format` (Responses), `output_config.format`
+  (Anthropic) or `responseMimeType` with `responseSchema` (Gemini). Anthropic
+  has no JSON mode without a schema, so such a request reaches it as plain text.
 
 ## Rotation and failover
 

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -84,6 +85,9 @@ type arenaState struct {
 	mu    sync.Mutex
 	data  arenaData
 	index map[string][]int // normalised name → models
+	// loose holds each board name without its vendor prefix or its note in
+	// parentheses; a match through it is a variant.
+	loose map[string][]int
 	// vocab holds every token of every board name. A token of a provider id
 	// that no board name uses is a tag (-free, -contributor), not a model.
 	vocab map[string]bool
@@ -117,7 +121,9 @@ var (
 		"thinking": true, "reasoning": true, "nothink": true, "non": true, "instant": true, "chat": true, "tiered": true}
 	// A thinking budget such as the 32k of claude-opus-4-5-high-32k.
 	budgetToken = regexp.MustCompile(`^\d+k$`)
-	dashes      = regexp.MustCompile(`-+`)
+	// A note such as "(codex-harness)" or "(xHigh)" names a setting, not a model.
+	parenNote = regexp.MustCompile(`\s*\([^)]*\)`)
+	dashes    = regexp.MustCompile(`-+`)
 )
 
 func modeToken(tok string) bool { return modeWords[tok] || budgetToken.MatchString(tok) }
@@ -150,16 +156,24 @@ func arenaNorm(s string) string {
 }
 
 func (st *arenaState) load(d arenaData) {
-	idx, vocab := map[string][]int{}, map[string]bool{}
+	idx, loose, vocab := map[string][]int{}, map[string][]int{}, map[string]bool{}
 	for i, m := range d.Models {
 		n := arenaNorm(m.Name)
 		idx[n] = append(idx[n], i)
 		for _, tok := range strings.Split(n, "-") {
 			vocab[tok] = true
 		}
+		org := arenaNorm(m.Org) + "-"
+		for _, k := range []string{n, arenaNorm(parenNote.ReplaceAllString(m.Name, ""))} {
+			for _, k := range []string{k, strings.TrimPrefix(k, org)} {
+				if k != n && k != "" && !slices.Contains(loose[k], i) {
+					loose[k] = append(loose[k], i)
+				}
+			}
+		}
 	}
 	st.mu.Lock()
-	st.data, st.index, st.vocab = d, idx, vocab
+	st.data, st.index, st.loose, st.vocab = d, idx, loose, vocab
 	st.mu.Unlock()
 }
 
@@ -199,7 +213,9 @@ func (st *arenaState) match(id string) (ArenaMatch, bool) {
 	return ArenaMatch{}, false
 }
 
-// matchName finds the board entry of a normalised name, exact or with mode words after it.
+// matchName finds the board entry of a normalised name: exact, through a
+// looser board name, with mode words after it, or with sizes after it when
+// only one entry has them (nemotron-3-ultra-550b-a55b-nvfp4).
 func (st *arenaState) matchName(n string) (ArenaMatch, bool) {
 	best := func(is []int) ArenaModel {
 		b := st.data.Models[is[0]]
@@ -213,17 +229,41 @@ func (st *arenaState) matchName(n string) (ArenaMatch, bool) {
 	if is, ok := st.index[n]; ok {
 		return ArenaMatch{best(is), "exact"}, true
 	}
-	var cands []int
-	for k, is := range st.index {
-		if rest, ok := strings.CutPrefix(k, n+"-"); ok && allModeTokens(rest) {
-			cands = append(cands, is...)
+	if is, ok := st.loose[n]; ok {
+		return ArenaMatch{best(is), "variant"}, true
+	}
+	var cands, sized []int
+	for _, keys := range []map[string][]int{st.index, st.loose} {
+		for k, is := range keys {
+			rest, ok := strings.CutPrefix(k, n+"-")
+			switch {
+			case !ok:
+			case allModeTokens(rest):
+				cands = append(cands, is...)
+			case allSizeTokens(rest):
+				sized = append(sized, is...)
+			}
 		}
 	}
 	if len(cands) > 0 {
 		sort.Ints(cands)
 		return ArenaMatch{best(cands), "variant"}, true
 	}
+	if sized = slices.Compact(slices.Sorted(slices.Values(sized))); len(sized) == 1 {
+		return ArenaMatch{st.data.Models[sized[0]], "variant"}, true
+	}
 	return ArenaMatch{}, false
+}
+
+// allSizeTokens reports whether every token is a mode word or carries a digit
+// (550b, a55b, nvfp4), never a word such as mini that names another model.
+func allSizeTokens(s string) bool {
+	for _, tok := range strings.Split(s, "-") {
+		if !modeToken(tok) && !strings.ContainsAny(tok, "0123456789") {
+			return false
+		}
+	}
+	return true
 }
 
 func allModeTokens(s string) bool {

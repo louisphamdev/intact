@@ -168,3 +168,27 @@ func TestArenaMatchDropsTagsNotIdentity(t *testing.T) {
 		}
 	}
 }
+
+// The board's own longer names: a vendor prefix, a note in parentheses, and a
+// size or quantisation after the name when only one entry carries it.
+func TestArenaMatchBoardSideLongerNames(t *testing.T) {
+	var st arenaState
+	var models []ArenaModel
+	for _, m := range [][2]string{{"nvidia-nemotron-3-ultra-550b-a55b-nvfp4", "nvidia"}, {"nvidia-nemotron-3-super-120b-a12b", "nvidia"},
+		{"gpt-5.3-codex (codex-harness)", "openai"}, {"o4-mini", "openai"},
+		{"llama-3.1-8b-instruct", "meta"}, {"llama-3.1-70b-instruct", "meta"}} {
+		models = append(models, ArenaModel{Name: m[0], Org: m[1], Scores: map[string]ArenaScore{"overall": {Votes: 100}}})
+	}
+	st.load(arenaData{Models: models})
+	for id, want := range map[string]string{
+		"nemotron-3-ultra-free": "nvidia-nemotron-3-ultra-550b-a55b-nvfp4",
+		"gpt-5.3-codex":         "gpt-5.3-codex (codex-harness)",
+		"o4":                    "",
+		"llama-3.1":             "",
+	} {
+		m, ok := st.match(id)
+		if got := map[bool]string{true: m.Name}[ok]; got != want {
+			t.Errorf("%s -> %q (%s), want %q", id, got, m.How, want)
+		}
+	}
+}

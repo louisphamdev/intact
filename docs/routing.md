@@ -76,6 +76,10 @@ the top of the provider's Connections card, or at
 
 - **Priority.** The ▲▼ buttons set the accounts' order, which both modes
   follow.
+- **Standby.** An active account marked **Standby** takes no turns. intact
+  tries it only after every other active account failed or was busy, in both
+  modes. An account that is off is never tried. Turning an account off clears
+  its standby mark.
 - **Next account.** The card marks the account that takes the next request,
   with its place in the turn (`next · 2/3`).
 - **Pools across providers.** A bare model listed by several providers pools

@@ -21,6 +21,9 @@ type Connection struct {
 	Provider string `json:"provider"`
 	Label    string `json:"label"`
 	IsActive bool   `json:"isActive"`
+	// Standby keeps an active connection out of the rotation: it is tried
+	// only after every other active connection of its provider.
+	Standby bool `json:"standby"`
 	// BaseURL, when set, replaces the provider's upstream for this connection.
 	BaseURL string `json:"baseUrl"`
 	// Meta holds provider-specific values that are not secret.
@@ -55,7 +58,7 @@ func (s *Store) CreateConnection(provider, label, secret string) (Connection, er
 // ListConnections returns every connection, newest first, without secrets.
 func (s *Store) ListConnections() ([]Connection, error) {
 	rows, err := s.DB.Query(
-		`SELECT id, provider, label, is_active, base_url, meta FROM connections ORDER BY created_at DESC`)
+		`SELECT id, provider, label, is_active, standby, base_url, meta FROM connections ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("query connections: %w", err)
 	}
@@ -64,15 +67,15 @@ func (s *Store) ListConnections() ([]Connection, error) {
 	out := []Connection{}
 	for rows.Next() {
 		var c Connection
-		var active int
+		var active, standby int
 		var meta string
-		if err := rows.Scan(&c.ID, &c.Provider, &c.Label, &active, &c.BaseURL, &meta); err != nil {
+		if err := rows.Scan(&c.ID, &c.Provider, &c.Label, &active, &standby, &c.BaseURL, &meta); err != nil {
 			return nil, fmt.Errorf("scan connection: %w", err)
 		}
 		if meta != "" && meta != "{}" {
 			json.Unmarshal([]byte(meta), &c.Meta)
 		}
-		c.IsActive = active != 0
+		c.IsActive, c.Standby = active != 0, standby != 0
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -164,6 +167,23 @@ func (s *Store) SetActive(id string, active bool) error {
 		v, time.Now().UTC().Format(time.RFC3339), id)
 	if err != nil {
 		return fmt.Errorf("set active: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// SetStandby marks an active connection as standby, or back as a normal one.
+func (s *Store) SetStandby(id string, standby bool) error {
+	v := 0
+	if standby {
+		v = 1
+	}
+	res, err := s.DB.Exec(`UPDATE connections SET standby = ?, updated_at = ? WHERE id = ?`,
+		v, time.Now().UTC().Format(time.RFC3339), id)
+	if err != nil {
+		return fmt.Errorf("set standby: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound

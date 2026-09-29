@@ -26,6 +26,9 @@ var oauthColumns = []string{
 	// meta holds provider-specific values that are not secret, as a JSON
 	// object: an Antigravity project id, a ChatGPT account id.
 	"meta          TEXT NOT NULL DEFAULT '{}'",
+	// standby: an active connection that serves only when every other
+	// active connection of its provider failed.
+	"standby       INTEGER NOT NULL DEFAULT 0",
 }
 
 // migrateOAuth adds the OAuth columns if they are missing. It is idempotent, so

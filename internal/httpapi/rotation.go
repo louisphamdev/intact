@@ -76,15 +76,39 @@ func (a *api) startFor(model string, targets []store.Connection) ([]store.Connec
 	prov := targets[0].Provider
 	for _, c := range targets[1:] {
 		if c.Provider != prov {
-			return targets, a.advance("m:"+model, len(targets), 1)
+			return withStandbyLast(targets, func(n int) int { return a.advance("m:"+model, n, 1) })
 		}
 	}
 	rot := a.rotation(prov)
 	targets = rot.ordered(targets)
 	if rot.Mode == RotateFallback {
-		return targets, 0
+		return withStandbyLast(targets, func(int) int { return 0 })
 	}
-	return targets, a.advance("p:"+prov, len(targets), rot.Sticky)
+	return withStandbyLast(targets, func(n int) int { return a.advance("p:"+prov, n, rot.Sticky) })
+}
+
+// withStandbyLast lets the normal accounts take turns from the index pick
+// returns, and puts the standby accounts after all of them, so a standby is
+// tried only when every normal account failed. The list it returns starts at
+// index 0.
+func withStandbyLast(targets []store.Connection, pick func(n int) int) ([]store.Connection, int) {
+	var normal, standby []store.Connection
+	for _, c := range targets {
+		if c.Standby {
+			standby = append(standby, c)
+		} else {
+			normal = append(normal, c)
+		}
+	}
+	if len(standby) == 0 {
+		return targets, pick(len(targets))
+	}
+	out := make([]store.Connection, 0, len(targets))
+	if len(normal) > 0 {
+		i := pick(len(normal))
+		out = append(append(out, normal[i:]...), normal[:i]...)
+	}
+	return append(out, standby...), 0
 }
 
 // advance returns the cursor's account for this request and moves it on
@@ -118,13 +142,15 @@ func (a *api) rotationState(prov string) map[string]any {
 		return out
 	}
 	if rot.Mode == RotateFallback {
+		conns, _ = withStandbyLast(conns, func(int) int { return 0 })
 		out["next"] = conns[0].ID
 		return out
 	}
 	a.rrMu.Lock()
 	c := a.rrNext["p:"+prov]
 	a.rrMu.Unlock()
-	out["next"], out["used"] = conns[c.i%len(conns)].ID, c.used
+	conns, i := withStandbyLast(conns, func(n int) int { return c.i % n })
+	out["next"], out["used"] = conns[i].ID, c.used
 	return out
 }
 

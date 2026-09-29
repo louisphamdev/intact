@@ -37,7 +37,7 @@ intact picked it (Antigravity variants). See [Routing](routing.md).
 | --- | --- |
 | `GET /api/providers` | Providers with their account counts and setup kind. |
 | `GET /api/accounts` | Accounts (never credentials): id, provider, label, active, base URL. |
-| `POST /api/accounts/{id}/active` (admin) | `{"active":bool}`. |
+| `POST /api/accounts/{id}/active` (admin) | `{"active":bool,"standby":bool}`. `standby` left out keeps the current mark; `"active":false` clears it. |
 | `POST /api/accounts/{id}/test` (admin) | `{"model":"…"}` optional. Test one account alone; the result is kept. |
 
 ### Models

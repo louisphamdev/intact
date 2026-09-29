@@ -85,3 +85,78 @@ func TestRotationStickyFallbackAndOrder(t *testing.T) {
 		t.Errorf("sticky 0 accepted: %s", got)
 	}
 }
+
+func TestStandbyAccountServesOnlyWhenEveryPrimaryFails(t *testing.T) {
+	busy := map[string]bool{}
+	up, seen := keysServer(busy)
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("groq", "a", "ka")
+	sb, _ := s.CreateConnection("groq", "s", "ks")
+	s.CreateConnection("groq", "b", "kb")
+	h := New(s, map[string]string{"groq": up.URL})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("POST", "/accounts/"+sb.ID+"/active", strings.NewReader(`{"active":true,"standby":true}`)))
+	if rec.Code != 200 {
+		t.Fatalf("set standby: %d %s", rec.Code, rec.Body.String())
+	}
+	list, _ := s.ListConnections()
+	for _, c := range list {
+		if c.Standby != (c.ID == sb.ID) || !c.IsActive {
+			t.Errorf("stored: %+v", c)
+		}
+	}
+	call := func(n int) string {
+		for i := 0; i < n; i++ {
+			postV1(h, `{"model":"groq/m","messages":[]}`)
+		}
+		return strings.Join(seen(), " ")
+	}
+	state := func() string {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, loopbackRequest("GET", "/providers/groq/rotation", nil))
+		return rec.Body.String()
+	}
+	// The primaries take turns; the standby is never one of them.
+	if got := call(4); strings.Contains(got, "ks") || strings.Count(got, "ka") != 2 || strings.Count(got, "kb") != 2 {
+		t.Errorf("round-robin = %q", got)
+	}
+	for i := 0; i < 3; i++ {
+		if st := state(); strings.Contains(st, `"next":"`+sb.ID+`"`) {
+			t.Errorf("the standby is shown as next: %s", st)
+		}
+		call(1)
+	}
+	// One primary busy: the other one answers, not the standby.
+	busy["ka"] = true
+	if got := call(2); strings.Contains(got, "ks") {
+		t.Errorf("one primary busy = %q", got)
+	}
+	// Every primary busy: the standby answers last.
+	busy["kb"] = true
+	if got := call(1); !strings.HasSuffix(got, "ks") || strings.Count(got, "ks") != 1 {
+		t.Errorf("all primaries busy = %q", got)
+	}
+	// Fallback mode keeps the standby after every primary too.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("POST", "/providers/groq/rotation", strings.NewReader(`{"mode":"fallback","order":["`+sb.ID+`"]}`)))
+	delete(busy, "ka")
+	delete(busy, "kb")
+	if got := call(2); strings.Contains(got, "ks") {
+		t.Errorf("fallback with the standby first in order = %q", got)
+	}
+	// Back to a normal account: it takes turns again.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("POST", "/accounts/"+sb.ID+"/active", strings.NewReader(`{"active":true,"standby":false}`)))
+	if got := call(1); got != "ks" {
+		t.Errorf("standby off, first in fallback order = %q", got)
+	}
+	// Switching an account off clears its standby mark: off means never.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("POST", "/accounts/"+sb.ID+"/active", strings.NewReader(`{"active":false}`)))
+	busy["ka"], busy["kb"] = true, true
+	if got := call(1); strings.Contains(got, "ks") {
+		t.Errorf("an account that is off was called: %q", got)
+	}
+}

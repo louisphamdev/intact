@@ -400,7 +400,7 @@ const VI={
 'Delete':'Xoá','Deleted':'Đã xoá','Delete failed':'Xoá thất bại','Delete {0}':'Xoá {0}','Delete "{0}"?':'Xoá "{0}"?','Edit':'Sửa','Edit {0}':'Sửa {0}','Done':'Xong',
 'Rename':'Đổi tên','Rename {0}':'Đổi tên {0}','Renamed':'Đã đổi tên','Show':'Hiện','Show {0}':'Hiện {0}','Name':'Tên','Create':'Tạo','Refresh':'Làm mới',
 'Loading…':'Đang tải…','Starting…':'Đang bắt đầu…','All':'Tất cả','New':'Mới','None':'Không có','Enabled':'Đang bật','Enabled: {0}':'Đang bật: {0}',
-'Active':'Đang bật','Off':'Tắt','active':'đang bật','off':'tắt','Test':'Test','Clear':'Bỏ chọn','Add':'Thêm','Login':'Đăng nhập','Sign in':'Đăng nhập',
+'Active':'Đang bật','Off':'Tắt','active':'đang bật','off':'tắt','Standby':'Dự phòng','standby':'dự phòng','Standby: this account takes no turns and serves only when every other active account fails or is busy.':'Dự phòng: account này không nhận lượt, chỉ được gọi khi mọi account đang bật khác lỗi hoặc bận.','Test':'Test','Clear':'Bỏ chọn','Add':'Thêm','Login':'Đăng nhập','Sign in':'Đăng nhập',
 'Provider':'Nhà cung cấp','Account':'Tài khoản','Model':'Model','Kind':'Loại','Note':'Ghi chú','Type':'Kiểu','Field':'Trường','Seen':'Số lần thấy','Sample':'Mẫu',
 'Direction':'Chiều','Day':'Ngày','All days':'Mọi ngày','Input':'Vào','Output':'Ra','Requests':'Request','Input tokens':'Token vào','Output tokens':'Token ra',
 // endpoint
@@ -953,6 +953,12 @@ function viewProvider(v,p){
       try{await postJSON('/accounts/'+a.id+'/active',{active:sw.checked});a.isActive=sw.checked;delete modelCache[p];route()}
       catch(e){sw.checked=!sw.checked;alert(e.message)}
     };
+    const stby=el('button',{class:'chip'+(a.standby?' on':''),type:'button','aria-pressed':String(!!a.standby),
+      title:'Standby: this account takes no turns and serves only when every other active account fails or is busy.',
+      onclick:async()=>{
+        try{await postJSON('/accounts/'+a.id+'/active',{active:true,standby:!a.standby});a.standby=!a.standby;route()}
+        catch(e){alert(e.message)}
+      }},'Standby');
     const isNext=a.isActive&&rot.next===a.id;
     return el('div',{class:'row'+(a.isActive?'':' off')},
       all.length>1?el('span',{class:'order'},
@@ -962,12 +968,13 @@ function viewProvider(v,p){
       el('div',{class:'who'},
         labelEditor(a),
         el('div',{class:'meta'},
-          el('span',{class:'badge'+(a.isActive?' ok':''),text:a.isActive?'active':'off'}),
+          el('span',{class:'badge'+(a.isActive?(a.standby?' warn':' ok'):''),text:a.isActive?(a.standby?'standby':'active'):'off'}),
           isNext&&list.length>1?el('span',{class:'badge accent',title:'The next request goes to this account'},
             rr&&R.sticky>1?t('next · {0}/{1}',(rot.used||0)+1,R.sticky):tr('next')):null,
           el('span',{class:'mono faint',title:a.id,text:short(a.id)}),
           acctTest(a))),
       ok?acctTestBtn(a):null,
+      a.isActive&&list.length>1?stby:null,
       el('button',{class:'danger',type:'button',onclick:()=>deleteAccount(a)},svg(ICON.trash),'Delete'),
       el('label',{class:'switch',title:a.isActive?'Active':'Off'},sw,el('span')));
     }));

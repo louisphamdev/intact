@@ -10,18 +10,30 @@ import (
 	"github.com/louisphamdev/intact/internal/web"
 )
 
-// setActive turns a connection on or off from a JSON body {"active":bool}.
+// setActive turns a connection on or off from a JSON body
+// {"active":bool,"standby":bool}; standby left out keeps the current mark.
 func (a *api) setActive(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Active bool `json:"active"`
+		Active  bool  `json:"active"`
+		Standby *bool `json:"standby"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "bad json")
 		return
 	}
-	if err := a.store.SetActive(r.PathValue("id"), body.Active); err != nil {
+	id := r.PathValue("id")
+	if err := a.store.SetActive(id, body.Active); err != nil {
 		writeError(w, http.StatusNotFound, "unknown connection")
 		return
+	}
+	// Off means never called, so it drops a standby mark: switched on again
+	// without one, the account takes turns like any other.
+	if !body.Active || body.Standby != nil {
+		standby := body.Active && body.Standby != nil && *body.Standby
+		if err := a.store.SetStandby(id, standby); err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot update connection")
+			return
+		}
 	}
 	writeJSON(w, map[string]any{"ok": true, "active": body.Active})
 }

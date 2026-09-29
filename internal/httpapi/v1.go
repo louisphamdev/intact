@@ -281,6 +281,10 @@ func (a *api) models(w http.ResponseWriter, r *http.Request) {
 		OwnedBy     string `json:"owned_by"`
 		Type        string `json:"type"`
 		DisplayName string `json:"display_name"`
+		// Token limits, when the provider's list gives them.
+		ContextLength   int64 `json:"context_length,omitempty"`
+		MaxInputTokens  int64 `json:"max_input_tokens,omitempty"`
+		MaxOutputTokens int64 `json:"max_output_tokens,omitempty"`
 	}
 	provs := a.activeProviders()
 	lists := make([][]string, len(provs))
@@ -295,8 +299,13 @@ func (a *api) models(w http.ResponseWriter, r *http.Request) {
 	wg.Wait()
 	data := []entry{}
 	for i, p := range provs {
+		a.cat.mu.Lock()
+		infos := a.cat.m[p].info
+		a.cat.mu.Unlock()
 		for _, id := range lists[i] {
-			data = append(data, entry{ID: p + "/" + id, Object: "model", OwnedBy: p, Type: "model", DisplayName: p + "/" + id})
+			in := infos[id]
+			data = append(data, entry{ID: p + "/" + id, Object: "model", OwnedBy: p, Type: "model", DisplayName: p + "/" + id,
+				ContextLength: in.Context, MaxInputTokens: in.Input, MaxOutputTokens: in.Output})
 		}
 	}
 	first, last := "", ""

@@ -15,7 +15,9 @@ The rules for a model:
 - A model switched off in the model table is not listed in `/v1/models`, is
   never picked for a bare id, and a call naming it gets `403`.
 - An inactive account is skipped.
-- `GET /v1/models` lists every model that is on, as `<provider>/<model>`.
+- `GET /v1/models` lists every model that is on, as `<provider>/<model>`. When
+  the provider's list gives token limits, an entry also has `context_length`,
+  `max_input_tokens` and `max_output_tokens` ([Models](models.md#token-limits)).
 
 ## Request shapes and translation
 

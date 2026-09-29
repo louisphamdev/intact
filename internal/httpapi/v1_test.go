@@ -216,3 +216,25 @@ func TestCustomAnthropicProviderUsesXAPIKeyAndMessages(t *testing.T) {
 		t.Errorf("caller got %s", rec.Body.String())
 	}
 }
+
+// /v1/models carries each model's token limits, so a client such as
+// llm-switcher can refuse a 1M context the model does not have.
+func TestV1ModelsCarryTokenLimits(t *testing.T) {
+	f := &fakeProvider{models: `{"data":[{"id":"big","context_length":1048576,"top_provider":{"max_completion_tokens":65536}},{"id":"small","context_length":200000},{"id":"bare"}]}`}
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("groq", "g", "k")
+	h := New(s, map[string]string{"groq": f.start(t)})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("GET", "/v1/models", nil))
+	body := rec.Body.String()
+	for _, want := range []string{
+		`{"id":"groq/big","object":"model","owned_by":"groq","type":"model","display_name":"groq/big","context_length":1048576,"max_output_tokens":65536}`,
+		`{"id":"groq/small","object":"model","owned_by":"groq","type":"model","display_name":"groq/small","context_length":200000}`,
+		`{"id":"groq/bare","object":"model","owned_by":"groq","type":"model","display_name":"groq/bare"}`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/v1/models lacks %s\n%s", want, body)
+		}
+	}
+}

@@ -153,8 +153,11 @@
   .empty{display:grid;place-items:center;gap:.5rem;text-align:center;padding:2.5rem 1rem;color:var(--muted)}
   .empty .ic{width:52px;height:52px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center}
   .empty b{color:var(--fg)}
+  /* Press feedback after Uiverse.io ItsEnigma143 (MIT): a short scale on :active. */
   button{font:inherit;min-height:36px;padding:.4rem .85rem;border:0;border-radius:8px;cursor:pointer;display:inline-flex;
-         align-items:center;gap:.4rem;justify-content:center}
+         align-items:center;gap:.4rem;justify-content:center;
+         transition:background-color .15s,border-color .15s,color .15s,box-shadow .15s,filter .15s,transform .1s}
+  button:active:not(:disabled){transform:scale(.97)}
   button.primary{background:var(--accent-strong);color:var(--accent-fg);font-weight:600}
   button.primary:hover{filter:brightness(1.07)}
   button.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
@@ -166,34 +169,85 @@
   button.icon{min-height:30px;min-width:30px;padding:.2rem;background:transparent;color:var(--muted)}
   button.icon:hover{color:var(--fg);background:var(--card2)}
   button:disabled{opacity:.35;cursor:default;pointer-events:none}
+  /* A busy button keeps its full colour: the spinner, not the fade, says it works. */
+  button[aria-busy=true]{opacity:1}
+  button[aria-busy=true]>svg{display:none}
+  button[aria-busy=true]::before,.loading::before{content:"";width:14px;height:14px;flex:none;border-radius:50%;
+    box-sizing:border-box;border:2px solid currentColor;border-right-color:transparent;animation:spin .7s linear infinite}
+  /* Spinner after Uiverse.io Cybercom682 (MIT): a ring with one open side. */
+  @keyframes spin{to{transform:rotate(1turn)}}
+  .loading{display:flex;align-items:center;gap:.6rem;color:var(--faint)}
   input,select,textarea{font:inherit;padding:.5rem .7rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg);
-               min-height:38px;width:100%}
+               min-height:38px;width:100%;transition:border-color .15s,box-shadow .15s}
+  input:hover:not(:focus):not(:disabled),select:hover:not(:focus):not(:disabled),textarea:hover:not(:focus):not(:disabled){border-color:var(--faint)}
   input:focus,select:focus,textarea:focus,button:focus-visible,a:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
   label.f,div.f{display:grid;gap:.35rem;font-size:.82rem;font-weight:500}
   .hint{font-size:.75rem;color:var(--faint);font-weight:400}
   .search{position:relative;max-width:18rem;width:100%}
   .search svg{position:absolute;left:.6rem;top:50%;transform:translateY(-50%);color:var(--faint)}
   .search input{padding-left:2rem}
-  .switch{position:relative;width:38px;height:22px;flex:none;display:inline-block}
+  .switch{position:relative;width:38px;height:22px;flex:none;display:inline-block;vertical-align:middle}
   .switch input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer;min-height:0}
-  .switch span{position:absolute;inset:0;border-radius:999px;background:var(--line);transition:background .15s;pointer-events:none}
-  .switch span::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}
+  /* Switch after Uiverse.io iSweat-exe (MIT); the knob stretches while pressed. */
+  /* The inset ring keeps the off track visible: --line alone reads 1.4:1 on a card. */
+  .switch span{position:absolute;inset:0;border-radius:999px;background:var(--line);box-shadow:inset 0 0 0 1.5px var(--faint);
+    transition:background-color .25s,box-shadow .25s;pointer-events:none}
+  .switch span::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:999px;background:#fff;
+    box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .25s cubic-bezier(.3,1.4,.6,1),width .15s}
+  .switch input:active+span::after{width:20px}
   /* A raw checkbox or radio: undo the full-width text-input rule above. */
   .chk{width:auto;min-height:0;margin:0;padding:0;flex:none;accent-color:var(--accent-strong)}
-  .switch input:checked+span{background:var(--accent-strong)}
+  .switch input:checked+span{background:var(--accent-strong);box-shadow:none}
   .switch input:checked+span::after{transform:translateX(16px)}
-  .switch input:focus-visible+span{box-shadow:0 0 0 3px var(--accent-soft)}
-  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(3px);display:grid;place-items:center;padding:1rem;z-index:20}
+  .switch input:checked:active+span::after{transform:translateX(12px)}
+  /* Checkbox after Uiverse.io adamgiebl (MIT): the tick scales in. !important beats
+     the inline width:auto that many call sites set for the native box. */
+  input[type=checkbox]:not(.switch input){appearance:none;width:16px!important;height:16px!important;min-height:0!important;
+    padding:0;margin:0;flex:none;border:1.5px solid var(--faint);border-radius:4px;background:var(--bg);cursor:pointer;
+    display:inline-grid;place-content:center;transition:background-color .15s,border-color .15s}
+  input[type=checkbox]:not(.switch input)::before{content:"";width:4px;height:8px;margin-top:-2px;border:solid var(--accent-fg);
+    border-width:0 2px 2px 0;transform:rotate(45deg) scale(0);transition:transform .15s cubic-bezier(.3,1.4,.6,1)}
+  input[type=checkbox]:not(.switch input):checked{background:var(--accent-strong);border-color:var(--accent-strong)}
+  input[type=checkbox]:not(.switch input):checked::before{transform:rotate(45deg) scale(1)}
+  input[type=checkbox]:not(.switch input):disabled{opacity:.45;cursor:default}
+  .switch input:focus-visible+span,input[type=checkbox]:not(.switch input):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(3px);display:grid;place-items:center;padding:1rem;z-index:20;
+           opacity:1;transition:opacity .18s,display .18s;transition-behavior:allow-discrete}
+  .overlay[hidden]{display:none;opacity:0}
   .modal{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);width:min(36rem,100%);
-         max-height:90vh;display:flex;flex-direction:column}
+         max-height:90vh;display:flex;flex-direction:column;transition:transform .18s cubic-bezier(.2,.9,.3,1.2)}
+  .overlay[hidden] .modal{transform:scale(.96) translateY(8px)}
+  @starting-style{.overlay{opacity:0}.overlay .modal{transform:scale(.96) translateY(8px)}}
   .modal.sm{width:min(26rem,100%)}
   .mh{display:flex;justify-content:space-between;align-items:center;padding:1rem 1.25rem;border-bottom:1px solid var(--line)}
   .mh strong{font-size:1rem}
   .mb{padding:1.1rem 1.25rem;overflow:auto;display:grid;grid-template-columns:minmax(0,1fr);gap:1rem}
   .mf{display:flex;justify-content:flex-end;gap:.5rem;padding:.85rem 1.25rem;border-top:1px solid var(--line)}
   .err-msg{color:var(--err);font-size:.82rem;min-height:1.2em}
-  .toast{position:fixed;bottom:1.25rem;left:50%;transform:translateX(-50%);background:var(--card2);border:1px solid var(--line);
-         box-shadow:var(--shadow);padding:.55rem 1rem;border-radius:10px;font-size:.85rem;z-index:30;max-width:90vw}
+  /* Toast after Uiverse.io alexruix (MIT): it slides in; the bar shows how long it stays. */
+  .toast{position:fixed;bottom:1.25rem;left:50%;translate:-50% 0;background:var(--card2);border:1px solid var(--line);
+         box-shadow:var(--shadow);padding:.6rem 1rem .6rem .85rem;border-radius:10px;font-size:.85rem;z-index:30;max-width:90vw;
+         display:flex;align-items:center;gap:.6rem;overflow:hidden;opacity:1;
+         transition:opacity .2s,translate .25s cubic-bezier(.2,.9,.3,1.2),display .25s;transition-behavior:allow-discrete}
+  .toast[hidden]{display:none;opacity:0;translate:-50% 12px}
+  @starting-style{.toast{opacity:0;translate:-50% 12px}}
+  .toast::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none;box-shadow:0 0 0 3px var(--ok-soft)}
+  .toast::after{content:"";position:absolute;left:0;bottom:0;height:2px;width:100%;background:var(--accent);transform-origin:left;
+         animation:toastbar var(--toast-ms,1.8s) linear forwards}
+  @keyframes toastbar{to{transform:scaleX(0)}}
+  /* Tooltip after Uiverse.io elijahgummer (MIT): a short fade and rise. It replaces
+     the native title bubble; the text stays in aria-label for screen readers. */
+  .tip{position:fixed;z-index:40;pointer-events:none;background:var(--fg);color:var(--bg);font-size:.72rem;font-weight:500;
+       padding:.3rem .55rem;border-radius:6px;white-space:nowrap;max-width:min(22rem,90vw);overflow:hidden;text-overflow:ellipsis;
+       box-shadow:0 6px 18px rgba(0,0,0,.25);opacity:1;translate:0 0;
+       transition:opacity .15s,translate .2s cubic-bezier(.3,1.4,.6,1),display .15s;transition-behavior:allow-discrete}
+  .tip[hidden]{display:none;opacity:0;translate:0 4px}
+  @starting-style{.tip{opacity:0;translate:0 4px}}
+  @media (prefers-reduced-motion:reduce){
+    *,::before,::after{transition-duration:.01ms!important;animation-duration:.01ms!important}
+    button[aria-busy=true]::before,.loading::before{animation-duration:1.5s!important}
+    .toast::after{animation-duration:var(--toast-ms,1.8s)!important}
+  }
   /* The rule under the tabs is an inset shadow, so the active tab's underline
      sits inside the box: nothing overflows, and no scrollbar shows. The row
      still scrolls sideways on a narrow screen. */
@@ -231,7 +285,8 @@
   .qwin{display:grid;gap:.3rem}
   .qwin .top{display:flex;justify-content:space-between;gap:.5rem;font-size:.82rem}
   .qwin .top b{font-weight:550}
-  [hidden]{display:none!important}
+  /* The overlay, toast and tooltip hide through their own rules so they can animate out. */
+  [hidden]:not(.overlay,.toast,.tip){display:none!important}
   /* Leaderboard tiers, best to worst. */
   .tier{display:inline-grid;place-items:center;width:1.6rem;height:1.6rem;border-radius:7px;font-weight:800;font-size:.8rem;color:#fff}
   .tier-S{background:#8b5cf6}.tier-A{background:#16a34a}.tier-B{background:#0891b2}.tier-C{background:#ca8a04}.tier-D{background:#6b7280}
@@ -390,7 +445,7 @@
   </div>
 </div>
 
-<div class="toast" id="toast" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
 <script>
 const VI={
@@ -675,7 +730,24 @@ const accountsOf=p=>S.accounts.filter(a=>a.provider===p);
 const activeOf=p=>accountsOf(p).filter(a=>a.isActive);
 const accById=id=>S.accounts.find(a=>a.id===id);
 
-function toast(msg){const t=$('toast');t.textContent=tr(msg);t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,1800)}
+// Hiding first and reading a layout value restarts the entry transition and the timer bar.
+function toast(msg){const t=$('toast');t.textContent=tr(msg);t.hidden=true;void t.offsetWidth;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,1800)}
+// The title moves to data-tip on first hover, so the native bubble does not show as well.
+// It stays the accessible name when the element has no text, else its description.
+const tip=el('div',{class:'tip',role:'tooltip',hidden:true});document.body.append(tip);
+function showTip(e){
+  const n=e.target.closest&&e.target.closest('[title],[data-tip]');if(!n)return;
+  if(n.title){n.dataset.tip=n.title;n.removeAttribute('title');
+    if(!n.hasAttribute('aria-label'))n.setAttribute(n.textContent.trim()?'aria-description':'aria-label',n.dataset.tip)}
+  tip.textContent=n.dataset.tip;tip.hidden=false;
+  const r=n.getBoundingClientRect(),w=tip.offsetWidth,h=tip.offsetHeight;
+  tip.style.left=Math.max(8,Math.min(r.left+r.width/2-w/2,innerWidth-w-8))+'px';
+  tip.style.top=(r.top-h-8<8?r.bottom+8:r.top-h-8)+'px';
+}
+const hideTip=()=>{tip.hidden=true};
+document.addEventListener('pointerover',showTip);document.addEventListener('focusin',showTip);
+document.addEventListener('pointerout',e=>{const n=e.target.closest&&e.target.closest('[data-tip]');if(n&&!n.contains(e.relatedTarget))hideTip()});
+for(const ev of ['focusout','click','scroll','hashchange'])addEventListener(ev,hideTip,true);
 function copy(text,what){
   const done=()=>toast(t('Copied {0}',what||text));
   if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(text).then(done,()=>{});
@@ -713,8 +785,8 @@ async function api(path,opts){
 const postJSON=(path,body)=>api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 
 // A form sends once: a second submit while the first is in flight is dropped.
-function guard(f){if(f.dataset.busy)return true;f.dataset.busy='1';f.querySelector('button[type=submit]').disabled=true;return false}
-function release(f){delete f.dataset.busy;f.querySelector('button[type=submit]').disabled=false}
+function guard(f){if(f.dataset.busy)return true;f.dataset.busy='1';const b=f.querySelector('button[type=submit]');b.disabled=true;b.setAttribute('aria-busy','true');return false}
+function release(f){delete f.dataset.busy;const b=f.querySelector('button[type=submit]');b.disabled=false;b.removeAttribute('aria-busy')}
 
 // ---- modals
 function openModal(id){$(id).hidden=false;const f=$(id).querySelector('input:not([type=hidden]):not(:disabled),select');if(f)f.focus()}
@@ -1567,7 +1639,7 @@ async function showKeyUsage(k){
   if(m)m.classList.remove('sm');
   $('kTitle').textContent=t('Usage · {0}',k.name);
   $('kFoot').replaceChildren(el('button',{class:'primary',type:'button','data-close':true},'Done'));
-  $('kBody').replaceChildren(el('div',{class:'faint'},'Loading…'));
+  $('kBody').replaceChildren(el('div',{class:'loading'},'Loading…'));
   openModal('kModal');
   let d;
   try{d=await api('/keys/'+k.id+'/usage')}catch(e){$('kBody').replaceChildren(el('div',{class:'err-msg',text:e.message}));return}
@@ -1778,7 +1850,7 @@ async function declareProvider(id){
 }
 // The definition card of a declared provider's page.
 function defCard(p){
-  const box=el('div',{class:'card pad'},el('span',{class:'faint small',text:'Loading…'}));
+  const box=el('div',{class:'card pad'},el('span',{class:'loading small',text:'Loading…'}));
   api('/provider-defs/'+encodeURIComponent(p)).then(d=>{
     const kv=(k,v)=>v?[el('span',{class:'k'},k),el('code',{text:v})]:[];
     box.replaceChildren(
@@ -2450,7 +2522,7 @@ function driftFields(){
   const provs=[...new Set(S.drift.map(c=>c.provider).concat(S.accounts.filter(a=>a.isActive).map(a=>a.provider)))].filter(wired).sort();
   const psel=el('select',{style:'width:auto','aria-label':'Provider'},provs.map(p=>el('option',{value:p,text:pname(p)})));
   const dsel=el('select',{style:'width:auto','aria-label':'Direction'},el('option',{value:'request',text:'Requests from clients'}),el('option',{value:'response',text:'Answers from the provider'}));
-  const box=el('div',{class:'card'},el('div',{class:'empty',text:'Loading…'}));
+  const box=el('div',{class:'card'},el('div',{class:'empty'},el('div',{class:'loading',text:'Loading…'})));
   const render=async()=>{
     try{
       const r=await api('/drift/fields?provider='+encodeURIComponent(psel.value)+'&direction='+dsel.value);

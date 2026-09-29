@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -17,6 +18,10 @@ type ModelInfo struct {
 	Default string   `json:"default,omitempty"`
 	// Paid: the provider serves it only on a paid plan.
 	Paid bool `json:"paid,omitempty"`
+	// Token limits: the whole window, the prompt, the answer. 0 is unknown.
+	Context int64 `json:"context,omitempty"`
+	Input   int64 `json:"input,omitempty"`
+	Output  int64 `json:"output,omitempty"`
 }
 
 // modelInfos reads thinking support from a model list answer. Each provider
@@ -67,24 +72,82 @@ func modelInfos(raw []byte) map[string]ModelInfo {
 		}
 	}
 	out := map[string]ModelInfo{}
-	reports := false
+	said := map[string]bool{}
 	for id, m := range items {
-		info, said := readInfo(m)
-		if said {
-			reports = true
+		info, ok := readInfo(m)
+		info.Context, info.Input, info.Output = readLimits(m)
+		if ok {
+			said[id] = true
+		}
+		if ok || info.Context+info.Input+info.Output > 0 {
 			out[id] = info
 		}
 	}
-	if !reports {
-		return nil
+	// Limits alone say nothing of thinking, so thinking stays unknown.
+	if len(said) == 0 {
+		if len(out) == 0 {
+			return nil
+		}
+		return out
 	}
 	no := false
 	for id := range items {
-		if _, ok := out[id]; !ok {
-			out[id] = ModelInfo{Thinking: &no}
+		if !said[id] {
+			info := out[id]
+			info.Thinking = &no
+			out[id] = info
 		}
 	}
 	return out
+}
+
+// readLimits reads a model's token limits under each provider's own field
+// names; the first field found wins. The names are listed in docs/models.md.
+func readLimits(m map[string]any) (context, input, output int64) {
+	pick := func(dst *int64, v any) {
+		if n := tokenCount(v); n > 0 && *dst == 0 {
+			*dst = n
+		}
+	}
+	caps, _ := m["capabilities"].(map[string]any)
+	if l, ok := caps["limits"].(map[string]any); ok {
+		pick(&context, l["max_context_window_tokens"])
+		pick(&input, l["max_prompt_tokens"])
+		pick(&output, l["max_output_tokens"])
+	}
+	if tp, ok := m["top_provider"].(map[string]any); ok {
+		pick(&context, tp["context_length"])
+		pick(&output, tp["max_completion_tokens"])
+	}
+	for _, k := range []string{"context_length", "context_window", "maxTokens"} {
+		pick(&context, m[k])
+	}
+	for _, k := range []string{"max_input_tokens", "inputTokenLimit"} {
+		pick(&input, m[k])
+	}
+	for _, k := range []string{"max_tokens", "max_completion_tokens", "maxOutputTokens", "outputTokenLimit"} {
+		pick(&output, m[k])
+	}
+	if props, ok := m["properties"].([]any); ok {
+		for _, p := range props {
+			if o, _ := p.(map[string]any); str(o["property_id"]) == "context_window" {
+				pick(&context, o["value"])
+			}
+		}
+	}
+	return context, input, output
+}
+
+// tokenCount reads a count given as a number or as a numeric string.
+func tokenCount(v any) int64 {
+	switch n := v.(type) {
+	case float64:
+		return int64(n)
+	case string:
+		i, _ := strconv.ParseInt(n, 10, 64)
+		return i
+	}
+	return 0
 }
 
 func readInfo(m map[string]any) (ModelInfo, bool) {
@@ -189,9 +252,13 @@ func foldInfos(infos map[string]ModelInfo, groups map[string]variantSet) map[str
 	for base, g := range groups {
 		var merged ModelInfo
 		for _, l := range g.Variants() {
-			if i, ok := infos[g.ids[l]]; ok && i.Thinking != nil && (merged.Thinking == nil || *i.Thinking) {
+			i, ok := infos[g.ids[l]]
+			if ok && i.Thinking != nil && (merged.Thinking == nil || *i.Thinking) {
 				merged.Thinking = i.Thinking
 			}
+			merged.Context = max(merged.Context, i.Context)
+			merged.Input = max(merged.Input, i.Input)
+			merged.Output = max(merged.Output, i.Output)
 			delete(infos, g.ids[l])
 		}
 		merged.Efforts = g.Variants()

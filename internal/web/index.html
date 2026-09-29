@@ -447,7 +447,7 @@ const VI={
 'Only models whose name contains "free" are on (and tested).':'Chỉ bật (và test) các model có chữ "free" trong tên.','Last run {0} · {1}':'Lần chạy gần nhất {0} · {1}','{0} of {1} tested work':'{0}/{1} model test dùng được',
 'New models start on when free.':'Model mới được bật nếu là model free.','New models start on.':'Model mới được bật sẵn.','Fetch the model list from the provider now':'Fetch danh sách model từ nhà cung cấp ngay',
 'Fetching…':'Đang fetch…','Fetch failed; nothing was removed':'Fetch lỗi; không xoá gì','Fetched {0} models':'Đã fetch {0} model','{0} new':'{0} mới','{0} removed':'{0} bị xoá','no change':'không đổi',
-'Fetch now':'Fetch ngay','Effort':'Effort','Last test':'Test gần nhất','free':'free','clear':'xoá lọc',
+'Fetch now':'Fetch ngay','Effort':'Effort','Context':'Context','out {0}':'ra {0}','Context window: {0} tokens':'Context window: {0} token','Max input: {0} tokens':'Input tối đa: {0} token','Max output: {0} tokens':'Output tối đa: {0} token','Last test':'Test gần nhất','free':'free','clear':'xoá lọc',
 // blacklist
 'Body field':'Trường body','Fields':'Trường','Schema key':'Key schema','Schema keys':'Key schema','System line':'Dòng system','System lines':'Dòng system','Header':'Header','Headers':'Header',
 'Block {0}':'Chặn {0}','Edit blocked {0}':'Sửa mục chặn {0}','Nothing blocked':'Chưa chặn gì','All providers':'Tất cả nhà cung cấp','Unblock "{0}"?':'Bỏ chặn "{0}"?','Removed':'Đã bỏ',
@@ -1195,6 +1195,15 @@ function modelTable(p){
   const all=el('input',{type:'checkbox','aria-label':'Select every model shown',style:'width:auto;min-height:0'});
   all.onchange=()=>{for(const r of tbl.visible())all.checked?st.sel.add(r.model):st.sel.delete(r.model);render()};
   const info=r=>st.info[r.model]||{};
+  // 128000 reads as 128K and 262144 as 256K: a round decimal count keeps base 1000.
+  const fmtTok=n=>{const b=n%1000===0?1000:1024;return n>=b*b?+(n/b/b).toFixed(1)+'M':n>=b?Math.round(n/b)+'K':String(n)};
+  const limitsCell=i=>{
+    const main=i.context||i.input;
+    if(!main&&!i.output)return el('span',{class:'faint small',text:'—'});
+    const tip=[i.context&&t('Context window: {0} tokens',i.context.toLocaleString()),i.input&&t('Max input: {0} tokens',i.input.toLocaleString()),
+      i.output&&t('Max output: {0} tokens',i.output.toLocaleString())].filter(Boolean).join('\n');
+    return el('span',{title:tip,'aria-label':tip},main?fmtTok(main):'—',
+      i.output?el('span',{class:'faint small',style:'display:block;font-size:.68rem',text:t('out {0}',fmtTok(i.output))}):null)};
   // Leaderboard: the entry a model maps to, its score on the chosen board.
   const arenaScore=r=>{const m=st.arena[r.model];return m&&m.scores&&m.scores[st.board]};
   const boardName=b=>({overall:'Overall',coding:'Coding',webdev:'WebDev'})[b]||b;
@@ -1255,6 +1264,7 @@ function modelTable(p){
       {id:'effort',label:'Effort',type:'chip',tdStyle:'white-space:nowrap',chips:r=>(info(r).efforts||[]).map(e=>e||'none'),
         order:v=>{const i=['none','minimal','extra-low','low','medium','high','xhigh','max','ultra','tiered'].indexOf(v);return i<0?99:i},
         sort:r=>(info(r).efforts||[]).length,td:r=>effortChips(info(r),!!st.variants[r.model])},
+      {id:'limits',label:'Context',type:'num',cls:'num',style:'width:6.5rem',get:r=>{const i=info(r);return i.context||i.input||-1},td:r=>limitsCell(info(r))},
       {id:'last',label:'Last test',type:'chip',chipLabel:tr,chips:r=>[testState(r)],
         order:v=>['passed','failed','testing','untested','—'].indexOf(v),
         sort:r=>r.testAt?(r.testOk?r.testMs:1e9):1e12,tdStyle:'max-width:18rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap',

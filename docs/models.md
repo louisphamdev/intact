@@ -6,6 +6,7 @@ A provider's page ends with its model table, with these columns:
 - the model's name (click it to copy `<provider>/<model>`);
 - its tags (`thinking`, `paid plan`);
 - its effort levels;
+- its token limits: the context window, and the most input and output tokens;
 - its last test result;
 - a Test button.
 
@@ -30,6 +31,24 @@ nothing either.
 
 The last list answer, as the provider sent it, is at
 `GET /api/providers/{id}/models/raw`.
+
+## Token limits
+
+intact reads each model's token limits from the provider's model list. Each
+provider names them its own way:
+
+| Provider | Context window | Input | Output |
+| --- | --- | --- | --- |
+| Copilot | `capabilities.limits.max_context_window_tokens` | `capabilities.limits.max_prompt_tokens` | `capabilities.limits.max_output_tokens` |
+| Anthropic | | `max_input_tokens` | `max_tokens` |
+| OpenRouter, zencore | `context_length`, `top_provider.context_length` | | `top_provider.max_completion_tokens` |
+| Antigravity | `maxTokens` | | `maxOutputTokens` |
+| Gemini | | `inputTokenLimit` | `outputTokenLimit` |
+| Groq | `context_window` | | `max_completion_tokens` |
+| Cloudflare | property `context_window` | | |
+
+A limit that the list does not give stays empty. A list that gives only limits
+says nothing about thinking, so the `thinking` tag stays unknown.
 
 ## Switches
 

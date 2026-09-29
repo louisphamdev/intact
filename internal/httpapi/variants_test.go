@@ -190,11 +190,37 @@ func TestModelInfos(t *testing.T) {
 		"groq":        `{"l":{"thinking":false},"q":{"thinking":true},"w":{"thinking":false}}`,
 		"antigravity": `{"img":{"thinking":false},"x":{"thinking":true,"efforts":["high","low"],"default":"high"}}`,
 		"nvidia":      `null`,
-		"cloudflare":  `{"@cf/a":{"thinking":true,"always":true,"efforts":["low","high"],"default":"low","paid":true},"@cf/b":{"thinking":false}}`,
+		"cloudflare":  `{"@cf/a":{"thinking":true,"always":true,"efforts":["low","high"],"default":"low","paid":true},"@cf/b":{"thinking":false,"context":8000}}`,
 	}
 	for k := range cases {
 		if got[k] != want[k] {
 			t.Errorf("%s:\n got %s\nwant %s", k, got[k], want[k])
+		}
+	}
+}
+
+// Token limits come in each provider's own words; a list that gives limits but
+// says nothing of thinking leaves thinking unknown.
+func TestModelLimits(t *testing.T) {
+	cases := map[string][2]string{
+		"copilot": {`{"data":[{"id":"a","capabilities":{"limits":{"max_context_window_tokens":200000,"max_prompt_tokens":128000,"max_output_tokens":16000},"supports":{"tool_calls":true}}}]}`,
+			`{"a":{"thinking":false,"context":200000,"input":128000,"output":16000}}`},
+		"anthropic": {`{"data":[{"id":"c","max_input_tokens":1000000,"max_tokens":128000,"capabilities":{"thinking":{"supported":true}}}]}`,
+			`{"c":{"thinking":true,"input":1000000,"output":128000}}`},
+		"openrouter": {`{"data":[{"id":"r","context_length":262144,"top_provider":{"context_length":262144,"max_completion_tokens":32768},"supported_parameters":["reasoning"]}]}`,
+			`{"r":{"thinking":true,"context":262144,"output":32768}}`},
+		"antigravity": {`{"models":{"x-high":{"supportsThinking":true,"maxTokens":1048576,"maxOutputTokens":65535},"x-low":{"supportsThinking":true,"maxTokens":1048576,"maxOutputTokens":65535}}}`,
+			`{"x":{"thinking":true,"efforts":["high","low"],"default":"high","context":1048576,"output":65535}}`},
+		"limits only": {`{"data":[{"id":"z","context_length":8192}]}`, `{"z":{"context":8192}}`},
+	}
+	for name, c := range cases {
+		infos := modelInfos([]byte(c[0]))
+		if name == "antigravity" {
+			_, g := groupVariants([]string{"x-high", "x-low"})
+			infos = foldInfos(infos, g)
+		}
+		if b, _ := json.Marshal(infos); string(b) != c[1] {
+			t.Errorf("%s:\n got %s\nwant %s", name, b, c[1])
 		}
 	}
 }

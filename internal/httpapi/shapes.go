@@ -30,6 +30,8 @@ func clientShape(path string) string {
 		return translate.OpenAI
 	case "messages":
 		return translate.Anthropic
+	case "responses":
+		return translate.Responses
 	}
 	return ""
 }
@@ -84,11 +86,15 @@ func translatable(shape string) bool {
 // toProvider converts a caller's request to the provider's shape.
 func toProvider(body []byte, client, want string) ([]byte, error) {
 	hub := body
-	if client == translate.Anthropic {
-		var err error
-		if hub, err = translate.AnthropicToOpenAI(body); err != nil {
-			return nil, err
-		}
+	var err error
+	switch client {
+	case translate.Anthropic:
+		hub, err = translate.AnthropicToOpenAI(body)
+	case translate.Responses:
+		hub, err = translate.ResponsesToOpenAI(body)
+	}
+	if err != nil {
+		return nil, err
 	}
 	switch want {
 	case translate.Anthropic:
@@ -108,8 +114,9 @@ func alwaysStreams(shape string) bool {
 const maxTranslatedBody = 32 << 20
 
 // relayVia answers the caller in its own shape (to) from a response in the
-// provider's shape (via). stream is what the caller asked for.
-func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, via string, stream bool, provider, path string, cap *contract.Capture) {
+// provider's shape (via). stream is what the caller asked for; tools names the
+// Responses tools behind the chat tool names, for a Responses caller.
+func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, via string, stream bool, tools map[string]translate.ToolMeta, provider, path string, cap *contract.Capture) {
 	a.rate.capture(connID, resp.Header)
 	for k, vs := range resp.Header {
 		if hopByHop[k] || k == "Content-Length" || k == "Content-Type" || k == "Content-Encoding" {
@@ -146,7 +153,7 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 			}
 			return
 		}
-		out, err := wholeToClient(body, via, to)
+		out, err := wholeToClient(body, via, to, tools)
 		if err != nil {
 			if cap != nil {
 				_ = cap.Seal(false, nil, err)
@@ -191,6 +198,13 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 		w.Header().Set("Cache-Control", "no-cache")
 		w.WriteHeader(resp.StatusCode)
 		clientErr = copyFlushing(out, chunks)
+	case stream && to == translate.Responses:
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(resp.StatusCode)
+		ef := &errFlusher{flushWriter: out}
+		translate.OpenAIStreamToResponses(ef, chunks, tools)
+		clientErr = ef.err
 	case stream:
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -206,8 +220,13 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 		if status < 400 && isErrorBody(whole) {
 			status = http.StatusBadGateway
 		}
-		if to == translate.Anthropic {
+		switch {
+		case to == translate.Anthropic:
 			if b, err := translate.OpenAIResponseToAnthropic(whole); err == nil {
+				whole = b
+			}
+		case to == translate.Responses && status < 400:
+			if b, err := translate.OpenAIResponseToResponses(whole, tools); err == nil {
 				whole = b
 			}
 		}
@@ -255,7 +274,7 @@ func (a *api) toChatChunks(dst translate.Flusher, src io.Reader, via string) {
 }
 
 // wholeToClient converts a whole (non-streamed) response.
-func wholeToClient(body []byte, via, to string) ([]byte, error) {
+func wholeToClient(body []byte, via, to string, tools map[string]translate.ToolMeta) ([]byte, error) {
 	hub := body
 	if via == translate.Anthropic {
 		var err error
@@ -263,8 +282,11 @@ func wholeToClient(body []byte, via, to string) ([]byte, error) {
 			return nil, err
 		}
 	}
-	if to == translate.Anthropic {
+	switch to {
+	case translate.Anthropic:
 		return translate.OpenAIResponseToAnthropic(hub)
+	case translate.Responses:
+		return translate.OpenAIResponseToResponses(hub, tools)
 	}
 	return hub, nil
 }

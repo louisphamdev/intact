@@ -24,7 +24,8 @@ The rules for a model:
 | `/v1/chat/completions` | OpenAI Chat Completions |
 | `/v1/messages` | Anthropic Messages |
 | `/v1/messages/count_tokens` | Anthropic token count. It is estimated locally when no Anthropic account serves the model. |
-| any other path (`/v1/responses`, `/v1/systemone`, …) | Passed through to the provider at the same path |
+| `/v1/responses` | OpenAI Responses (Codex CLI) |
+| any other path (`/v1/systemone`, …) | Passed through to the provider at the same path |
 
 Each provider speaks one shape: OpenAI, Anthropic, Responses (Codex), or Gemini
 inside Antigravity's envelope. When the client's shape differs from the
@@ -47,6 +48,12 @@ Details worth knowing:
   so tool calls survive a round trip.
 - **Tool calls, images and reasoning** are carried across shapes where both
   sides support them.
+- **Responses tools** reach a chat provider as function tools. A tool in a
+  `namespace` gets the name `<namespace>__<name>`. A `custom` (freeform) tool
+  gets one string argument, `input`. intact gives each call back to the client
+  as the kind of tool the client declared. Hosted tools, such as `web_search`,
+  run only at OpenAI, so intact does not send them. Encrypted reasoning items
+  are also not sent, because no other provider can read them.
 - **Structured output** is carried too. A JSON schema for the answer goes as
   `response_format` (OpenAI), `text.format` (Responses), `output_config.format`
   (Anthropic) or `responseMimeType` with `responseSchema` (Gemini). Anthropic

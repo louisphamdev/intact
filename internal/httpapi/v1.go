@@ -585,6 +585,10 @@ func bodyModel(body []byte) (string, bool) {
 func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targets []store.Connection, start int, cap *contract.Capture) {
 	client := clientShape(r.PathValue("path"))
 	stream := translate.Stream(body)
+	var tools map[string]translate.ToolMeta
+	if client == translate.Responses {
+		tools = translate.ResponsesTools(body)
+	}
 	translated := map[string][]byte{}
 	tried := 0
 	attempts := a.attemptsFor(r.Context(), targets, start, body)
@@ -730,7 +734,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			w.Header().Set("X-Intact-Model", at.model)
 		}
 		if to != "" {
-			a.relayVia(w, resp, conn.ID, to, via, stream, conn.Provider, path, cap)
+			a.relayVia(w, resp, conn.ID, to, via, stream, tools, conn.Provider, path, cap)
 		} else {
 			a.relayObserved(w, resp, conn.ID, conn.Provider, path, cap)
 		}

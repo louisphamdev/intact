@@ -89,6 +89,9 @@ Set a client's base URL as follows:
 - OpenAI SDKs and tools: `https://intact.example/v1`
 - Anthropic SDKs and Claude Code: `https://intact.example`
 
+If an Anthropic client gets `https://intact.example/v1`, it sends
+`/v1/v1/messages`. intact accepts `/v1/v1/…` as `/v1/…`, so both base URLs work.
+
 ## Deployment
 
 The reference deployment runs intact under systemd on loopback, and exposes it

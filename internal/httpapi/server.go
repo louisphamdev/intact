@@ -112,10 +112,6 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	// One base URL: the model in the body picks the provider and its accounts.
 	mux.HandleFunc("GET /v1/models", a.requireToken(a.models))
 	mux.HandleFunc("/v1/{path...}", a.requireToken(a.v1))
-	// The base URL intact shows ends in /v1, and Anthropic clients add /v1
-	// themselves, so /v1/v1/… must reach the same routes.
-	mux.HandleFunc("GET /v1/v1/models", a.requireToken(a.models))
-	mux.HandleFunc("/v1/v1/{path...}", a.requireToken(a.v1))
 	// Management API for machines: the same token as /v1.
 	mux.HandleFunc("GET /api/providers", a.requireToken(a.apiProviders))
 	mux.HandleFunc("GET /api/accounts", a.requireToken(a.accounts))
@@ -248,7 +244,30 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	// "{$}" matches the root and nothing else. A bare "/" would be a catch-all
 	// and would answer every mistyped path with the dashboard.
 	mux.HandleFunc("GET /{$}", a.requireSession(a.dashboard))
-	return a, a.guardRequest(mux)
+	return a, a.guardRequest(collapseV1(mux))
+}
+
+// collapseV1 routes /v1/v1/… (any number of repeats) as /v1/…. The base URL
+// intact shows ends in /v1, and Anthropic clients add /v1 themselves.
+func collapseV1(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p := collapseV1Path(r.URL.Path); p != r.URL.Path {
+			u := *r.URL
+			u.Path, u.RawPath = p, ""
+			r2 := r.Clone(r.Context())
+			r2.URL = &u
+			r = r2
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// collapseV1Path removes repeats of a leading /v1 segment.
+func collapseV1Path(p string) string {
+	for strings.HasPrefix(p, "/v1/v1/") || p == "/v1/v1" {
+		p = p[len("/v1"):]
+	}
+	return p
 }
 
 // isCallerTrusted determines whether the request principal is trusted for contract writes/read gates.

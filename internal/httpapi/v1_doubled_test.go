@@ -42,14 +42,20 @@ func TestDoubledV1PrefixReachesTheSameRoute(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"type":"message"`) {
 		t.Errorf("/v1/v1/messages: code=%d body=%s, want an Anthropic answer", rec.Code, rec.Body.String())
 	}
-	rec = callV1(h, "POST", "/v1/v1/chat/completions", key, `{"model":"groq/llama"}`)
+	rec = callV1(h, "POST", "/v1/v1/v1/chat/completions", key, `{"model":"groq/llama"}`)
 	if rec.Code != http.StatusOK {
-		t.Errorf("/v1/v1/chat/completions: code=%d body=%s", rec.Code, rec.Body.String())
+		t.Errorf("/v1/v1/v1/chat/completions: code=%d body=%s", rec.Code, rec.Body.String())
 	}
 	if strings.Join(paths, ",") != "/chat/completions,/chat/completions" {
 		t.Errorf("upstream paths = %q, want the doubled /v1 gone", paths)
 	}
-	if rec := callV1(h, "GET", "/v1/v1/models", key, ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "groq/llama") {
-		t.Errorf("/v1/v1/models: code=%d body=%s", rec.Code, rec.Body.String())
+	for _, p := range []string{"/v1/v1/models", "/v1/v1/v1/models"} {
+		if rec := callV1(h, "GET", p, key, ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "groq/llama") {
+			t.Errorf("%s: code=%d body=%s", p, rec.Code, rec.Body.String())
+		}
+	}
+	// Only a leading repeat is collapsed; a path that merely contains v1 is untouched.
+	if got := collapseV1Path("/v1/chat/v1/x"); got != "/v1/chat/v1/x" {
+		t.Errorf("collapseV1Path changed an inner v1: %s", got)
 	}
 }

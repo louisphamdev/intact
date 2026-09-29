@@ -90,7 +90,7 @@ Set a client's base URL as follows:
 - Anthropic SDKs and Claude Code: `https://intact.example`
 
 If an Anthropic client gets `https://intact.example/v1`, it sends
-`/v1/v1/messages`. intact accepts `/v1/v1/…` as `/v1/…`, so both base URLs work.
+`/v1/v1/messages`. intact removes a repeated leading `/v1` before it routes a request, so both base URLs work.
 
 ## Deployment
 

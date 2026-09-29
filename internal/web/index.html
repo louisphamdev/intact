@@ -143,6 +143,8 @@
   tr:last-child td{border-bottom:0}
   th{color:var(--muted);font-weight:500;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
   .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  /* Read by a screen reader, not drawn. */
+  .sr{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
   .scroll{overflow-x:auto}
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));gap:.75rem}
   .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:.9rem 1.1rem}
@@ -447,7 +449,7 @@ const VI={
 'Only models whose name contains "free" are on (and tested).':'Chỉ bật (và test) các model có chữ "free" trong tên.','Last run {0} · {1}':'Lần chạy gần nhất {0} · {1}','{0} of {1} tested work':'{0}/{1} model test dùng được',
 'New models start on when free.':'Model mới được bật nếu là model free.','New models start on.':'Model mới được bật sẵn.','Fetch the model list from the provider now':'Fetch danh sách model từ nhà cung cấp ngay',
 'Fetching…':'Đang fetch…','Fetch failed; nothing was removed':'Fetch lỗi; không xoá gì','Fetched {0} models':'Đã fetch {0} model','{0} new':'{0} mới','{0} removed':'{0} bị xoá','no change':'không đổi',
-'Fetch now':'Fetch ngay','Effort':'Effort','Context':'Context','out {0}':'ra {0}','Context window: {0} tokens':'Context window: {0} token','Max input: {0} tokens':'Input tối đa: {0} token','Max output: {0} tokens':'Output tối đa: {0} token','Last test':'Test gần nhất','free':'free','clear':'xoá lọc',
+'Fetch now':'Fetch ngay','Effort':'Effort','Context':'Context','out {0}':'ra {0}','Context window: {0} tokens':'Context window: {0} token','Max input: {0} tokens':'Input tối đa: {0} token','Max output: {0} tokens':'Output tối đa: {0} token','No token limits listed':'Không có giới hạn token','Last test':'Test gần nhất','free':'free','clear':'xoá lọc',
 // blacklist
 'Body field':'Trường body','Fields':'Trường','Schema key':'Key schema','Schema keys':'Key schema','System line':'Dòng system','System lines':'Dòng system','Header':'Header','Headers':'Header',
 'Block {0}':'Chặn {0}','Edit blocked {0}':'Sửa mục chặn {0}','Nothing blocked':'Chưa chặn gì','All providers':'Tất cả nhà cung cấp','Unblock "{0}"?':'Bỏ chặn "{0}"?','Removed':'Đã bỏ',
@@ -1199,11 +1201,12 @@ function modelTable(p){
   const fmtTok=n=>{const b=n%1000===0?1000:1024;return n>=b*b?+(n/b/b).toFixed(1)+'M':n>=b?Math.round(n/b)+'K':String(n)};
   const limitsCell=i=>{
     const main=i.context||i.input;
-    if(!main&&!i.output)return el('span',{class:'faint small',text:'—'});
+    if(!main&&!i.output)return el('span',{title:t('No token limits listed')},el('span',{class:'faint small','aria-hidden':'true',text:'—'}),el('span',{class:'sr',text:t('No token limits listed')}));
     const tip=[i.context&&t('Context window: {0} tokens',i.context.toLocaleString()),i.input&&t('Max input: {0} tokens',i.input.toLocaleString()),
       i.output&&t('Max output: {0} tokens',i.output.toLocaleString())].filter(Boolean).join('\n');
-    return el('span',{title:tip,'aria-label':tip},main?fmtTok(main):'—',
-      i.output?el('span',{class:'faint small',style:'display:block;font-size:.68rem',text:t('out {0}',fmtTok(i.output))}):null)};
+    return el('span',{title:tip},el('span',{'aria-hidden':'true'},main?fmtTok(main):'—',
+      i.output?el('span',{class:'faint small',style:'display:block;font-size:.68rem',text:t('out {0}',fmtTok(i.output))}):null),
+      el('span',{class:'sr',text:tip.replace(/\n/g,'. ')}))};
   // Leaderboard: the entry a model maps to, its score on the chosen board.
   const arenaScore=r=>{const m=st.arena[r.model];return m&&m.scores&&m.scores[st.board]};
   const boardName=b=>({overall:'Overall',coding:'Coding',webdev:'WebDev'})[b]||b;

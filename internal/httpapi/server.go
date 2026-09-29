@@ -3,9 +3,12 @@ package httpapi
 
 import (
 	"log"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/louisphamdev/intact/internal/auth"
 	"github.com/louisphamdev/intact/internal/contract"
@@ -26,6 +29,8 @@ type api struct {
 	// model for a pool across providers ("m:").
 	rrMu   sync.Mutex
 	rrNext map[string]rrCursor
+	// keyLim counts each API key's requests against its per-minute cap.
+	keyLim keyLimiter
 	// cat caches each provider's model list for resolving a bare model id.
 	cat catalog
 	// filters caches the compiled request filters.
@@ -89,6 +94,7 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	consumer.SetReleaseQueueSlot(contractMgr.ReleaseQueueSlot)
 	_ = consumer.StartupRecovery()
 	a := &api{store: s, baseOverride: baseOverride, auth: authCfg, rrNext: map[string]rrCursor{},
+		keyLim:  keyLimiter{seen: map[string][]time.Time{}},
 		cat:     catalog{m: map[string]catalogEntry{}, inflight: map[string]*catalogFetch{}},
 		copilot: copilotCache{m: map[string]copilotToken{}},
 		sigs:    sigStore{m: map[string]sigEntry{}}, drift: drift.New(s),
@@ -220,6 +226,8 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	mux.HandleFunc("POST /keys/{id}/active", a.requireSession(a.setKeyActive))
 	mux.HandleFunc("POST /keys/{id}/trusted", a.requireSession(a.setKeyTrusted))
 	mux.HandleFunc("POST /keys/{id}/models", a.requireSession(a.setKeyModels))
+	mux.HandleFunc("POST /keys/{id}/limits", a.requireSession(a.setKeyLimits))
+	mux.HandleFunc("GET /keys/{id}/usage", a.requireSession(a.keyUsage))
 	mux.HandleFunc("POST /keys/{id}/delete", a.requireSession(a.deleteKey))
 	mux.HandleFunc("GET /filters", a.requireSession(a.listFilters))
 	mux.HandleFunc("POST /filters", a.requireSession(a.saveFilter))
@@ -314,8 +322,19 @@ func (a *api) requireToken(next http.HandlerFunc) http.HandlerFunc {
 			next(w, withPrincipal(r, principal{admin: true, name: "env"}))
 			return
 		}
-		if id, name, models, ok := a.store.APIKeyByToken(tok); ok {
-			next(w, withPrincipal(r, principal{keyID: id, name: name, models: models}))
+		if k, ok := a.store.APIKeyByToken(tok); ok {
+			if k.Expired(time.Now()) {
+				writeError(w, http.StatusUnauthorized, "api key expired")
+				return
+			}
+			if k.RPM > 0 {
+				if ok, wait := a.keyLim.allow(k.ID, k.RPM, time.Now()); !ok {
+					w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
+					writeError(w, http.StatusTooManyRequests, "api key rate limit: "+strconv.Itoa(k.RPM)+" requests per minute")
+					return
+				}
+			}
+			next(w, withPrincipal(r, principal{keyID: k.ID, name: k.Name, models: k.Models}))
 			return
 		}
 		if ck, err := r.Cookie(sessionCookie); err == nil && a.auth != nil && a.auth.ValidSession(ck.Value) {

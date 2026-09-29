@@ -166,7 +166,7 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 		if cap != nil {
 			_ = cap.Seal(false, writeErr, nil)
 		}
-		a.recordUsage(connID, body, "")
+		a.recordUsage(connID, keyIDOf(resp), body, "")
 		if watched(provider) {
 			a.drift.Observe(drift.Response, provider, path, body, false)
 		}
@@ -242,7 +242,7 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 	if cap != nil {
 		_ = cap.Seal(true, clientErr, nil)
 	}
-	a.recordUsage(connID, tap.bytes(), "")
+	a.recordUsage(connID, keyIDOf(resp), tap.bytes(), "")
 	if resp.StatusCode < 300 && watched(provider) {
 		a.drift.Observe(drift.Response, provider, path, raw.bytes(), true)
 	}

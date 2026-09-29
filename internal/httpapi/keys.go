@@ -3,7 +3,11 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/louisphamdev/intact/internal/store"
 )
 
 // API keys are managed from the dashboard only: a machine holding one key must
@@ -99,4 +103,78 @@ func (a *api) deleteKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// setKeyLimits stores {"expiresAt":"<RFC 3339>"|"","rpm":n}; a field left out
+// keeps its value.
+func (a *api) setKeyLimits(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ExpiresAt *string `json:"expiresAt"`
+		RPM       *int    `json:"rpm"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	id := r.PathValue("id")
+	cur, ok := a.keyByID(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "unknown api key")
+		return
+	}
+	if body.ExpiresAt != nil {
+		cur.ExpiresAt = ""
+		if *body.ExpiresAt != "" {
+			t, err := time.Parse(time.RFC3339, *body.ExpiresAt)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "expiresAt: an RFC 3339 time, or empty for none")
+				return
+			}
+			cur.ExpiresAt = t.UTC().Format(time.RFC3339)
+		}
+	}
+	if body.RPM != nil {
+		if *body.RPM < 0 || *body.RPM > maxKeyRPM {
+			writeError(w, http.StatusBadRequest, "rpm: 0 (no cap) to "+strconv.Itoa(maxKeyRPM))
+			return
+		}
+		cur.RPM = *body.RPM
+	}
+	if err := a.store.SetAPIKeyLimits(id, cur.ExpiresAt, cur.RPM); err != nil {
+		writeError(w, http.StatusNotFound, "unknown api key")
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "expiresAt": cur.ExpiresAt, "rpm": cur.RPM})
+}
+
+// keyUsage serves a key's last 30 days by day and model, and its requests in
+// the last minute against its cap.
+func (a *api) keyUsage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	k, ok := a.keyByID(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "unknown api key")
+		return
+	}
+	now := time.Now()
+	rows, err := a.store.KeyUsage(id, usageDay(now.AddDate(0, 0, -29)))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot read usage")
+		return
+	}
+	writeJSON(w, map[string]any{"rows": rows, "rpm": k.RPM, "lastMinute": a.keyLim.count(id, now),
+		"expiresAt": k.ExpiresAt, "lastUsed": k.LastUsed, "today": usageDay(now)})
+}
+
+func (a *api) keyByID(id string) (store.APIKey, bool) {
+	list, err := a.store.ListAPIKeys()
+	if err != nil {
+		return store.APIKey{}, false
+	}
+	for _, k := range list {
+		if k.ID == id {
+			return k, true
+		}
+	}
+	return store.APIKey{}, false
 }

@@ -22,8 +22,31 @@ type APIKey struct {
 	Trusted bool   `json:"trusted"`
 	// Models lists the "<provider>/<model>" ids the key may call. Empty means
 	// every model.
-	Models    []string `json:"models"`
-	CreatedAt string   `json:"createdAt"`
+	Models []string `json:"models"`
+	// ExpiresAt (RFC 3339, UTC) ends the key; empty means it never expires.
+	ExpiresAt string `json:"expiresAt"`
+	// RPM caps the requests the key makes in any 60 seconds; 0 means no cap.
+	RPM       int    `json:"rpm"`
+	LastUsed  string `json:"lastUsed"`
+	CreatedAt string `json:"createdAt"`
+}
+
+// Expired reports whether the key's expiry has passed at now.
+func (k APIKey) Expired(now time.Time) bool {
+	if k.ExpiresAt == "" {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339, k.ExpiresAt)
+	return err != nil || !now.Before(t)
+}
+
+// KeyUsageRow is one day's total for an API key and model.
+type KeyUsageRow struct {
+	Day          string `json:"day"`
+	Model        string `json:"model"`
+	InputTokens  int64  `json:"inputTokens"`
+	OutputTokens int64  `json:"outputTokens"`
+	Requests     int64  `json:"requests"`
 }
 
 // ErrKeyNotFound reports that no API key has the requested id.
@@ -38,6 +61,15 @@ CREATE TABLE IF NOT EXISTS api_keys (
 	trusted    INTEGER NOT NULL DEFAULT 0,
 	models     TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS usage_key_daily (
+	day           TEXT NOT NULL,
+	key_id        TEXT NOT NULL,
+	model         TEXT NOT NULL,
+	input_tokens  INTEGER NOT NULL DEFAULT 0,
+	output_tokens INTEGER NOT NULL DEFAULT 0,
+	requests      INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (day, key_id, model)
 );`
 
 func mask(k string) string {
@@ -53,7 +85,7 @@ func (s *Store) migrateAPIKeys() error {
 		return err
 	}
 	defer rows.Close()
-	hasTrusted, hasModels := false, false
+	have := map[string]bool{}
 	for rows.Next() {
 		var cid int
 		var name, ctype string
@@ -62,21 +94,24 @@ func (s *Store) migrateAPIKeys() error {
 		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
 			return err
 		}
-		hasTrusted = hasTrusted || name == "trusted"
-		hasModels = hasModels || name == "models"
+		have[name] = true
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
 	rows.Close()
-	if !hasTrusted {
-		if _, err := s.DB.Exec(`ALTER TABLE api_keys ADD COLUMN trusted INTEGER NOT NULL DEFAULT 0`); err != nil {
-			return fmt.Errorf("alter api_keys add trusted: %w", err)
+	for _, col := range []struct{ name, def string }{
+		{"trusted", "INTEGER NOT NULL DEFAULT 0"},
+		{"models", "TEXT NOT NULL DEFAULT ''"},
+		{"expires_at", "TEXT NOT NULL DEFAULT ''"},
+		{"rpm", "INTEGER NOT NULL DEFAULT 0"},
+		{"last_used", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if have[col.name] {
+			continue
 		}
-	}
-	if !hasModels {
-		if _, err := s.DB.Exec(`ALTER TABLE api_keys ADD COLUMN models TEXT NOT NULL DEFAULT ''`); err != nil {
-			return fmt.Errorf("alter api_keys add models: %w", err)
+		if _, err := s.DB.Exec(`ALTER TABLE api_keys ADD COLUMN ` + col.name + ` ` + col.def); err != nil {
+			return fmt.Errorf("alter api_keys add %s: %w", col.name, err)
 		}
 	}
 	return nil
@@ -134,7 +169,7 @@ func (s *Store) CreateAPIKey(name string, models []string) (APIKey, error) {
 
 // ListAPIKeys returns every key, newest first, masked.
 func (s *Store) ListAPIKeys() ([]APIKey, error) {
-	rows, err := s.DB.Query(`SELECT id, name, key, enabled, trusted, models, created_at FROM api_keys ORDER BY created_at DESC`)
+	rows, err := s.DB.Query(`SELECT id, name, key, enabled, trusted, models, expires_at, rpm, last_used, created_at FROM api_keys ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("query api keys: %w", err)
 	}
@@ -144,7 +179,7 @@ func (s *Store) ListAPIKeys() ([]APIKey, error) {
 		var k APIKey
 		var full, models string
 		var en, tr int
-		if err := rows.Scan(&k.ID, &k.Name, &full, &en, &tr, &models, &k.CreatedAt); err != nil {
+		if err := rows.Scan(&k.ID, &k.Name, &full, &en, &tr, &models, &k.ExpiresAt, &k.RPM, &k.LastUsed, &k.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan api key: %w", err)
 		}
 		k.Masked, k.Enabled, k.Trusted, k.Models = mask(full), en != 0, tr != 0, parseModels(models)
@@ -191,8 +226,10 @@ func (s *Store) SetAPIKeyModels(id string, models []string) error {
 	return nil
 }
 
-// DeleteAPIKey removes a key; a client using it is refused from then on.
+// DeleteAPIKey removes a key and its usage; a client using it is refused from
+// then on.
 func (s *Store) DeleteAPIKey(id string) error {
+	s.DB.Exec(`DELETE FROM usage_key_daily WHERE key_id = ?`, id)
 	res, err := s.DB.Exec(`DELETE FROM api_keys WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete api key: %w", err)
@@ -256,15 +293,69 @@ func (s *Store) APIKeyInfoByToken(tok string) (id, name string, trusted bool, ok
 	return id, name, tr != 0, true
 }
 
-// APIKeyByToken returns the id, the name and the model list of an enabled key.
-// The id is the caller's identity: a name is free text that the operator can repeat.
-func (s *Store) APIKeyByToken(tok string) (id, name string, models []string, ok bool) {
+// APIKeyByToken returns an enabled key with its model list and limits, without
+// the key itself. The id is the caller's identity: a name is free text that the
+// operator can repeat.
+func (s *Store) APIKeyByToken(tok string) (APIKey, bool) {
 	if tok == "" {
-		return "", "", nil, false
+		return APIKey{}, false
 	}
+	var k APIKey
 	var enc string
-	if s.DB.QueryRow(`SELECT id, name, models FROM api_keys WHERE key = ? AND enabled = 1`, tok).Scan(&id, &name, &enc) != nil {
-		return "", "", nil, false
+	if s.DB.QueryRow(`SELECT id, name, models, expires_at, rpm FROM api_keys WHERE key = ? AND enabled = 1`, tok).
+		Scan(&k.ID, &k.Name, &enc, &k.ExpiresAt, &k.RPM) != nil {
+		return APIKey{}, false
 	}
-	return id, name, parseModels(enc), true
+	k.Enabled, k.Models = true, parseModels(enc)
+	return k, true
+}
+
+// SetAPIKeyLimits stores a key's expiry (RFC 3339, or "" for none) and its
+// requests per minute (0 for no cap).
+func (s *Store) SetAPIKeyLimits(id, expiresAt string, rpm int) error {
+	res, err := s.DB.Exec(`UPDATE api_keys SET expires_at = ?, rpm = ? WHERE id = ?`, expiresAt, rpm, id)
+	if err != nil {
+		return fmt.Errorf("set api key limits: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrKeyNotFound
+	}
+	return nil
+}
+
+// AddKeyUsage folds one request's token counts into the key's daily counter and
+// records when the key was last used.
+func (s *Store) AddKeyUsage(day, keyID, model string, inputTokens, outputTokens int64) error {
+	if _, err := s.DB.Exec(
+		`INSERT INTO usage_key_daily (day, key_id, model, input_tokens, output_tokens, requests)
+		 VALUES (?, ?, ?, ?, ?, 1)
+		 ON CONFLICT(day, key_id, model) DO UPDATE SET
+		   input_tokens  = input_tokens  + excluded.input_tokens,
+		   output_tokens = output_tokens + excluded.output_tokens,
+		   requests      = requests + 1`,
+		day, keyID, model, inputTokens, outputTokens); err != nil {
+		return fmt.Errorf("add key usage: %w", err)
+	}
+	_, err := s.DB.Exec(`UPDATE api_keys SET last_used = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339), keyID)
+	return err
+}
+
+// KeyUsage returns a key's daily counters from day since on, newest day first.
+func (s *Store) KeyUsage(keyID, since string) ([]KeyUsageRow, error) {
+	rows, err := s.DB.Query(
+		`SELECT day, model, input_tokens, output_tokens, requests FROM usage_key_daily
+		 WHERE key_id = ? AND day >= ? ORDER BY day DESC, model`, keyID, since)
+	if err != nil {
+		return nil, fmt.Errorf("query key usage: %w", err)
+	}
+	defer rows.Close()
+	out := []KeyUsageRow{}
+	for rows.Next() {
+		var r KeyUsageRow
+		if err := rows.Scan(&r.Day, &r.Model, &r.InputTokens, &r.OutputTokens, &r.Requests); err != nil {
+			return nil, fmt.Errorf("scan key usage: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }

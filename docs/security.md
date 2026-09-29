@@ -102,8 +102,30 @@ model. When a caller sends a bare model id, intact uses only the providers
 that the list names for that id. When a key calls a model that is not on its
 list, intact answers `403 model is not permitted for this api key`.
 
+### Expiry and rate limit
+
+Each key has two limits. Only the session can change them, with the key's
+limits tag on **Endpoint → API keys**. Both are empty by default, which means
+no limit.
+
+- **Expires.** After this time, intact refuses the key with
+  `401 api key expired`. The key list marks a key that expires within 7 days.
+- **Requests per minute.** intact counts the key's requests in the last 60
+  seconds. When the count reaches the limit, intact answers `429` with a
+  `Retry-After` header that gives the seconds until the oldest request leaves
+  the window. A refused request does not count. The count is kept in memory,
+  so a restart sets it to zero.
+
+### Usage per key
+
+intact adds the tokens of each answer to a daily counter for the key and the
+model, next to the counter for the account. The **Usage** button of a key
+shows the last 30 days: the totals, the requests in the last minute against
+the limit, one bar per day, and tables by model and by day. The key list also
+shows when a key was last used. Deleting a key deletes its usage.
+
 `INTACT_API_TOKEN` in the environment is the master token. It is not shown in
-the dashboard, and it reaches every route.
+the dashboard, it reaches every route, and it has no expiry and no rate limit.
 
 ## Contract Lab storage and trust
 

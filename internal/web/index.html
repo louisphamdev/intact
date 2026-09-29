@@ -279,6 +279,9 @@
     .ph{padding:1rem;flex-wrap:wrap}
     .content{padding:1rem 1rem 2.5rem}
     .row{padding:.7rem 1rem;flex-wrap:wrap}
+    /* Beside the buttons the name and its tags get a few pixels; on its own
+       line the identity reads, and the buttons wrap below it. */
+    .row .who{flex:1 0 100%}
     .kv{grid-template-columns:1fr}
     .kv .k{margin-bottom:-.35rem}
   }
@@ -405,7 +408,7 @@ const VI={
 'Direction':'Chiều','Day':'Ngày','All days':'Mọi ngày','Input':'Vào','Output':'Ra','Requests':'Request','Input tokens':'Token vào','Output tokens':'Token ra',
 // endpoint
 'API keys':'API key','Base URL':'Base URL','Models':'Model','Auth':'Xác thực','Anthropic Messages API':'Anthropic Messages API','OpenAI Chat Completions API':'OpenAI Chat Completions API',
-'MCP server':'MCP server','Transport':'Giao thức','Create key':'Tạo key','No keys yet.':'Chưa có key nào.','Create API key':'Tạo API key','Key created':'Đã tạo key',
+'MCP server':'MCP server','Transport':'Giao thức','Create key':'Tạo key','Edit expiry and rate limit':'Sửa hạn dùng và rate limit','{0}/min':'{0}/phút','No rate limit':'Không giới hạn rate','until {0}':'đến {0}','No expiry':'Không hết hạn','expires in {0} d':'còn {0} ngày','last used {0}':'dùng lần cuối {0}','never used':'chưa dùng','Limits · {0}':'Giới hạn · {0}','Empty: the key never expires. After this time the key is refused (401).':'Để trống: key không hết hạn. Sau thời điểm này key bị từ chối (401).','Requests per minute':'Request mỗi phút','No limit':'Không giới hạn','Empty or 0: no limit. Over it, a call gets 429 with Retry-After.':'Trống hoặc 0: không giới hạn. Vượt mức, lời gọi nhận 429 kèm Retry-After.','Requests per minute: a whole number from 0 to 100000.':'Request mỗi phút: số nguyên từ 0 đến 100000.','Usage · {0}':'Usage · {0}','Requests · 30 days':'Request · 30 ngày','Last minute':'Phút vừa qua','Requests per day, last 30 days':'Request mỗi ngày, 30 ngày qua','{0} requests':'{0} request','Requests per day':'Request mỗi ngày','By model':'Theo model','By day':'Theo ngày','No usage in the last 30 days':'Không có usage trong 30 ngày qua','Calls made with this key show up here.':'Các lời gọi dùng key này sẽ hiện ở đây.','No keys yet.':'Chưa có key nào.','Create API key':'Tạo API key','Key created':'Đã tạo key',
 'e.g. laptop, hermes':'ví dụ: laptop, hermes','created {0}':'tạo ngày {0}','Delete key "{0}"? Clients using it stop working.':'Xoá key "{0}"? Các client đang dùng nó sẽ ngừng hoạt động.',
 'All models':'Tất cả model','Selected models only':'Chỉ các model được chọn','Select all':'Chọn tất cả','Deselect all':'Bỏ chọn tất cả','Search models…':'Tìm model…','No models found':'Không tìm thấy model nào','Allowed models':'Model được phép','Edit allowed models':'Sửa model được phép','Edit models · {0}':'Sửa model · {0}','Save':'Lưu','Please select at least one model, or choose "All models".':'Vui lòng chọn ít nhất một model, hoặc chọn "Tất cả model".','{0} models':'{0} model','{0} of {1} selected':'Đã chọn {0}/{1}',
 // providers
@@ -624,7 +627,7 @@ function svg(paths,cls){
   for(const d of paths){const p=document.createElementNS(ns,'path');p.setAttribute('d',d);s.append(p)}
   return s;
 }
-const ICON={copy:['M9 9h11v11H9z','M5 15H4V4h11v1'],fetch:['M20 11a8 8 0 0 0-14.3-4.9L4 8','M4 4v4h4','M4 13a8 8 0 0 0 14.3 4.9L20 16','M20 20v-4h-4'],up:['m6 15 6-6 6 6'],down:['m6 9 6 6 6-6'],x:['M6 6l12 12M18 6 6 18'],
+const ICON={copy:['M9 9h11v11H9z','M5 15H4V4h11v1'],clock:['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z','M12 7v5l3 2'],chart:['M4 20h16','M7 16v-5','M12 16V6','M17 16v-8'],fetch:['M20 11a8 8 0 0 0-14.3-4.9L4 8','M4 4v4h4','M4 13a8 8 0 0 0 14.3 4.9L20 16','M20 20v-4h-4'],up:['m6 15 6-6 6 6'],down:['m6 9 6 6 6-6'],x:['M6 6l12 12M18 6 6 18'],
   trash:['M4 7h16','M10 11v6M14 11v6','M6 7l1 13h10l1-13','M9 7V4h6v3'],edit:['M4 20h4L19 9l-4-4L4 16v4Z'],
   plus:['M12 5v14M5 12h14'],back:['M19 12H5m0 0 6-6m-6 6 6 6'],layers:['M12 3 3 8l9 5 9-5-9-5Z','m3 13 9 5 9-5'],
   search:['M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Z','m20 20-3.5-3.5']};
@@ -1497,11 +1500,18 @@ function keysCard(){
     trSw.onchange=async()=>{try{await postJSON('/keys/'+k.id+'/trusted',{trusted:trSw.checked});k.trusted=trSw.checked;route()}catch(e){trSw.checked=!trSw.checked;alert(e.message)}};
     const reveal=async()=>{try{const r=await api('/keys/'+k.id+'/reveal',{method:'POST'});return r.key}catch(e){alert(e.message)}};
     const isAll=!k.models||k.models.length===0||k.models.includes('*');
-    const modelTag=el('button',{class:'ghost',type:'button',style:'cursor:pointer;border-radius:6px;border:1px solid var(--line);background:var(--card);font-size:.75rem;padding:.15rem .45rem;display:inline-flex;align-items:center;gap:.3rem;color:var(--ink)',title:t('Edit allowed models'),onclick:()=>editKeyModels(k)},
+    const tagStyle='cursor:pointer;border-radius:6px;border:1px solid var(--line);background:var(--card);font-size:.75rem;padding:.15rem .45rem;display:inline-flex;align-items:center;gap:.3rem;color:var(--ink)';
+    const modelTag=el('button',{class:'ghost',type:'button',style:tagStyle,title:t('Edit allowed models'),onclick:()=>editKeyModels(k)},
       svg(ICON.layers),isAll?t('All models'):t('{0} models',k.models.length));
+    const exp=keyExpiry(k);
+    const limitTag=el('button',{class:'ghost',type:'button',style:tagStyle,title:t('Edit expiry and rate limit'),onclick:()=>editKeyLimits(k)},
+      svg(ICON.clock),(k.rpm?t('{0}/min',fmt(k.rpm)):t('No rate limit'))+' · '+(k.expiresAt?t('until {0}',new Date(k.expiresAt).toLocaleDateString()):t('No expiry')));
     return el('div',{class:'row'+(k.enabled?'':' off')},
       el('div',{class:'who'},el('div',{class:'l',text:k.name}),
-        el('div',{class:'meta',style:'display:flex;align-items:center;gap:.6rem;flex-wrap:wrap'},code,modelTag,el('span',{class:'faint small',text:t('created {0}',k.createdAt.slice(0,10))}))),
+        el('div',{class:'meta',style:'display:flex;align-items:center;gap:.6rem;flex-wrap:wrap'},code,modelTag,limitTag,
+          exp.badge,
+          el('span',{class:'faint small',text:t('created {0}',k.createdAt.slice(0,10))+' · '+(k.lastUsed?t('last used {0}',new Date(k.lastUsed).toLocaleString()):t('never used'))}))),
+      el('button',{class:'ghost',type:'button',onclick:()=>showKeyUsage(k)},svg(ICON.chart),'Usage'),
       el('button',{class:'icon',type:'button',title:'Show','aria-label':t('Show {0}',k.name),onclick:async()=>{const f=await reveal();if(f)code.textContent=code.textContent===f?k.masked:f}},
         svg(['M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z','M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z'])),
       el('button',{class:'icon',type:'button',title:'Copy','aria-label':t('Copy {0}',k.name),onclick:async()=>{const f=await reveal();if(f)copy(f,k.name)}},svg(ICON.copy)),
@@ -1514,6 +1524,90 @@ function keysCard(){
     el('div',{class:'cardh'},el('h2',{class:'grow'},'API keys'),
       el('button',{class:'primary',type:'button',onclick:createKey},svg(ICON.plus),'Create key')),
     rows.length?rows:el('div',{class:'empty',style:'padding:1.25rem'},'No keys yet.'));
+}
+// keyExpiry reads a key's expiry into a badge: expired, or ending within 7 days.
+function keyExpiry(k){
+  if(!k.expiresAt)return {};
+  const left=new Date(k.expiresAt)-Date.now();
+  if(left<=0)return {expired:true,badge:el('span',{class:'badge warn',text:t('expired')})};
+  const days=Math.ceil(left/864e5);
+  return days<=7?{badge:el('span',{class:'badge warn',text:t('expires in {0} d',days)})}:{};
+}
+function editKeyLimits(k){
+  const m=$('kModal').querySelector('.modal');
+  if(m)m.classList.add('sm');
+  $('kTitle').textContent=t('Limits · {0}',k.name);
+  const pad=n=>String(n).padStart(2,'0');
+  const local=iso=>{if(!iso)return '';const d=new Date(iso);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes())};
+  const expires=el('input',{type:'datetime-local',name:'expiresAt',value:local(k.expiresAt)});
+  const rpm=el('input',{type:'number',name:'rpm',min:'0',max:'100000',step:'1',inputmode:'numeric',placeholder:t('No limit'),value:k.rpm?String(k.rpm):''});
+  const err=el('div',{class:'err-msg',role:'alert'});
+  $('kBody').replaceChildren(
+    el('label',{class:'f'},'Expires',expires,el('span',{class:'faint small'},'Empty: the key never expires. After this time the key is refused (401).')),
+    el('label',{class:'f'},'Requests per minute',rpm,el('span',{class:'faint small'},'Empty or 0: no limit. Over it, a call gets 429 with Retry-After.')),
+    err);
+  const save=el('button',{class:'primary',type:'button'},'Save');
+  $('kFoot').replaceChildren(el('button',{class:'ghost',type:'button','data-close':true},'Cancel'),save);
+  save.onclick=async()=>{
+    const n=rpm.value.trim()===''?0:Number(rpm.value);
+    if(!Number.isInteger(n)||n<0||n>100000){err.textContent=t('Requests per minute: a whole number from 0 to 100000.');return}
+    save.disabled=true;
+    try{
+      await postJSON('/keys/'+k.id+'/limits',{expiresAt:expires.value?new Date(expires.value).toISOString():'',rpm:n});
+      closeModal('kModal');toast(t('Saved'));await load();
+    }catch(e){err.textContent=e.message;save.disabled=false}
+  };
+  openModal('kModal');
+}
+// showKeyUsage: a key's last 30 days, one bar per day, then by model and by day.
+async function showKeyUsage(k){
+  const m=$('kModal').querySelector('.modal');
+  if(m)m.classList.remove('sm');
+  $('kTitle').textContent=t('Usage · {0}',k.name);
+  $('kFoot').replaceChildren(el('button',{class:'primary',type:'button','data-close':true},'Done'));
+  $('kBody').replaceChildren(el('div',{class:'faint'},'Loading…'));
+  openModal('kModal');
+  let d;
+  try{d=await api('/keys/'+k.id+'/usage')}catch(e){$('kBody').replaceChildren(el('div',{class:'err-msg',text:e.message}));return}
+  const rows=d.rows||[],sum=f=>rows.reduce((s,r)=>s+r[f],0);
+  const byDay=new Map(),byModel=new Map();
+  for(const r of rows){
+    const a=byDay.get(r.day)||{requests:0,inputTokens:0,outputTokens:0};
+    const b=byModel.get(r.model)||{requests:0,inputTokens:0,outputTokens:0};
+    for(const f of ['requests','inputTokens','outputTokens']){a[f]+=r[f];b[f]+=r[f]}
+    byDay.set(r.day,a);byModel.set(r.model,b);
+  }
+  const stat=(k2,v)=>el('div',{class:'stat'},el('div',{class:'k',text:t(k2)}),el('div',{class:'v',text:v}));
+  const stats=el('div',{class:'stats',style:'margin-bottom:1rem'},
+    stat('Requests · 30 days',fmt(sum('requests'))),stat('Input tokens',fmt(sum('inputTokens'))),stat('Output tokens',fmt(sum('outputTokens'))),
+    stat('Last minute',d.rpm?fmt(d.lastMinute)+' / '+fmt(d.rpm):fmt(d.lastMinute)));
+  // The 30 days end today in the server's day, so an idle day shows as an empty slot.
+  const days=[];const end=new Date(d.today+'T00:00:00Z');
+  for(let i=29;i>=0;i--)days.push(new Date(end-i*864e5).toISOString().slice(0,10));
+  const max=Math.max(1,...days.map(x=>(byDay.get(x)||{}).requests||0));
+  const W=600,H=120,gap=2,bw=W/days.length-gap;
+  const svgNS='http://www.w3.org/2000/svg',mk=(tag,attrs)=>{const n=document.createElementNS(svgNS,tag);for(const[a,v]of Object.entries(attrs))n.setAttribute(a,v);return n};
+  const chart=mk('svg',{viewBox:'0 0 '+W+' '+(H+18),width:'100%',role:'img','aria-label':t('Requests per day, last 30 days'),style:'display:block;max-height:10rem'});
+  chart.append(mk('line',{x1:0,x2:W,y1:H+.5,y2:H+.5,stroke:'var(--line)','stroke-width':1}));
+  days.forEach((day,i)=>{
+    const v=(byDay.get(day)||{}).requests||0,h=v?Math.max(2,Math.round(v/max*(H-4))):0,x=i*(W/days.length)+gap/2;
+    const g=mk('g',{});
+    const tip=mk('title',{});tip.textContent=day+': '+t('{0} requests',fmt(v));
+    // The hit area covers the whole slot, so a short bar is still easy to hover.
+    g.append(tip,mk('rect',{x,y:0,width:bw,height:H,fill:'transparent'}));
+    if(h)g.append(mk('path',{d:`M${x},${H}V${H-h+4}a4,4 0 0 1 4,-4h${bw-8}a4,4 0 0 1 4,4V${H}Z`,fill:'var(--accent)'}));
+    chart.append(g);
+  });
+  for(const i of [0,days.length-1]){const tx=mk('text',{x:i?W:0,y:H+14,'text-anchor':i?'end':'start','font-size':11,fill:'var(--muted)'});tx.textContent=days[i].slice(5);chart.append(tx)}
+  const table=(head,entries)=>el('div',{class:'scroll'},el('table',{},
+    el('thead',{},el('tr',{},el('th',{},t(head)),el('th',{class:'num'},t('Requests')),el('th',{class:'num'},t('Input tokens')),el('th',{class:'num'},t('Output tokens')))),
+    el('tbody',{},entries.map(([name,x])=>el('tr',{},el('td',{class:head==='Model'?'mono':'',text:name}),el('td',{class:'num',text:fmt(x.requests)}),el('td',{class:'num',text:fmt(x.inputTokens)}),el('td',{class:'num',text:fmt(x.outputTokens)}))))));
+  $('kBody').replaceChildren(stats,
+    rows.length?el('div',{},
+      el('h3',{style:'font-size:.9rem;margin:.25rem 0 .5rem'},t('Requests per day')),chart,
+      el('h3',{style:'font-size:.9rem;margin:1rem 0 .5rem'},t('By model')),table('Model',[...byModel].sort((a,b)=>b[1].requests-a[1].requests)),
+      el('h3',{style:'font-size:.9rem;margin:1rem 0 .5rem'},t('By day')),table('Day',[...byDay].sort((a,b)=>a[0]<b[0]?1:-1)))
+    :el('div',{class:'empty'},el('b',{},t('No usage in the last 30 days')),t('Calls made with this key show up here.')));
 }
 function createKey(){
   const m=$('kModal').querySelector('.modal');

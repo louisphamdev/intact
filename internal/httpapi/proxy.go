@@ -122,7 +122,7 @@ func (a *api) relayObserved(w http.ResponseWriter, resp *http.Response, connID, 
 		isSSE := isEventStream(resp, tapped)
 		_ = cap.Seal(isSSE, clientErr, upstreamErr)
 	}
-	a.recordUsage(connID, tapped, resp.Header.Get("Content-Encoding"))
+	a.recordUsage(connID, keyIDOf(resp), tapped, resp.Header.Get("Content-Encoding"))
 	if resp.StatusCode < 300 && resp.Header.Get("Content-Encoding") == "" && watched(provider) {
 		a.drift.Observe(drift.Response, provider, path, tapped, isEventStream(resp, tapped))
 	}
@@ -144,7 +144,7 @@ func isEventStream(resp *http.Response, body []byte) bool {
 // A client that sends Accept-Encoding: gzip gets a gzip body that Go does not
 // auto-decompress, so the tap holds compressed bytes. The counter decompresses
 // its own copy; the caller still gets the original bytes untouched.
-func (a *api) recordUsage(connID string, body []byte, contentEncoding string) {
+func (a *api) recordUsage(connID, keyID string, body []byte, contentEncoding string) {
 	if contentEncoding == "gzip" {
 		if plain, err := gunzip(body); err == nil {
 			body = plain
@@ -162,6 +162,11 @@ func (a *api) recordUsage(connID string, body []byte, contentEncoding string) {
 	// (a lock, a full disk) is visible instead of losing counts in silence.
 	if err := a.store.AddUsage(day, connID, c.Model, c.InputTokens, c.OutputTokens); err != nil {
 		log.Printf("record usage for connection %s: %v", connID, err)
+	}
+	if keyID != "" {
+		if err := a.store.AddKeyUsage(day, keyID, c.Model, c.InputTokens, c.OutputTokens); err != nil {
+			log.Printf("record usage for api key %s: %v", keyID, err)
+		}
 	}
 }
 
@@ -315,4 +320,13 @@ func sessionFor(providerID, secret string) string {
 	b[6] = b[6]&0x0f | 0x40
 	b[8] = b[8]&0x3f | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
+
+// keyIDOf names the API key behind a response: the outbound request carries
+// the caller's context, and with it the caller.
+func keyIDOf(resp *http.Response) string {
+	if resp == nil || resp.Request == nil {
+		return ""
+	}
+	return principalOf(resp.Request).keyID
 }

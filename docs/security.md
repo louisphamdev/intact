@@ -94,6 +94,13 @@ Keys are created under **Endpoint → API keys**:
 - It is shown in full once. After that, **Reveal** shows it again.
 - It can be switched off or deleted at any time.
 - A key has a `trusted` flag (default false). Only the session can change this flag.
+- A key has a list of allowed models (default: all models). Only the session can change this list.
+
+The model list holds `<provider>/<model>` ids. intact compares an id exactly,
+and the case of each letter counts. A variant such as `-high` is a different
+model. When a caller sends a bare model id, intact uses only the providers
+that the list names for that id. When a key calls a model that is not on its
+list, intact answers `403 model is not permitted for this api key`.
 
 `INTACT_API_TOKEN` in the environment is the master token. It is not shown in
 the dashboard, and it reaches every route.

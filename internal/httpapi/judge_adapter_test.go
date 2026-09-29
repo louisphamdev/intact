@@ -100,7 +100,7 @@ func TestC1JudgeIntegrationWithDecisionModel(t *testing.T) {
 	a2, _ := newServer(s2, map[string]string{"typesafe": jevServer.URL}, nil)
 	defer a2.consumer.Stop()
 
-	k, err := s2.CreateAPIKey("k-c1")
+	k, err := s2.CreateAPIKey("k-c1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

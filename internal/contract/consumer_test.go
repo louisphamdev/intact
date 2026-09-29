@@ -529,7 +529,7 @@ func TestC4KeyDemotedWhileCapturingAndQueued(t *testing.T) {
 	}
 
 	// 1. Key demoted while trace capturing
-	k1, err := s.CreateAPIKey("k1")
+	k1, err := s.CreateAPIKey("k1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -561,7 +561,7 @@ func TestC4KeyDemotedWhileCapturingAndQueued(t *testing.T) {
 	}
 
 	// 2. Key demoted while queued
-	k2, err := s.CreateAPIKey("k2")
+	k2, err := s.CreateAPIKey("k2", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -663,7 +663,7 @@ func TestC12TruncatedRecordsHandling(t *testing.T) {
 	}
 	consumer := NewConsumer(s, nil, alertFn)
 
-	k, err := s.CreateAPIKey("k-c12")
+	k, err := s.CreateAPIKey("k-c12", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -729,7 +729,7 @@ func TestC11NewModelAndChangedModelPolicy(t *testing.T) {
 	}
 	consumer := NewConsumer(s, nil, alertFn)
 
-	k, err := s.CreateAPIKey("k-c11")
+	k, err := s.CreateAPIKey("k-c11", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -801,7 +801,7 @@ func TestC13GoldenTraceLearning(t *testing.T) {
 	m := NewCaptureManager(s, testKey)
 	consumer := NewConsumer(s, nil, nil)
 
-	k, err := s.CreateAPIKey("k-c13")
+	k, err := s.CreateAPIKey("k-c13", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -862,7 +862,7 @@ func TestC14RenamedWorkflow(t *testing.T) {
 	jm := NewJudgeManager(s, stub)
 	consumer := NewConsumer(s, jm, nil)
 
-	k, err := s.CreateAPIKey("k-c14")
+	k, err := s.CreateAPIKey("k-c14", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -946,7 +946,7 @@ func TestC15FindingReopenAndCounters(t *testing.T) {
 	jm := NewJudgeManager(s, stub)
 	consumer := NewConsumer(s, jm, nil)
 
-	k, err := s.CreateAPIKey("k-c15")
+	k, err := s.CreateAPIKey("k-c15", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

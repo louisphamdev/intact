@@ -176,6 +176,8 @@
   .switch input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer;min-height:0}
   .switch span{position:absolute;inset:0;border-radius:999px;background:var(--line);transition:background .15s;pointer-events:none}
   .switch span::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}
+  /* A raw checkbox or radio: undo the full-width text-input rule above. */
+  .chk{width:auto;min-height:0;margin:0;padding:0;flex:none;accent-color:var(--accent-strong)}
   .switch input:checked+span{background:var(--accent-strong)}
   .switch input:checked+span::after{transform:translateX(16px)}
   .switch input:focus-visible+span{box-shadow:0 0 0 3px var(--accent-soft)}
@@ -403,6 +405,7 @@ const VI={
 'API keys':'API key','Base URL':'Base URL','Models':'Model','Auth':'Xác thực','Anthropic Messages API':'Anthropic Messages API','OpenAI Chat Completions API':'OpenAI Chat Completions API',
 'MCP server':'MCP server','Transport':'Giao thức','Create key':'Tạo key','No keys yet.':'Chưa có key nào.','Create API key':'Tạo API key','Key created':'Đã tạo key',
 'e.g. laptop, hermes':'ví dụ: laptop, hermes','created {0}':'tạo ngày {0}','Delete key "{0}"? Clients using it stop working.':'Xoá key "{0}"? Các client đang dùng nó sẽ ngừng hoạt động.',
+'All models':'Tất cả model','Selected models only':'Chỉ các model được chọn','Select all':'Chọn tất cả','Deselect all':'Bỏ chọn tất cả','Search models…':'Tìm model…','No models found':'Không tìm thấy model nào','Allowed models':'Model được phép','Edit allowed models':'Sửa model được phép','Edit models · {0}':'Sửa model · {0}','Save':'Lưu','Please select at least one model, or choose "All models".':'Vui lòng chọn ít nhất một model, hoặc chọn "Tất cả model".','{0} models':'{0} model','{0} of {1} selected':'Đã chọn {0}/{1}',
 // providers
 'OpenAI compatible':'Tương thích OpenAI','Signs in as the real tool (OAuth)':'Đăng nhập như công cụ thật (OAuth)','Documented API with a key':'API công khai, dùng key',
 'Choose a provider':'Chọn nhà cung cấp','Connected':'Đã kết nối','Not connected yet':'Chưa kết nối','Signs in with the provider account':'Đăng nhập bằng tài khoản của nhà cung cấp',
@@ -710,7 +713,7 @@ function release(f){delete f.dataset.busy;f.querySelector('button[type=submit]')
 
 // ---- modals
 function openModal(id){$(id).hidden=false;const f=$(id).querySelector('input:not([type=hidden]):not(:disabled),select');if(f)f.focus()}
-function closeModal(id){$(id).hidden=true}
+function closeModal(id){$(id).hidden=true;if(id==='kModal'){const m=$(id).querySelector('.modal');if(m)m.classList.add('sm')}}
 for(const m of document.querySelectorAll('.overlay')){
   m.addEventListener('click',e=>{
     if(e.target!==m&&!e.target.closest('[data-close]'))return;
@@ -1397,6 +1400,74 @@ async function deleteAccount(a){
 }
 
 // ---- API keys
+async function fetchAllActiveModels(){
+  try{
+    const res=await api('/v1/models');
+    if(res&&res.data)return res.data.map(m=>m.id).sort();
+  }catch(e){}
+  return [];
+}
+
+function modelSelectorUI(initialModels,allModels){
+  const isCustomInit=Array.isArray(initialModels)&&initialModels.length>0&&!initialModels.includes('*');
+  const selSet=new Set(isCustomInit?initialModels:(allModels.length?allModels:[]));
+  const wrap=el('div',{style:'display:flex;flex-direction:column;gap:.6rem;margin-top:.25rem'});
+  const radAll=el('input',{class:'chk',type:'radio',name:'modelMode',checked:!isCustomInit});
+  const radCustom=el('input',{class:'chk',type:'radio',name:'modelMode',checked:isCustomInit});
+  const customBox=el('div',{style:isCustomInit?'display:flex;flex-direction:column;gap:.5rem':'display:none;flex-direction:column;gap:.5rem'});
+  radAll.onchange=()=>{if(radAll.checked)customBox.style.display='none'};
+  radCustom.onchange=()=>{if(radCustom.checked)customBox.style.display='flex'};
+
+  const modeRow=el('div',{style:'display:flex;gap:1.25rem;align-items:center;padding:.2rem 0'},
+    el('label',{style:'display:inline-flex;align-items:center;gap:.35rem;cursor:pointer'},radAll,el('span',null,'All models')),
+    el('label',{style:'display:inline-flex;align-items:center;gap:.35rem;cursor:pointer'},radCustom,el('span',null,'Selected models only')));
+
+  const search=el('input',{type:'search',name:'modelSearch','aria-label':t('Search models…'),placeholder:'Search models…',style:'width:100%'});
+  const btnAll=el('button',{class:'ghost small',type:'button'},'Select all');
+  const btnNone=el('button',{class:'ghost small',type:'button'},'Deselect all');
+  const countSpan=el('span',{class:'small faint'});
+  const updateCount=()=>{countSpan.textContent=t('{0} of {1} selected',selSet.size,allModels.length)};
+
+  const listEl=el('div',{style:'max-height:12rem;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:.5rem;display:flex;flex-direction:column;gap:.25rem;background:var(--bg)'});
+  const renderList=()=>{
+    const q=search.value.trim().toLowerCase();
+    const filtered=allModels.filter(m=>!q||m.toLowerCase().includes(q));
+    if(!filtered.length){
+      listEl.replaceChildren(el('div',{class:'empty small',style:'padding:.5rem'},'No models found'));
+      return;
+    }
+    const items=filtered.map(m=>{
+      const cb=el('input',{class:'chk',type:'checkbox',name:'model',value:m,checked:selSet.has(m)});
+      cb.onchange=()=>{
+        if(cb.checked)selSet.add(m);else selSet.delete(m);
+        updateCount();
+      };
+      return el('label',{style:'display:flex;align-items:center;gap:.5rem;cursor:pointer;padding:.2rem .35rem;border-radius:4px;font-size:.85rem;overflow-wrap:anywhere'},
+        cb,el('span',{class:'mono'},m));
+    });
+    listEl.replaceChildren(...items);
+  };
+  search.oninput=renderList;
+  btnAll.onclick=()=>{allModels.forEach(m=>selSet.add(m));renderList();updateCount()};
+  btnNone.onclick=()=>{selSet.clear();renderList();updateCount()};
+  renderList();
+  updateCount();
+
+  const toolbar=el('div',{style:'display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap'},
+    el('div',{style:'display:flex;gap:.35rem'},btnAll,btnNone),countSpan);
+  customBox.append(search,toolbar,listEl);
+  // A <label> here would wrap both radios and become the name of the first
+  // one, so the group heading is a plain span and each radio keeps its own.
+  wrap.append(el('div',{class:'f',role:'group','aria-label':t('Allowed models')},
+    el('span',{style:'font-weight:600'},'Allowed models'),modeRow),customBox);
+
+  return {
+    el:wrap,
+    getModels:()=>radAll.checked?[]:[...selSet],
+    validate:()=>(radCustom.checked&&selSet.size===0)?t('Please select at least one model, or choose "All models".'):null
+  };
+}
+
 function keysCard(){
   const rows=S.keys.map(k=>{
     const code=el('code',{class:'mono',text:k.masked});
@@ -1405,9 +1476,12 @@ function keysCard(){
     const trSw=el('input',{type:'checkbox',checked:!!k.trusted,'aria-label':t('Trusted: {0}',k.name)});
     trSw.onchange=async()=>{try{await postJSON('/keys/'+k.id+'/trusted',{trusted:trSw.checked});k.trusted=trSw.checked;route()}catch(e){trSw.checked=!trSw.checked;alert(e.message)}};
     const reveal=async()=>{try{const r=await api('/keys/'+k.id+'/reveal',{method:'POST'});return r.key}catch(e){alert(e.message)}};
+    const isAll=!k.models||k.models.length===0||k.models.includes('*');
+    const modelTag=el('button',{class:'ghost',type:'button',style:'cursor:pointer;border-radius:6px;border:1px solid var(--line);background:var(--card);font-size:.75rem;padding:.15rem .45rem;display:inline-flex;align-items:center;gap:.3rem;color:var(--ink)',title:t('Edit allowed models'),onclick:()=>editKeyModels(k)},
+      svg(ICON.layers),isAll?t('All models'):t('{0} models',k.models.length));
     return el('div',{class:'row'+(k.enabled?'':' off')},
       el('div',{class:'who'},el('div',{class:'l',text:k.name}),
-        el('div',{class:'meta'},code,el('span',{class:'faint small',text:t('created {0}',k.createdAt.slice(0,10))}))),
+        el('div',{class:'meta',style:'display:flex;align-items:center;gap:.6rem;flex-wrap:wrap'},code,modelTag,el('span',{class:'faint small',text:t('created {0}',k.createdAt.slice(0,10))}))),
       el('button',{class:'icon',type:'button',title:'Show','aria-label':t('Show {0}',k.name),onclick:async()=>{const f=await reveal();if(f)code.textContent=code.textContent===f?k.masked:f}},
         svg(['M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z','M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z'])),
       el('button',{class:'icon',type:'button',title:'Copy','aria-label':t('Copy {0}',k.name),onclick:async()=>{const f=await reveal();if(f)copy(f,k.name)}},svg(ICON.copy)),
@@ -1422,27 +1496,61 @@ function keysCard(){
     rows.length?rows:el('div',{class:'empty',style:'padding:1.25rem'},'No keys yet.'));
 }
 function createKey(){
+  const m=$('kModal').querySelector('.modal');
+  if(m)m.classList.remove('sm');
   $('kTitle').textContent=t('Create API key');
   const name=el('input',{placeholder:'e.g. laptop, hermes',autocomplete:'off'});
   const err=el('div',{class:'err-msg'});
-  $('kBody').replaceChildren(el('label',{class:'f'},'Name',name),err);
-  const go=el('button',{class:'primary',type:'button'},'Create');
-  $('kFoot').replaceChildren(el('button',{class:'ghost',type:'button','data-close':true},'Cancel'),go);
+  fetchAllActiveModels().then(allModels=>{
+    const selector=modelSelectorUI([],allModels);
+    $('kBody').replaceChildren(el('label',{class:'f'},'Name',name),selector.el,err);
+    const go=el('button',{class:'primary',type:'button'},'Create');
+    $('kFoot').replaceChildren(el('button',{class:'ghost',type:'button','data-close':true},'Cancel'),go);
+    let busy=false;
+    const submit=async()=>{
+      if(busy)return;
+      const vErr=selector.validate();
+      if(vErr){err.textContent=vErr;return}
+      busy=true;go.disabled=true;
+      try{
+        const k=await postJSON('/keys',{name:name.value.trim(),models:selector.getModels()});
+        if(m)m.classList.add('sm');
+        $('kTitle').textContent=t('Key created');
+        $('kBody').replaceChildren(copyLine(k.key));
+        $('kFoot').replaceChildren(el('button',{class:'primary',type:'button','data-close':true},'Done'));
+        await load();
+      }catch(e){err.textContent=e.message;busy=false;go.disabled=false}
+    };
+    go.onclick=submit;name.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing&&e.keyCode!==229)submit()};
+  });
+  openModal('kModal');
+}
+
+async function editKeyModels(k){
+  const m=$('kModal').querySelector('.modal');
+  if(m)m.classList.remove('sm');
+  $('kTitle').textContent=t('Edit models · {0}',k.name);
+  const err=el('div',{class:'err-msg'});
+  const allModels=await fetchAllActiveModels();
+  const selector=modelSelectorUI(k.models||[],allModels);
+  $('kBody').replaceChildren(selector.el,err);
+  const save=el('button',{class:'primary',type:'button'},'Save');
+  $('kFoot').replaceChildren(el('button',{class:'ghost',type:'button','data-close':true},'Cancel'),save);
   let busy=false;
-  const submit=async()=>{
+  save.onclick=async()=>{
     if(busy)return;
-    busy=true;go.disabled=true;
+    const vErr=selector.validate();
+    if(vErr){err.textContent=vErr;return}
+    busy=true;save.disabled=true;
     try{
-      const k=await postJSON('/keys',{name:name.value.trim()});
-      $('kTitle').textContent=t('Key created');
-      $('kBody').replaceChildren(copyLine(k.key));
-      $('kFoot').replaceChildren(el('button',{class:'primary',type:'button','data-close':true},'Done'));
+      const selected=selector.getModels();
+      await postJSON('/keys/'+k.id+'/models',{models:selected});
+      k.models=selected;
+      toast(t('Saved'));
+      closeModal('kModal');
       await load();
-    }catch(e){err.textContent=e.message;busy=false;go.disabled=false}
+    }catch(e){err.textContent=e.message;busy=false;save.disabled=false}
   };
-  // An input method sends its own Enter while composing (Vietnamese Telex, …);
-  // only a plain Enter submits.
-  go.onclick=submit;name.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing&&e.keyCode!==229)submit()};
   openModal('kModal');
 }
 

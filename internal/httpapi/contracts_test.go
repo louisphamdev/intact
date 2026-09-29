@@ -35,7 +35,7 @@ func TestContractsTraceRoutes(t *testing.T) {
 	a, s, handler := newContractTestServer(t, nil)
 
 	// Create an API key
-	key, err := s.CreateAPIKey("agent-key")
+	key, err := s.CreateAPIKey("agent-key", nil)
 	if err != nil {
 		t.Fatalf("create key: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestContractsTraceRoutes(t *testing.T) {
 	}
 
 	// 2. Another untrusted key cannot see or post half to this trace -> 404
-	otherKey, _ := s.CreateAPIKey("other-key")
+	otherKey, _ := s.CreateAPIKey("other-key", nil)
 	req = httptest.NewRequest("POST", "/api/contracts/traces/"+traceID+"/half", bytes.NewReader(halfBytes))
 	req.Header.Set("Authorization", "Bearer "+otherKey.Key)
 	rec = httptest.NewRecorder()
@@ -228,8 +228,8 @@ func TestContractReadRoutesAndMCP(t *testing.T) {
 	a, s, handler := newContractTestServer(t, nil)
 
 	// Create an untrusted key and a trusted key
-	untrustedKey, _ := s.CreateAPIKey("untrusted-caller")
-	trustedKey, _ := s.CreateAPIKey("trusted-caller")
+	untrustedKey, _ := s.CreateAPIKey("untrusted-caller", nil)
+	trustedKey, _ := s.CreateAPIKey("trusted-caller", nil)
 	_ = s.SetAPIKeyTrusted(trustedKey.ID, true)
 
 	// Pre-seed some findings
@@ -607,7 +607,7 @@ func TestC6TracedRequestTranslationErrorAbortsCapture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create connection: %v", err)
 	}
-	key, err := s.CreateAPIKey("untrusted-key")
+	key, err := s.CreateAPIKey("untrusted-key", nil)
 	if err != nil {
 		t.Fatalf("create key: %v", err)
 	}
@@ -646,9 +646,9 @@ func TestC6TracedRequestTranslationErrorAbortsCapture(t *testing.T) {
 func TestC3OpenerAccessControl(t *testing.T) {
 	a, s, handler := newContractTestServer(t, nil)
 
-	untrustedKey, _ := s.CreateAPIKey("untrusted-key")
-	keyA, _ := s.CreateAPIKey("key-a")
-	keyBTrusted, _ := s.CreateAPIKey("key-b-trusted")
+	untrustedKey, _ := s.CreateAPIKey("untrusted-key", nil)
+	keyA, _ := s.CreateAPIKey("key-a", nil)
+	keyBTrusted, _ := s.CreateAPIKey("key-b-trusted", nil)
 	_ = s.SetAPIKeyTrusted(keyBTrusted.ID, true)
 
 	now := time.Now().UTC()
@@ -741,7 +741,7 @@ func TestC2ReviewSignatureVerdictAdminOnly(t *testing.T) {
 		t.Fatalf("insert signature: %v", err)
 	}
 
-	trustedKey, err := s.CreateAPIKey("trusted-worker")
+	trustedKey, err := s.CreateAPIKey("trusted-worker", nil)
 	if err != nil {
 		t.Fatalf("create key: %v", err)
 	}

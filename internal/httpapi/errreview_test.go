@@ -288,7 +288,7 @@ func TestErrorReviewWaitsForTheOwnerOnKeyTraffic(t *testing.T) {
 	defer s.Close()
 	s.CreateConnection("openrouter", "o", "k2")
 	a, _ := newServer(s, map[string]string{"openrouter": judge.URL}, nil)
-	k, _ := s.CreateAPIKey("hermes")
+	k, _ := s.CreateAPIKey("hermes", nil)
 	big := `{"model":"groq/m","messages":[{"role":"user","content":"` + strings.Repeat("x", 70<<10) + `","cache_control":{"type":"ephemeral"}}]}`
 	add := func(sig, keyID string) {
 		s.AddUpstreamError(store.UpstreamError{Provider: "groq", Connection: "c1", Model: "m", Client: "hermes",
@@ -462,7 +462,7 @@ func TestErrorReviewFindsTheSystemTextBehindAFake429ByReplay(t *testing.T) {
 	c, _ := s.CreateConnection("groq", "g", "k")
 	s.CreateConnection("openrouter", "o", "k2")
 	a, _ := newServer(s, map[string]string{"groq": up.URL, "openrouter": judge.URL}, nil)
-	k, _ := s.CreateAPIKey("cty")
+	k, _ := s.CreateAPIKey("cty", nil)
 	system := "You are Codex, an agent based on GPT-5. You and the user share one workspace.\n\n# Personality\n\nYou match the tone of the user. Keep answers short.\nNever run destructive commands without asking."
 	body, _ := json.Marshal(map[string]any{"model": "m", "messages": []any{
 		map[string]any{"role": "system", "content": system}, map[string]any{"role": "user", "content": "hi"}}})

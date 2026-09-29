@@ -18,17 +18,19 @@ func (a *api) listKeys(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"keys": list})
 }
 
-// createKey makes a key from {"name": "…"} and returns it in full once.
+// createKey makes a key from {"name": "…", "models": […]} and returns it in
+// full once. No models means every model.
 func (a *api) createKey(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name string `json:"name"`
+		Name   string   `json:"name"`
+		Models []string `json:"models"`
 	}
-	json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body)
+	json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&body)
 	name := strings.TrimSpace(body.Name)
 	if name == "" {
 		name = "key"
 	}
-	k, err := a.store.CreateAPIKey(name)
+	k, err := a.store.CreateAPIKey(name, body.Models)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "cannot create api key")
 		return
@@ -69,6 +71,22 @@ func (a *api) setKeyTrusted(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.store.SetAPIKeyTrusted(r.PathValue("id"), body.Trusted); err != nil {
+		writeError(w, http.StatusNotFound, "unknown api key")
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// setKeyModels replaces the models a key may call from {"models": […]}.
+func (a *api) setKeyModels(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Models []string `json:"models"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	if err := a.store.SetAPIKeyModels(r.PathValue("id"), body.Models); err != nil {
 		writeError(w, http.StatusNotFound, "unknown api key")
 		return
 	}

@@ -219,6 +219,7 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	mux.HandleFunc("POST /keys/{id}/reveal", a.requireSession(a.revealKey))
 	mux.HandleFunc("POST /keys/{id}/active", a.requireSession(a.setKeyActive))
 	mux.HandleFunc("POST /keys/{id}/trusted", a.requireSession(a.setKeyTrusted))
+	mux.HandleFunc("POST /keys/{id}/models", a.requireSession(a.setKeyModels))
 	mux.HandleFunc("POST /keys/{id}/delete", a.requireSession(a.deleteKey))
 	mux.HandleFunc("GET /filters", a.requireSession(a.listFilters))
 	mux.HandleFunc("POST /filters", a.requireSession(a.saveFilter))
@@ -290,8 +291,8 @@ func (a *api) requireToken(next http.HandlerFunc) http.HandlerFunc {
 			next(w, withPrincipal(r, principal{admin: true, name: "env"}))
 			return
 		}
-		if id, name, ok := a.store.APIKeyByToken(tok); ok {
-			next(w, withPrincipal(r, principal{keyID: id, name: name}))
+		if id, name, models, ok := a.store.APIKeyByToken(tok); ok {
+			next(w, withPrincipal(r, principal{keyID: id, name: name, models: models}))
 			return
 		}
 		if ck, err := r.Cookie(sessionCookie); err == nil && a.auth != nil && a.auth.ValidSession(ck.Value) {

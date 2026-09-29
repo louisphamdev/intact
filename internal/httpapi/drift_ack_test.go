@@ -138,7 +138,7 @@ func TestDriftChangesMasksSampleForDashboardKey(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	key, err := s.CreateAPIKey("dashboard-caller")
+	key, err := s.CreateAPIKey("dashboard-caller", nil)
 	if err != nil {
 		t.Fatalf("create key: %v", err)
 	}

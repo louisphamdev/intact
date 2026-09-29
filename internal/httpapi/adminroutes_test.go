@@ -53,7 +53,7 @@ func TestAdminAPIRoutesRefuseADashboardKey(t *testing.T) {
 	defer s.Close()
 	cfg := authConfig()
 	a, h := newServer(s, nil, cfg)
-	k, err := s.CreateAPIKey("laptop")
+	k, err := s.CreateAPIKey("laptop", nil)
 	if err != nil {
 		t.Fatalf("create key: %v", err)
 	}

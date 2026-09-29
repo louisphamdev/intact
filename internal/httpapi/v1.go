@@ -93,6 +93,11 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prov, upstreamModel := a.splitModel(model)
+	caller := principalOf(r)
+	if !caller.allowsModel(prov, upstreamModel, model) {
+		writeError(w, http.StatusForbidden, "model is not permitted for this api key")
+		return
+	}
 
 	traceHeader := r.Header.Get("X-Intact-Trace")
 	r.Header.Del("X-Intact-Trace")
@@ -151,7 +156,9 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		for _, p := range a.providersServing(r.Context(), model) {
-			targets = append(targets, a.activeConnections(p)...)
+			if caller.allowsProviderModel(p, model) {
+				targets = append(targets, a.activeConnections(p)...)
+			}
 		}
 	}
 	// A test pinned to one account reaches that account alone, switched on or not.

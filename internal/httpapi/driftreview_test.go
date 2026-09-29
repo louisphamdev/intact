@@ -127,8 +127,8 @@ func TestDriftLearnsClientsApartAndSkipsArguments(t *testing.T) {
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
 	s.CreateConnection("github", "g", "k")
-	kA, _ := s.CreateAPIKey("alpha")
-	kB, _ := s.CreateAPIKey("beta")
+	kA, _ := s.CreateAPIKey("alpha", nil)
+	kB, _ := s.CreateAPIKey("beta", nil)
 	fa, _ := s.RevealAPIKey(kA.ID)
 	fb, _ := s.RevealAPIKey(kB.ID)
 	a, h := newServer(s, map[string]string{"github": up.URL}, nil)
@@ -304,7 +304,7 @@ func TestDriftReviewWaitsForOwnerOnKeyTraffic(t *testing.T) {
 		t.Fatalf("config: %s", rec.Body.String())
 	}
 
-	k, err := s.CreateAPIKey("dashboard-key")
+	k, err := s.CreateAPIKey("dashboard-key", nil)
 	if err != nil {
 		t.Fatalf("create key: %v", err)
 	}

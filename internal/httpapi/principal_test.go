@@ -109,7 +109,7 @@ func TestErrorBodiesBelongToTheKeyThatCausedThem(t *testing.T) {
 
 	keyA := keyThroughDashboard(t, h, ck, "key")
 	// The same name, put straight into the store: a duplicate can already exist.
-	keyB, err := s.CreateAPIKey("key")
+	keyB, err := s.CreateAPIKey("key", nil)
 	if err != nil {
 		t.Fatalf("create key B: %v", err)
 	}

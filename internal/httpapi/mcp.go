@@ -193,7 +193,7 @@ var mcpTools = []mcpTool{
 	{Name: "list_provider_defs", Description: "List the declared providers (added from the dashboard, the API or MCP rather than built in), with their definition. A dashboard key reads the credentials masked.",
 		InputSchema: schema(map[string]any{}),
 		run:         func(a *api, args map[string]any) (any, error) { return a.store.ProviderDefs() }},
-	{Name: "put_provider_def", Description: "Declare a provider, or replace a declared provider's definition. def: {id, name, kind: apikey|oauth-code|oauth-device, api: openai|anthropic|responses, baseUrl, authHeader?, authPrefix?, headers?, modelsUrl? (or \"none\" with models), models?, color?, icon?, oauth?: {authorizeUrl|deviceCodeUrl, tokenUrl, clientId, clientSecret?, scope?, redirectUri?, verifyUrl?, noPkce?, jsonToken?, extra?}}.",
+	{Name: "put_provider_def", Description: "Declare a provider, or replace a declared provider's definition. def: {id, name, kind: apikey|oauth-code|oauth-device, api: openai|anthropic|responses|typesafe, baseUrl, authHeader?, authPrefix?, headers?, modelsUrl? (or \"none\" with models), models?, color?, icon?, oauth?: {authorizeUrl|deviceCodeUrl, tokenUrl, clientId, clientSecret?, scope?, redirectUri?, verifyUrl?, noPkce?, jsonToken?, extra?}}.",
 		InputSchema: schema(map[string]any{"def": map[string]any{"type": "object"}}, "def"),
 		run: func(a *api, args map[string]any) (any, error) {
 			raw, _ := json.Marshal(args["def"])

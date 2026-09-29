@@ -118,7 +118,9 @@ Defaults and conventions:
 - **API standard:**
   - `openai` calls `<base>/chat/completions`;
   - `anthropic` calls `<base>/messages` and sends `anthropic-version`;
-  - `responses` calls `<base>/responses`.
+  - `responses` calls `<base>/responses`;
+  - `typesafe` calls `<base>/systemone`. intact does not translate this shape:
+    only a `POST /v1/systemone` call reaches the provider.
 - **Credential header:** empty means `Authorization: Bearer <key>`. An
   Anthropic API key uses `x-api-key` instead.
 - **Model list:** empty means `<base>/models`. The list is read whether it is

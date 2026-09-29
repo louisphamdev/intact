@@ -27,7 +27,8 @@ type Def struct {
 	Icon string `json:"icon,omitempty"`
 	Kind string `json:"kind"`
 	// API is the request shape: openai (Chat Completions), anthropic
-	// (Messages) or responses (OpenAI Responses).
+	// (Messages), responses (OpenAI Responses) or typesafe (System One,
+	// passed through untranslated).
 	API     string `json:"api"`
 	BaseURL string `json:"baseUrl"`
 	// AuthHeader and AuthPrefix carry the credential. Empty: Authorization /
@@ -99,9 +100,9 @@ func (d *Def) Normalize() error {
 		d.API = "openai"
 	}
 	switch d.API {
-	case "openai", "anthropic", "responses":
+	case "openai", "anthropic", "responses", "typesafe":
 	default:
-		return errors.New("api: openai, anthropic or responses")
+		return errors.New("api: openai, anthropic, responses or typesafe")
 	}
 	if !httpURL(strings.ReplaceAll(d.BaseURL, "{accountId}", "x")) {
 		return errors.New("baseUrl: an http(s) URL")

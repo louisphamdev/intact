@@ -96,6 +96,31 @@ func TestDeclaredFixedModelsAndAnthropic(t *testing.T) {
 	}
 }
 
+func TestDeclaredTypeSafeProviderPassesSystemOneThrough(t *testing.T) {
+	var gotPath, gotAuth, gotBody string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotPath, gotAuth, gotBody = r.URL.Path, r.Header.Get("Authorization"), string(b)
+		w.Write([]byte(`{"model":"jev-1.13-free","answers":{"u":{"type":"noul","noul":1.0}}}`))
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	h := New(s, nil)
+	if rec := postJSONTo(h, "/provider-defs", `{"id":"zen-jev","api":"typesafe","baseUrl":"`+up.URL+`/jev/v1","modelsUrl":"none","models":["jev-latest"]}`); rec.Code != 200 {
+		t.Fatalf("declare: %s", rec.Body.String())
+	}
+	s.CreateConnection("zen-jev", "k", "tk")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/systemone", strings.NewReader(`{"model":"zen-jev/jev-latest","state":"x","questions":{"u":{"type":"noul","instructions":"?"}}}`)))
+	if gotPath != "/jev/v1/systemone" || gotAuth != "Bearer tk" || gotBody != `{"model":"jev-latest","state":"x","questions":{"u":{"type":"noul","instructions":"?"}}}` {
+		t.Errorf("upstream got %s auth=%q %s", gotPath, gotAuth, gotBody)
+	}
+	if rec.Body.String() != `{"model":"jev-1.13-free","answers":{"u":{"type":"noul","noul":1.0}}}` {
+		t.Errorf("answer altered: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestDeclareValidation(t *testing.T) {
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()

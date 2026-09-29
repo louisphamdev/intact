@@ -891,7 +891,7 @@ function viewProviders(v){
         el('div',{class:'nm',text:pname(p)}),
         el('div',{style:'display:flex;gap:.45rem;align-items:center;flex-wrap:wrap'},
           el('span',{class:'status'+(act?' on':''),text:n?t('{0} connected',act)+(act<n?' · '+t('{0} off',n-act):''):'No connections'}),
-          api?el('span',{class:'badge',text:{openai:'OpenAI',anthropic:'Anthropic',responses:'Responses'}[api]||api}):null)));
+          api?el('span',{class:'badge',text:{openai:'OpenAI',anthropic:'Anthropic',responses:'Responses',typesafe:'TypeSafe'}[api]||api}):null)));
   };
   const group=(title,list,addLabel,onAdd,empty)=>el('div',{class:'sec'},
     el('div',{class:'sech'},el('h2',{class:'grow'},title),
@@ -1584,7 +1584,7 @@ async function declareProvider(id){
   const area=(k,props={})=>(f[k]=el('textarea',{rows:3,spellcheck:'false',style:'font:12px/1.5 ui-monospace,monospace',...props}));
   const row=(label,node,hint,key)=>el('label',{class:'f','data-row':key||''},label,node,hint?el('span',{class:'faint small',text:tr(hint)}):null);
   const kind=el('select',{},DECL_KINDS.map(([k,n])=>el('option',{value:k,text:tr(n)})));
-  const apiSel=el('select',{},[['openai','OpenAI Chat Completions'],['anthropic','Anthropic Messages'],['responses','OpenAI Responses']].map(([k,n])=>el('option',{value:k,text:n})));
+  const apiSel=el('select',{},[['openai','OpenAI Chat Completions'],['anthropic','Anthropic Messages'],['responses','OpenAI Responses'],['typesafe','TypeSafe System One']].map(([k,n])=>el('option',{value:k,text:n})));
   const noPkce=el('input',{type:'checkbox',style:'width:auto;min-height:0'}),jsonTok=el('input',{type:'checkbox',style:'width:auto;min-height:0'});
   const form=el('div',{style:'display:grid;gap:.85rem'},
     el('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:.75rem;align-items:start'},

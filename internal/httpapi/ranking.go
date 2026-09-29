@@ -84,6 +84,9 @@ type arenaState struct {
 	mu    sync.Mutex
 	data  arenaData
 	index map[string][]int // normalised name → models
+	// vocab holds every token of every board name. A token of a provider id
+	// that no board name uses is a tag (-free, -contributor), not a model.
+	vocab map[string]bool
 	busy  bool
 }
 
@@ -109,10 +112,15 @@ var (
 	// Suffixes that name a build or a packaging of a model, not another model.
 	buildSuffixes = []string{"-latest", "-preview", "-exp", "-fp8-fast", "-fp8", "-fast", "-awq", "-int4",
 		"-instruct", "-it", "-hf", "-versatile", "-001", "-002"}
-	// Effort and mode suffixes a board lists a model under.
-	effortSuffixes = map[string]bool{"max": true, "xhigh": true, "high": true, "medium": true, "low": true, "minimal": true,
-		"thinking": true, "reasoning": true, "nothink": true, "non-thinking": true, "instant": true, "chat": true, "tiered": true}
+	// Effort and mode words a board lists a model under, one token each.
+	modeWords = map[string]bool{"max": true, "xhigh": true, "high": true, "medium": true, "low": true, "minimal": true,
+		"thinking": true, "reasoning": true, "nothink": true, "non": true, "instant": true, "chat": true, "tiered": true}
+	// A thinking budget such as the 32k of claude-opus-4-5-high-32k.
+	budgetToken = regexp.MustCompile(`^\d+k$`)
+	dashes      = regexp.MustCompile(`-+`)
 )
+
+func modeToken(tok string) bool { return modeWords[tok] || budgetToken.MatchString(tok) }
 
 // arenaNorm reduces a model id to a comparable name: no vendor path, no
 // ":free" style tag, dots and underscores as dashes, no date or build suffix.
@@ -126,7 +134,8 @@ func arenaNorm(s string) string {
 	if i := strings.LastIndexByte(s, '/'); i >= 0 {
 		s = s[i+1:]
 	}
-	s = strings.NewReplacer("_", "-", ".", "-", " ", "-").Replace(s)
+	s = strings.NewReplacer("_", "-", ".", "-", " ", "-", "(", "-", ")", "-").Replace(s)
+	s = strings.Trim(dashes.ReplaceAllString(s, "-"), "-")
 	s = dateSuffix.ReplaceAllString(s, "")
 	s = dateInside.ReplaceAllString(s, "-")
 	for changed := true; changed; {
@@ -141,13 +150,16 @@ func arenaNorm(s string) string {
 }
 
 func (st *arenaState) load(d arenaData) {
-	idx := map[string][]int{}
+	idx, vocab := map[string][]int{}, map[string]bool{}
 	for i, m := range d.Models {
 		n := arenaNorm(m.Name)
 		idx[n] = append(idx[n], i)
+		for _, tok := range strings.Split(n, "-") {
+			vocab[tok] = true
+		}
 	}
 	st.mu.Lock()
-	st.data, st.index = d, idx
+	st.data, st.index, st.vocab = d, idx, vocab
 	st.mu.Unlock()
 }
 
@@ -162,11 +174,33 @@ func votes(m ArenaModel) int {
 }
 
 // match finds the leaderboard entry of a model id: the same normalised name,
-// else that name with an effort suffix (the most voted one).
+// else that name with mode words after it (the most voted one). Failing both,
+// trailing tokens are dropped one at a time while each is a mode word or a
+// word no board name uses; a token with a digit (a version, a size) or a word
+// the board knows (mini, air) names another model and stops the search.
 func (st *arenaState) match(id string) (ArenaMatch, bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	n := arenaNorm(id)
+	toks := strings.Split(arenaNorm(id), "-")
+	for k := len(toks); k >= 1; k-- {
+		if k < len(toks) {
+			tok := toks[k]
+			if !modeToken(tok) && (st.vocab[tok] || strings.ContainsAny(tok, "0123456789")) {
+				break
+			}
+		}
+		if m, ok := st.matchName(strings.Join(toks[:k], "-")); ok {
+			if k < len(toks) {
+				m.How = "variant"
+			}
+			return m, true
+		}
+	}
+	return ArenaMatch{}, false
+}
+
+// matchName finds the board entry of a normalised name, exact or with mode words after it.
+func (st *arenaState) matchName(n string) (ArenaMatch, bool) {
 	best := func(is []int) ArenaModel {
 		b := st.data.Models[is[0]]
 		for _, i := range is[1:] {
@@ -181,7 +215,7 @@ func (st *arenaState) match(id string) (ArenaMatch, bool) {
 	}
 	var cands []int
 	for k, is := range st.index {
-		if rest, ok := strings.CutPrefix(k, n+"-"); ok && effortSuffixes[rest] {
+		if rest, ok := strings.CutPrefix(k, n+"-"); ok && allModeTokens(rest) {
 			cands = append(cands, is...)
 		}
 	}
@@ -190,6 +224,15 @@ func (st *arenaState) match(id string) (ArenaMatch, bool) {
 		return ArenaMatch{best(cands), "variant"}, true
 	}
 	return ArenaMatch{}, false
+}
+
+func allModeTokens(s string) bool {
+	for _, tok := range strings.Split(s, "-") {
+		if !modeToken(tok) {
+			return false
+		}
+	}
+	return true
 }
 
 func (st *arenaState) byName(name string) (ArenaModel, bool) {

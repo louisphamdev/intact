@@ -135,3 +135,35 @@ func TestArenaAlias(t *testing.T) {
 		t.Errorf("table arena = %+v", d.Arena)
 	}
 }
+
+// Provider ids carry tags the board never uses (-free, -contributor) and modes
+// it may not list (-thinking); both must fall away, but a word that names
+// another model (mini) or a size must not.
+func TestArenaMatchDropsTagsNotIdentity(t *testing.T) {
+	var st arenaState
+	var models []ArenaModel
+	for _, n := range []string{"mimo-v2.6-flash", "mimo-v2.6-pro", "muse-spark-1.3-max", "muse-spark-1.2 (xHigh)", "deepseek-v4-flash",
+		"claude-opus-4-6", "claude-opus-4-6-high", "kimi-k2.5-thinking", "gemini-3-flash (thinking-minimal)",
+		"claude-opus-4-5-20251101", "claude-opus-4-5-20251101-high-32k", "gpt-5", "o4-mini", "gpt-oss-120b"} {
+		models = append(models, ArenaModel{Name: n, Scores: map[string]ArenaScore{"overall": {Votes: 100}}})
+	}
+	st.load(arenaData{Models: models})
+	for id, want := range map[string]string{
+		"mimo-v2.6-flash-free":            "mimo-v2.6-flash",
+		"muse-spark-1.3-contributor-free": "muse-spark-1.3-max",
+		"muse-spark-1.2-contributor-free": "muse-spark-1.2 (xHigh)",
+		"deepseek-v4-flash-free":          "deepseek-v4-flash",
+		"claude-opus-4-6-thinking":        "claude-opus-4-6",
+		"claude-opus-4.5-thinking":        "claude-opus-4-5-20251101",
+		"kimi-k2.5-thinking":              "kimi-k2.5-thinking",
+		"gemini-3-flash-thinking":         "gemini-3-flash (thinking-minimal)",
+		"gpt-5-mini":                      "",
+		"gpt-oss-20b":                     "",
+		"space-bunny-free":                "",
+	} {
+		m, ok := st.match(id)
+		if got := map[bool]string{true: m.Name}[ok]; got != want {
+			t.Errorf("%s -> %q (%s), want %q", id, got, m.How, want)
+		}
+	}
+}

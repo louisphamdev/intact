@@ -144,7 +144,7 @@ func TestArenaMatchDropsTagsNotIdentity(t *testing.T) {
 	var models []ArenaModel
 	for _, n := range []string{"mimo-v2.6-flash", "mimo-v2.6-pro", "muse-spark-1.3-max", "muse-spark-1.2 (xHigh)", "deepseek-v4-flash",
 		"claude-opus-4-6", "claude-opus-4-6-high", "kimi-k2.5-thinking", "gemini-3-flash (thinking-minimal)",
-		"claude-opus-4-5-20251101", "claude-opus-4-5-20251101-high-32k", "gpt-5", "o4-mini", "gpt-oss-120b"} {
+		"claude-opus-4-5-20251101", "claude-opus-4-5-20251101-high-32k", "gpt-5", "o4-mini", "gpt-oss-120b", "gpt-4-0613", "gpt-4o"} {
 		models = append(models, ArenaModel{Name: n, Scores: map[string]ArenaScore{"overall": {Votes: 100}}})
 	}
 	st.load(arenaData{Models: models})
@@ -159,6 +159,7 @@ func TestArenaMatchDropsTagsNotIdentity(t *testing.T) {
 		"gemini-3-flash-thinking":         "gemini-3-flash (thinking-minimal)",
 		"gpt-5-mini":                      "",
 		"gpt-oss-20b":                     "",
+		"gpt-4-o-preview":                 "",
 		"space-bunny-free":                "",
 	} {
 		m, ok := st.match(id)

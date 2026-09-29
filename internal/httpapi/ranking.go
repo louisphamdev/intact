@@ -176,8 +176,8 @@ func votes(m ArenaModel) int {
 // match finds the leaderboard entry of a model id: the same normalised name,
 // else that name with mode words after it (the most voted one). Failing both,
 // trailing tokens are dropped one at a time while each is a mode word or a
-// word no board name uses; a token with a digit (a version, a size) or a word
-// the board knows (mini, air) names another model and stops the search.
+// word of 3+ letters no board name uses. A digit (a version, a size), a word
+// the board knows (mini, air) or a letter (the o of gpt-4-o) stops the search.
 func (st *arenaState) match(id string) (ArenaMatch, bool) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -185,7 +185,7 @@ func (st *arenaState) match(id string) (ArenaMatch, bool) {
 	for k := len(toks); k >= 1; k-- {
 		if k < len(toks) {
 			tok := toks[k]
-			if !modeToken(tok) && (st.vocab[tok] || strings.ContainsAny(tok, "0123456789")) {
+			if !modeToken(tok) && (st.vocab[tok] || len(tok) < 3 || strings.ContainsAny(tok, "0123456789")) {
 				break
 			}
 		}

@@ -992,7 +992,9 @@ function viewProvider(v,p){
   v.append(card);
   // Keep "next" current while the page is open.
   if(list.length>1&&ok){const poll=async()=>{if(!card.isConnected)return;
-    if(!document.hidden){try{rot=await api('/providers/'+p+'/rotation');paint()}catch(e){}}setTimeout(poll,5000)};poll()}
+    // A repaint rebuilds the rows and drops keyboard focus, so it runs only
+    // when the rotation state changed.
+    if(!document.hidden){try{const r=await api('/providers/'+p+'/rotation');if(JSON.stringify(r)!==JSON.stringify(rot)){rot=r;paint()}}catch(e){}}setTimeout(poll,5000)};poll()}
   if(ok&&activeOf(p).length)v.append(modelTable(p));
   loadAcctTests();
 }

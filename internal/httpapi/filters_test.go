@@ -39,7 +39,7 @@ func TestFiltersApplyToTheOutgoingRequest(t *testing.T) {
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/messages",
-		strings.NewReader(`{"model":"claude/x","context_management":{"a":1},"temperature":0.5,"messages":[]}`)))
+		strings.NewReader(`{"model":"claude/x","max_tokens":1,"context_management":{"a":1},"temperature":0.5,"messages":[]}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("code=%d body=%s", rec.Code, rec.Body.String())
 	}

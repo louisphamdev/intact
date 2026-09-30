@@ -116,8 +116,11 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	go a.contractPruneLoop()
 	mux := http.NewServeMux()
 	// One base URL: the model in the body picks the provider and its accounts.
-	mux.HandleFunc("GET /v1/models", a.requireToken(a.models))
-	mux.HandleFunc("/v1/{path...}", a.requireToken(a.v1))
+	// The contract of /v1 is public, like the API it describes.
+	mux.HandleFunc("GET /openapi.json", serveOpenAPI)
+	mux.HandleFunc("GET /v1/models", v1API(a.requireToken(a.models)))
+	mux.HandleFunc("GET /v1/models/{model...}", v1API(a.requireToken(a.model)))
+	mux.HandleFunc("/v1/{path...}", v1API(a.requireToken(a.v1)))
 	// Management API for machines: the same token as /v1.
 	mux.HandleFunc("GET /api/providers", a.requireToken(a.apiProviders))
 	mux.HandleFunc("GET /api/accounts", a.requireToken(a.accounts))

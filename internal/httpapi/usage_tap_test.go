@@ -35,9 +35,10 @@ func TestProxyRecordsUsageWithoutAlteringTheResponse(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
-	// The tap must not touch the bytes the caller receives.
-	if rec.Body.String() != respBody {
-		t.Fatalf("response altered by the tap:\n got %s\nwant %s", rec.Body.String(), respBody)
+	// The tap must not touch the bytes the caller receives; only the model id
+	// goes back to the one the caller sent.
+	if want := strings.Replace(respBody, `"model":"llama-3.3-70b-versatile"`, `"model":"groq/llama-3.3-70b-versatile"`, 1); rec.Body.String() != want {
+		t.Fatalf("response altered by the tap:\n got %s\nwant %s", rec.Body.String(), want)
 	}
 
 	rows, err := s.Usage()
@@ -102,7 +103,7 @@ func TestProxyRecordsUsageWhenGzipEncoded(t *testing.T) {
 
 	h := New(s, map[string]string{"claude": up.URL})
 	rec := httptest.NewRecorder()
-	req := loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m"}`))
+	req := loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m","max_tokens":1}`))
 	// The client accepts gzip, so the proxy forwards it and Go does not
 	// auto-decompress the upstream response. This is the case that broke usage.
 	req.Header.Set("Accept-Encoding", "gzip")
@@ -144,9 +145,9 @@ func TestProxyRecordsUsageOnStreamLargerThanTapLimit(t *testing.T) {
 
 	h := New(s, map[string]string{"claude": up.URL})
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m"}`)))
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m","max_tokens":1}`)))
 
-	if rec.Body.String() != stream {
+	if want := strings.Replace(stream, `"model":"claude-opus-4-8"`, `"model":"claude/m"`, 1); rec.Body.String() != want {
 		t.Fatalf("caller stream altered")
 	}
 	rows, _ := s.Usage()

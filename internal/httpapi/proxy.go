@@ -111,9 +111,7 @@ func (a *api) relayObserved(w http.ResponseWriter, resp *http.Response, connID, 
 		if hopByHop[k] {
 			continue
 		}
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
+		copyHeader(w.Header(), k, vs)
 	}
 	w.WriteHeader(resp.StatusCode)
 	tapped, clientErr, upstreamErr := streamBody(w, resp, cap)
@@ -260,8 +258,13 @@ func (t *respTap) bytes() []byte {
 	return out
 }
 
-// writeError replies with a JSON body that never names a credential.
+// writeError replies with a JSON body that never names a credential; on /v1
+// in the caller's API envelope.
 func writeError(w http.ResponseWriter, status int, msg string) {
+	writeAPIError(w, status, "", "", msg)
+}
+
+func writeLegacyError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	b, _ := json.Marshal(map[string]string{"error": msg})
@@ -329,4 +332,18 @@ func keyIDOf(resp *http.Response) string {
 		return ""
 	}
 	return principalOf(resp.Request).keyID
+}
+
+// copyHeader relays one upstream header. A request id replaces intact's own
+// instead of adding a second value.
+func copyHeader(h http.Header, k string, vs []string) {
+	for _, id := range requestIDHeaders {
+		if k == id {
+			h[k] = append([]string(nil), vs...)
+			return
+		}
+	}
+	for _, v := range vs {
+		h.Add(k, v)
+	}
 }

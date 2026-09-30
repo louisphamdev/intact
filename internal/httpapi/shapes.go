@@ -18,7 +18,8 @@ import (
 
 // A request reaches a provider in the provider's own shape. When the caller
 // speaks the same shape, the bytes pass through untouched both ways; that is
-// the point of intact. Only when the shapes differ is the request translated,
+// the point of intact. The one edit is the model id, which intact stripped of
+// its provider prefix on the way in and puts back on the way out (replyEditor). Only when the shapes differ is the request translated,
 // with OpenAI Chat Completions as the hub: caller → chat → provider on the way
 // in, provider → chat chunks → caller on the way out.
 
@@ -123,9 +124,7 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 		if hopByHop[k] || k == "Content-Length" || k == "Content-Type" || k == "Content-Encoding" {
 			continue
 		}
-		for _, v := range vs {
-			w.Header().Add(k, v)
-		}
+		copyHeader(w.Header(), k, vs)
 	}
 	// Codex streams its events under a Content-Type of application/json, so a
 	// shape that only ever streams is read as a stream whatever the header says.
@@ -146,9 +145,15 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if resp.StatusCode >= 400 {
-			w.WriteHeader(resp.StatusCode)
-			_, writeErr := w.Write(translate.Error(resp.StatusCode, body, to))
+		// An error body under 200 is still an error: the caller's SDK would
+		// otherwise read it as an answer.
+		status := resp.StatusCode
+		if status < 400 && isErrorBody(body) {
+			status = http.StatusBadGateway
+		}
+		if status >= 400 {
+			w.WriteHeader(status)
+			_, writeErr := w.Write(translate.Error(status, body, to))
 			if cap != nil {
 				_ = cap.Seal(false, writeErr, nil)
 			}

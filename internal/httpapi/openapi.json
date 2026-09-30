@@ -1,0 +1,239 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "intact",
+    "version": "1",
+    "description": "One base URL for many LLM providers. The model in the request body selects the provider: send \"<provider>/<model>\", or a bare model id that one provider serves. OpenAI Chat Completions, Anthropic Messages and OpenAI Responses callers use the same URL. Each caller gets answers and errors in its own API shape."
+  },
+  "servers": [{ "url": "/" }],
+  "security": [{ "bearer": [] }, { "apiKey": [] }],
+  "paths": {
+    "/v1/models": {
+      "get": {
+        "summary": "List the models that an active account serves",
+        "responses": {
+          "200": { "description": "The model list", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ModelList" } } } },
+          "401": { "$ref": "#/components/responses/OpenAIError" }
+        }
+      }
+    },
+    "/v1/models/{model}": {
+      "get": {
+        "summary": "Read one model",
+        "parameters": [{
+          "name": "model", "in": "path", "required": true,
+          "description": "\"<provider>/<model>\", or a bare id that one provider serves. The slash can also be sent as %2F.",
+          "schema": { "type": "string" }
+        }],
+        "responses": {
+          "200": { "description": "The model", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Model" } } } },
+          "404": { "$ref": "#/components/responses/OpenAIError" }
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "summary": "OpenAI Chat Completions",
+        "description": "The body follows the OpenAI Chat Completions request. The answer follows the OpenAI answer, whole or streamed. The model in the answer is the model id that the caller sent.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChatRequest" } } } },
+        "responses": {
+          "200": {
+            "description": "A chat.completion object, or a text/event-stream of chat.completion.chunk objects that ends with data: [DONE]",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ChatCompletion" } },
+              "text/event-stream": { "schema": { "type": "string" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/OpenAIError" },
+          "401": { "$ref": "#/components/responses/OpenAIError" },
+          "403": { "$ref": "#/components/responses/OpenAIError" },
+          "404": { "$ref": "#/components/responses/OpenAIError" },
+          "405": { "$ref": "#/components/responses/OpenAIError" },
+          "429": { "$ref": "#/components/responses/OpenAIError" },
+          "502": { "$ref": "#/components/responses/OpenAIError" }
+        }
+      }
+    },
+    "/v1/messages": {
+      "post": {
+        "summary": "Anthropic Messages",
+        "description": "The body follows the Anthropic Messages request. max_tokens is required. The answer follows the Anthropic answer, whole or as the Messages event stream. When the caller enables thinking, the reasoning of an OpenAI-shaped provider is sent as thinking blocks with an empty signature.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MessagesRequest" } } } },
+        "responses": {
+          "200": {
+            "description": "A message object, or a text/event-stream of Messages events",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Message" } },
+              "text/event-stream": { "schema": { "type": "string" } }
+            }
+          },
+          "400": { "$ref": "#/components/responses/AnthropicError" },
+          "401": { "$ref": "#/components/responses/AnthropicError" },
+          "403": { "$ref": "#/components/responses/AnthropicError" },
+          "404": { "$ref": "#/components/responses/AnthropicError" },
+          "405": { "$ref": "#/components/responses/AnthropicError" },
+          "429": { "$ref": "#/components/responses/AnthropicError" },
+          "502": { "$ref": "#/components/responses/AnthropicError" }
+        }
+      }
+    },
+    "/v1/messages/count_tokens": {
+      "post": {
+        "summary": "Count the input tokens of a Messages request",
+        "description": "An Anthropic provider counts the tokens. For other providers, intact estimates four bytes per token.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MessagesRequest" } } } },
+        "responses": {
+          "200": {
+            "description": "The count",
+            "content": { "application/json": { "schema": { "type": "object", "required": ["input_tokens"], "properties": { "input_tokens": { "type": "integer" } } } } }
+          },
+          "400": { "$ref": "#/components/responses/AnthropicError" }
+        }
+      }
+    },
+    "/v1/responses": {
+      "post": {
+        "summary": "OpenAI Responses",
+        "description": "The body follows the OpenAI Responses request. Errors use the OpenAI error envelope.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["model"], "properties": { "model": { "type": "string" } } } } } },
+        "responses": {
+          "200": { "description": "A response object, or its event stream" },
+          "400": { "$ref": "#/components/responses/OpenAIError" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": { "type": "http", "scheme": "bearer", "description": "The master token, or a key made in the dashboard (sk-intact-...)" },
+      "apiKey": { "type": "apiKey", "in": "header", "name": "x-api-key", "description": "The same token, in the header that Anthropic clients send" }
+    },
+    "headers": {
+      "RequestId": { "description": "One id per call. When the provider sends its own request id, that id replaces this one.", "schema": { "type": "string" } }
+    },
+    "responses": {
+      "OpenAIError": {
+        "description": "An error in the OpenAI envelope",
+        "headers": { "Request-Id": { "$ref": "#/components/headers/RequestId" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OpenAIError" } } }
+      },
+      "AnthropicError": {
+        "description": "An error in the Anthropic envelope",
+        "headers": { "Request-Id": { "$ref": "#/components/headers/RequestId" } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AnthropicError" } } }
+      }
+    },
+    "schemas": {
+      "OpenAIError": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["message", "type", "param", "code"],
+            "properties": {
+              "message": { "type": "string" },
+              "type": { "type": "string" },
+              "param": { "type": ["string", "null"] },
+              "code": { "type": ["string", "null"], "examples": ["invalid_api_key", "model_not_found", "rate_limit_exceeded"] }
+            }
+          }
+        }
+      },
+      "AnthropicError": {
+        "type": "object",
+        "required": ["type", "error"],
+        "properties": {
+          "type": { "const": "error" },
+          "error": {
+            "type": "object",
+            "required": ["type", "message"],
+            "properties": {
+              "type": {
+                "enum": ["invalid_request_error", "authentication_error", "permission_error", "not_found_error", "request_too_large",
+                         "rate_limit_error", "api_error", "timeout_error", "overloaded_error", "billing_error"]
+              },
+              "message": { "type": "string" }
+            }
+          }
+        }
+      },
+      "Model": {
+        "type": "object",
+        "description": "Both vocabularies in one object: OpenAI reads object, created and owned_by. Anthropic reads type, display_name and created_at. created is the time intact read the provider list.",
+        "required": ["id", "object", "created", "owned_by", "type", "display_name", "created_at"],
+        "properties": {
+          "id": { "type": "string", "examples": ["zencore/space-bunny-free"] },
+          "object": { "const": "model" },
+          "created": { "type": "integer" },
+          "owned_by": { "type": "string" },
+          "type": { "const": "model" },
+          "display_name": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "context_length": { "type": "integer", "description": "Extension: the context window, when the provider gives it" },
+          "max_input_tokens": { "type": "integer", "description": "Extension" },
+          "max_output_tokens": { "type": "integer", "description": "Extension" }
+        }
+      },
+      "ModelList": {
+        "type": "object",
+        "required": ["object", "data"],
+        "properties": {
+          "object": { "const": "list" },
+          "data": { "type": "array", "items": { "$ref": "#/components/schemas/Model" } },
+          "has_more": { "type": "boolean" },
+          "first_id": { "type": "string" },
+          "last_id": { "type": "string" }
+        }
+      },
+      "ChatRequest": {
+        "type": "object",
+        "description": "The OpenAI Chat Completions request. Only model is read by intact; the provider reads the rest.",
+        "required": ["model", "messages"],
+        "properties": {
+          "model": { "type": "string" },
+          "messages": { "type": "array" },
+          "stream": { "type": "boolean" },
+          "stream_options": { "type": "object", "properties": { "include_usage": { "type": "boolean" } } }
+        }
+      },
+      "ChatCompletion": {
+        "type": "object",
+        "required": ["id", "object", "created", "model", "choices"],
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "const": "chat.completion" },
+          "created": { "type": "integer" },
+          "model": { "type": "string", "description": "The model id that the caller sent" },
+          "choices": { "type": "array" },
+          "usage": { "type": "object" }
+        }
+      },
+      "MessagesRequest": {
+        "type": "object",
+        "required": ["model", "max_tokens", "messages"],
+        "properties": {
+          "model": { "type": "string" },
+          "max_tokens": { "type": "integer", "minimum": 1 },
+          "messages": { "type": "array" },
+          "stream": { "type": "boolean" },
+          "thinking": { "type": "object", "properties": { "type": { "enum": ["enabled", "adaptive", "disabled"] }, "budget_tokens": { "type": "integer" } } }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "required": ["id", "type", "role", "model", "content", "stop_reason", "stop_sequence", "usage"],
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "const": "message" },
+          "role": { "const": "assistant" },
+          "model": { "type": "string", "description": "The model id that the caller sent" },
+          "content": { "type": "array" },
+          "stop_reason": { "enum": ["end_turn", "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal", null] },
+          "stop_sequence": { "type": ["string", "null"] },
+          "usage": { "type": "object", "required": ["input_tokens", "output_tokens"] }
+        }
+      }
+    }
+  }
+}

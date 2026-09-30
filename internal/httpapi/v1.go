@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -93,8 +94,22 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 	original := body
 	model, ok := bodyModel(body)
 	if !ok || model == "" {
-		writeError(w, http.StatusBadRequest, "the request names no model; send \"model\": \"<provider>/<model>\" or a model id")
+		switch {
+		case clientShape(r.PathValue("path")) != "" && r.Method != http.MethodPost:
+			w.Header().Set("Allow", http.MethodPost)
+			writeError(w, http.StatusMethodNotAllowed, "Method "+r.Method+" is not allowed on "+r.URL.Path+"; use POST")
+		case len(bytes.TrimSpace(body)) == 0 && r.Method != http.MethodPost:
+			writeError(w, http.StatusNotFound, "Unknown request URL: "+r.Method+" "+r.URL.Path)
+		default:
+			writeAPIError(w, http.StatusBadRequest, "", "model", "the request names no model; send \"model\": \"<provider>/<model>\" or a model id")
+		}
 		return
+	}
+	if r.PathValue("path") == "messages" {
+		if msg := checkMaxTokens(body); msg != "" {
+			writeAPIError(w, http.StatusBadRequest, "", "max_tokens", msg)
+			return
+		}
 	}
 	prov, upstreamModel := a.splitModel(model)
 	caller := principalOf(r)
@@ -180,7 +195,7 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		if cap != nil {
 			cap.ReleaseOnAbort()
 		}
-		writeError(w, http.StatusNotFound, "no active account serves this model")
+		writeAPIError(w, http.StatusNotFound, "model_not_found", "model", "no active account serves this model")
 		return
 	}
 	// The client's own request, before intact changes anything, is what shows
@@ -277,19 +292,54 @@ func (a *api) providersServing(ctx context.Context, model string) []string {
 // models answers GET /v1/models with every provider's models, each named
 // "<provider>/<model>" so the id a client picks routes back to one provider.
 func (a *api) models(w http.ResponseWriter, r *http.Request) {
-	// One entry serves both vocabularies: OpenAI reads object and owned_by,
-	// Anthropic reads type and display_name.
-	type entry struct {
-		ID          string `json:"id"`
-		Object      string `json:"object"`
-		OwnedBy     string `json:"owned_by"`
-		Type        string `json:"type"`
-		DisplayName string `json:"display_name"`
-		// Token limits, when the provider's list gives them.
-		ContextLength   int64 `json:"context_length,omitempty"`
-		MaxInputTokens  int64 `json:"max_input_tokens,omitempty"`
-		MaxOutputTokens int64 `json:"max_output_tokens,omitempty"`
+	data := a.modelEntries(r.Context())
+	first, last := "", ""
+	if len(data) > 0 {
+		first, last = data[0].ID, data[len(data)-1].ID
 	}
+	writeJSON(w, map[string]any{"object": "list", "data": data, "has_more": false, "first_id": first, "last_id": last})
+}
+
+// model serves one entry of the list, by "<provider>/<model>" or by a bare id
+// that only one provider lists.
+func (a *api) model(w http.ResponseWriter, r *http.Request) {
+	want := r.PathValue("model")
+	var bare []modelEntry
+	for _, e := range a.modelEntries(r.Context()) {
+		if e.ID == want {
+			writeJSON(w, e)
+			return
+		}
+		if strings.HasSuffix(e.ID, "/"+want) {
+			bare = append(bare, e)
+		}
+	}
+	if len(bare) == 1 {
+		writeJSON(w, bare[0])
+		return
+	}
+	writeAPIError(w, http.StatusNotFound, "model_not_found", "model", "model "+strconv.Quote(want)+" is not served")
+}
+
+// modelEntry serves both vocabularies: OpenAI reads object, created and
+// owned_by, Anthropic reads type, display_name and created_at.
+type modelEntry struct {
+	ID          string `json:"id"`
+	Object      string `json:"object"`
+	Created     int64  `json:"created"`
+	OwnedBy     string `json:"owned_by"`
+	Type        string `json:"type"`
+	DisplayName string `json:"display_name"`
+	CreatedAt   string `json:"created_at"`
+	// Token limits, when the provider's list gives them.
+	ContextLength   int64 `json:"context_length,omitempty"`
+	MaxInputTokens  int64 `json:"max_input_tokens,omitempty"`
+	MaxOutputTokens int64 `json:"max_output_tokens,omitempty"`
+}
+
+// modelEntries lists every model an active account serves. A provider list
+// gives no creation date, so created is when intact read the list.
+func (a *api) modelEntries(ctx context.Context) []modelEntry {
 	provs := a.activeProviders()
 	lists := make([][]string, len(provs))
 	var wg sync.WaitGroup
@@ -297,26 +347,26 @@ func (a *api) models(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(i int, p string) {
 			defer wg.Done()
-			lists[i] = a.providerModels(r.Context(), p)
+			lists[i] = a.providerModels(ctx, p)
 		}(i, p)
 	}
 	wg.Wait()
-	data := []entry{}
+	data := []modelEntry{}
 	for i, p := range provs {
 		a.cat.mu.Lock()
-		infos := a.cat.m[p].info
+		infos, at := a.cat.m[p].info, a.cat.m[p].at
 		a.cat.mu.Unlock()
+		if at.IsZero() {
+			at = time.Now()
+		}
 		for _, id := range lists[i] {
 			in := infos[id]
-			data = append(data, entry{ID: p + "/" + id, Object: "model", OwnedBy: p, Type: "model", DisplayName: p + "/" + id,
+			data = append(data, modelEntry{ID: p + "/" + id, Object: "model", Created: at.Unix(), OwnedBy: p,
+				Type: "model", DisplayName: p + "/" + id, CreatedAt: at.UTC().Format(time.RFC3339),
 				ContextLength: in.Context, MaxInputTokens: in.Input, MaxOutputTokens: in.Output})
 		}
 	}
-	first, last := "", ""
-	if len(data) > 0 {
-		first, last = data[0].ID, data[len(data)-1].ID
-	}
-	writeJSON(w, map[string]any{"object": "list", "data": data, "has_more": false, "first_id": first, "last_id": last})
+	return data
 }
 
 // activeProviders returns the registered providers that have an active account.
@@ -689,6 +739,14 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			writeError(w, http.StatusBadRequest, "cannot translate the request: "+err.Error())
 			return
 		}
+		// A same-shape Chat Completions stream is asked for its usage so intact
+		// can count it; the editor below takes it out again for the caller.
+		injected := false
+		if to == "" && client == translate.OpenAI {
+			if want, _ := shapeFor(p, model); want == translate.OpenAI {
+				send, injected = withUsage(send)
+			}
+		}
 		send = filterFor(a, p, conn.Provider, send)
 		tried++
 		resp, err := a.sendLogged(r, p, conn, path, secret, send, model)
@@ -751,11 +809,21 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			// The model that answered, when intact chose it (a level variant).
 			w.Header().Set("X-Intact-Model", at.model)
 		}
-		if to != "" {
-			a.relayVia(w, resp, conn.ID, to, via, stream, tools, reply, conn.Provider, path, cap)
-		} else {
-			a.relayObserved(w, resp, conn.ID, conn.Provider, path, cap)
+		// The answer names the model the caller asked for, prefix included.
+		callerModel, _ := r.Context().Value(callerModelKey{}).(string)
+		out, finish := w, func() {}
+		switch {
+		case to == "" && client != "":
+			out, finish = newReplyEditor(w, callerModel, model, injected)
+		case to == translate.OpenAI:
+			out, finish = newReplyEditor(w, callerModel, model, false)
 		}
+		if to != "" {
+			a.relayVia(out, resp, conn.ID, to, via, stream, tools, reply, conn.Provider, path, cap)
+		} else {
+			a.relayObserved(out, resp, conn.ID, conn.Provider, path, cap)
+		}
+		finish()
 		return
 	}
 	if cap != nil {
@@ -838,4 +906,22 @@ func modelNote(m string) string {
 		return ""
 	}
 	return " on " + m
+}
+
+// checkMaxTokens refuses a Messages request whose max_tokens is missing or not
+// a positive integer, as the Messages API does; it returns the reason. A body
+// that is not JSON is left to the translation, which names that fault.
+func checkMaxTokens(body []byte) string {
+	var in map[string]json.RawMessage
+	if json.Unmarshal(body, &in) != nil {
+		return ""
+	}
+	raw, ok := in["max_tokens"]
+	if !ok {
+		return "max_tokens: Field required"
+	}
+	if n, err := strconv.ParseInt(string(raw), 10, 64); err != nil || n < 1 {
+		return "max_tokens: Input should be a positive integer"
+	}
+	return ""
 }

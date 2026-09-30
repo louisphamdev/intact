@@ -133,7 +133,7 @@ func TestV1AcceptsXAPIKeyAndDoesNotForwardIt(t *testing.T) {
 	cfg := authConfig()
 	h := NewWithAuth(s, map[string]string{"claude": up.URL}, cfg)
 
-	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/claude-sonnet-5"}`))
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/claude-sonnet-5","max_tokens":1}`))
 	req.Header.Set("X-Api-Key", cfg.APIToken)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

@@ -161,7 +161,7 @@ func TestProxyAppliesClassAIdentityAndDefaults(t *testing.T) {
 	}
 
 	h := New(s, map[string]string{"claude": up.URL})
-	req := loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m"}`))
+	req := loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m","max_tokens":1}`))
 	// The caller sends its own identity and its own feature selection.
 	req.Header.Set("User-Agent", "some-other-client/1.0")
 	req.Header.Set("Anthropic-Beta", "caller-chose-this")
@@ -189,7 +189,7 @@ func TestV1RejectsProviderWithNoAccount(t *testing.T) {
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
 	h := New(s, nil)
-	req := loopbackRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"claude/m"}`))
+	req := loopbackRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"claude/m","max_tokens":1}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {

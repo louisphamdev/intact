@@ -302,6 +302,16 @@ func effortForBudget(budget int64) string {
 	return "high"
 }
 
+// adaptiveEffort maps Anthropic's output_config.effort, which adaptive
+// thinking reads, to reasoning_effort. OpenAI's scale ends at high.
+func adaptiveEffort(effort string) string {
+	switch effort {
+	case "low", "medium":
+		return effort
+	}
+	return "high"
+}
+
 func oaToolChoice(v any) obj {
 	switch c := v.(type) {
 	case string:
@@ -358,9 +368,13 @@ func AnthropicToOpenAI(body []byte) ([]byte, error) {
 			case "text":
 				parts = append(parts, obj{"type": "text", "text": blk["text"]})
 			case "image":
-				if u := imageURL(asObj(blk["source"])); u != "" {
-					parts = append(parts, obj{"type": "image_url", "image_url": obj{"url": u}})
+				u := imageURL(asObj(blk["source"]))
+				if u == "" {
+					return nil, fmt.Errorf("an image source of type %q is not supported by this provider", str(asObj(blk["source"])["type"]))
 				}
+				parts = append(parts, obj{"type": "image_url", "image_url": obj{"url": u}})
+			case "document":
+				return nil, errors.New("document blocks are not supported by this provider")
 			case "tool_use":
 				args, _ := json.Marshal(blk["input"])
 				calls = append(calls, obj{"id": blk["id"], "type": "function",
@@ -369,13 +383,26 @@ func AnthropicToOpenAI(body []byte) ([]byte, error) {
 				// A tool result is its own message in OpenAI, and it must follow
 				// the assistant turn that called the tool, before any user text.
 				content := blk["content"]
+				var images []any
 				if l, ok := content.([]any); ok {
 					content = joinText(l)
+					for _, p := range l {
+						if pb := asObj(p); str(pb["type"]) == "image" {
+							if u := imageURL(asObj(pb["source"])); u != "" {
+								images = append(images, obj{"type": "image_url", "image_url": obj{"url": u}})
+							}
+						}
+					}
 				}
 				if e, _ := blk["is_error"].(bool); e {
 					content = "Error: " + str(content)
 				}
 				msgs = append(msgs, obj{"role": "tool", "tool_call_id": blk["tool_use_id"], "content": str(content)})
+				// A tool message carries text only, so its images follow it as
+				// a user turn instead of being lost.
+				if len(images) > 0 {
+					msgs = append(msgs, obj{"role": "user", "content": images})
+				}
 			}
 		}
 		if role == "assistant" {
@@ -399,8 +426,11 @@ func AnthropicToOpenAI(body []byte) ([]byte, error) {
 			out[k] = v
 		}
 	}
-	if th := asObj(in["thinking"]); str(th["type"]) == "enabled" {
+	switch th := asObj(in["thinking"]); str(th["type"]) {
+	case "enabled":
 		out["reasoning_effort"] = effortForBudget(num(th["budget_tokens"]))
+	case "adaptive":
+		out["reasoning_effort"] = adaptiveEffort(str(asObj(in["output_config"])["effort"]))
 	}
 	if s, ok := in["stream"].(bool); ok {
 		out["stream"] = s
@@ -439,7 +469,9 @@ func AnthropicToOpenAI(body []byte) ([]byte, error) {
 			out["tools"] = ts
 		}
 	}
-	if tc := asObj(in["tool_choice"]); tc != nil {
+	// A tool_choice with no function tool left (only server tools) would be
+	// refused upstream, so it goes with them.
+	if tc := asObj(in["tool_choice"]); tc != nil && out["tools"] != nil {
 		switch str(tc["type"]) {
 		case "auto":
 			out["tool_choice"] = "auto"

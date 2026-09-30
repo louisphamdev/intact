@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -227,7 +228,8 @@ func TestV1ModelsCarryTokenLimits(t *testing.T) {
 	h := New(s, map[string]string{"groq": f.start(t)})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, loopbackRequest("GET", "/v1/models", nil))
-	body := rec.Body.String()
+	// created is when intact read the list, so it is left out of the match.
+	body := regexp.MustCompile(`"created":\d+,|,"created_at":"[^"]*"`).ReplaceAllString(rec.Body.String(), "")
 	for _, want := range []string{
 		`{"id":"groq/big","object":"model","owned_by":"groq","type":"model","display_name":"groq/big","context_length":1048576,"max_output_tokens":65536}`,
 		`{"id":"groq/small","object":"model","owned_by":"groq","type":"model","display_name":"groq/small","context_length":200000}`,

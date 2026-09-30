@@ -14,7 +14,16 @@ An API key calls the proxy and reads the management API. It does not manage
 intact. Every route marked **admin** below needs the master token or the
 session. [Security](security.md) lists the same routes and the masked reads.
 
-Errors are JSON: `{"error":{"message":"…"}}`.
+Errors are JSON. On `/v1`, each caller gets the envelope of its own API:
+
+| Path | Envelope |
+| --- | --- |
+| `/v1/messages`, `/v1/messages/*` | Anthropic: `{"type":"error","error":{"type":"not_found_error","message":"…"}}` |
+| every other `/v1` path | OpenAI: `{"error":{"message":"…","type":"…","param":null,"code":null}}` |
+| management and dashboard routes | `{"error":"…"}` |
+
+An unknown `/v1` path gets 404. A known path with the wrong method gets 405.
+intact does not serve a CORS preflight on `/v1`, and answers `OPTIONS` with 405.
 
 ## Proxy (token)
 
@@ -22,12 +31,18 @@ Errors are JSON: `{"error":{"message":"…"}}`.
 | --- | --- |
 | `GET /v1/models` | Every model that is on, as `<provider>/<model>`. The format serves both OpenAI (`object`, `owned_by`) and Anthropic (`type`, `display_name`) clients. |
 | `POST /v1/chat/completions` | OpenAI shape, to any provider. |
-| `POST /v1/messages` | Anthropic shape, to any provider. |
+| `GET /v1/models/{model}` | One model, by `<provider>/<model>` or by a bare id that one provider serves. |
+| `POST /v1/messages` | Anthropic shape, to any provider. `max_tokens` is required, as at Anthropic. |
 | `POST /v1/messages/count_tokens` | Anthropic token count; estimated when no Anthropic account serves the model. |
 | `* /v1/{path}` | Any other path, passed through to the provider at that path (`/v1/responses`, `/v1/systemone`, …). |
 
-Response header: `X-Intact-Model`, the upstream model that answered, when
-intact picked it (Antigravity variants). See [Routing](routing.md).
+Response headers:
+- `X-Intact-Model`: the upstream model that answered, when intact picked it
+  (Antigravity variants). See [Routing](routing.md).
+- `Request-Id` and `X-Request-Id`: one id per call. When the provider sends its
+  own request id, that id replaces the id of intact.
+
+`GET /openapi.json` (**open**) is the OpenAPI 3.1 document of this surface.
 
 ## Management API (token, some admin)
 

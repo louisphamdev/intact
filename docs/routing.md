@@ -37,7 +37,15 @@ provider's, intact translates:
   shape.
 
 When the two shapes are the same, the bytes pass through untouched, at the
-provider's own path.
+provider's own path, with two exceptions:
+- The answer names the model id that the client sent, prefix included. intact
+  removes the prefix on the way in, so it puts the prefix back on the way out.
+- An OpenAI Chat stream always asks the provider for its usage, so that intact
+  can count the tokens. If the client did not ask for usage, intact removes the
+  usage chunk and the `"usage":null` fields before the client reads them.
+
+When the provider reasons and the client enabled thinking on `/v1/messages`,
+the reasoning arrives as `thinking` blocks with an empty signature.
 
 Details worth knowing:
 - **Codex and Antigravity answer only as a stream.** When the client did not

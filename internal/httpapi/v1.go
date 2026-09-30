@@ -72,6 +72,10 @@ type catalogFetch struct {
 	ids  []string
 }
 
+// callerModelKey carries the model id the caller sent, before the provider
+// prefix is removed, so a translated answer can name it back.
+type callerModelKey struct{}
+
 // v1 forwards a request to the accounts that serve the model named in its body.
 func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
@@ -192,7 +196,7 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	targets, start := a.startFor(model, targets)
-	a.failover(w, r, body, targets, start, cap)
+	a.failover(w, r.WithContext(context.WithValue(r.Context(), callerModelKey{}, model)), body, targets, start, cap)
 }
 
 // splitModel reads a "<provider>/<model>" prefix. It reports the provider only
@@ -598,6 +602,11 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 	if client == translate.Responses {
 		tools = translate.ResponsesTools(body)
 	}
+	var reply translate.Reply
+	if client == translate.Anthropic {
+		callerModel, _ := r.Context().Value(callerModelKey{}).(string)
+		reply = translate.ReplyFor(body, callerModel)
+	}
 	translated := map[string][]byte{}
 	tried := 0
 	attempts := a.attemptsFor(r.Context(), targets, start, body)
@@ -743,7 +752,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			w.Header().Set("X-Intact-Model", at.model)
 		}
 		if to != "" {
-			a.relayVia(w, resp, conn.ID, to, via, stream, tools, conn.Provider, path, cap)
+			a.relayVia(w, resp, conn.ID, to, via, stream, tools, reply, conn.Provider, path, cap)
 		} else {
 			a.relayObserved(w, resp, conn.ID, conn.Provider, path, cap)
 		}

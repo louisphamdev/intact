@@ -52,7 +52,7 @@ func CollectOpenAIStream(src io.Reader) []byte {
 		}
 		d := asObj(c["delta"])
 		text.WriteString(str(d["content"]))
-		reasoning.WriteString(str(d["reasoning_content"]))
+		reasoning.WriteString(reasoningOf(d))
 		for _, raw := range list(d["tool_calls"]) {
 			tc := asObj(raw)
 			i := int(num(tc["index"]))
@@ -82,11 +82,15 @@ func CollectOpenAIStream(src io.Reader) []byte {
 		b, _ := json.Marshal(obj{"error": errObj})
 		return b
 	}
-	// A cut-short stream (a read error, and neither [DONE] nor a finish_reason
-	// arrived) is not a finished answer: return an error envelope so relayVia
-	// answers non-200 instead of presenting partial text as complete.
-	if streamErr != nil && !sawDone && finish == "" {
-		b, _ := json.Marshal(obj{"error": obj{"message": "upstream stream ended early: " + streamErr.Error(), "type": "api_error"}})
+	// A stream that ended with neither [DONE] nor a finish_reason was cut
+	// short, by a read error or a clean close: return an error envelope so
+	// relayVia answers non-200 instead of presenting partial text as complete.
+	if !sawDone && finish == "" {
+		msg := "upstream stream ended early"
+		if streamErr != nil {
+			msg += ": " + streamErr.Error()
+		}
+		b, _ := json.Marshal(obj{"error": obj{"message": msg, "type": "api_error"}})
 		return b
 	}
 	msg := obj{"role": "assistant", "content": text.String()}

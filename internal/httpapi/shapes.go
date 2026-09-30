@@ -115,8 +115,9 @@ const maxTranslatedBody = 32 << 20
 
 // relayVia answers the caller in its own shape (to) from a response in the
 // provider's shape (via). stream is what the caller asked for; tools names the
-// Responses tools behind the chat tool names, for a Responses caller.
-func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, via string, stream bool, tools map[string]translate.ToolMeta, provider, path string, cap *contract.Capture) {
+// Responses tools behind the chat tool names, for a Responses caller; reply
+// says what a Messages caller's answer must carry.
+func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, via string, stream bool, tools map[string]translate.ToolMeta, reply translate.Reply, provider, path string, cap *contract.Capture) {
 	a.rate.capture(connID, resp.Header)
 	for k, vs := range resp.Header {
 		if hopByHop[k] || k == "Content-Length" || k == "Content-Type" || k == "Content-Encoding" {
@@ -147,13 +148,13 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 		w.Header().Set("Content-Type", "application/json")
 		if resp.StatusCode >= 400 {
 			w.WriteHeader(resp.StatusCode)
-			_, writeErr := w.Write(translate.Error(body, to))
+			_, writeErr := w.Write(translate.Error(resp.StatusCode, body, to))
 			if cap != nil {
 				_ = cap.Seal(false, writeErr, nil)
 			}
 			return
 		}
-		out, err := wholeToClient(body, via, to, tools)
+		out, err := wholeToClient(body, via, to, tools, reply)
 		if err != nil {
 			if cap != nil {
 				_ = cap.Seal(false, nil, err)
@@ -210,7 +211,7 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 		w.Header().Set("Cache-Control", "no-cache")
 		w.WriteHeader(resp.StatusCode)
 		ef := &errFlusher{flushWriter: out}
-		translate.OpenAIStreamToAnthropic(ef, chunks)
+		translate.OpenAIStreamToAnthropic(ef, chunks, reply)
 		clientErr = ef.err
 	default:
 		whole := translate.CollectOpenAIStream(chunks)
@@ -222,7 +223,7 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 		}
 		switch {
 		case to == translate.Anthropic:
-			if b, err := translate.OpenAIResponseToAnthropic(whole); err == nil {
+			if b, err := translate.OpenAIResponseToAnthropic(whole, reply); err == nil {
 				whole = b
 			}
 		case to == translate.Responses && status < 400:
@@ -274,7 +275,7 @@ func (a *api) toChatChunks(dst translate.Flusher, src io.Reader, via string) {
 }
 
 // wholeToClient converts a whole (non-streamed) response.
-func wholeToClient(body []byte, via, to string, tools map[string]translate.ToolMeta) ([]byte, error) {
+func wholeToClient(body []byte, via, to string, tools map[string]translate.ToolMeta, reply translate.Reply) ([]byte, error) {
 	hub := body
 	if via == translate.Anthropic {
 		var err error
@@ -284,7 +285,7 @@ func wholeToClient(body []byte, via, to string, tools map[string]translate.ToolM
 	}
 	switch to {
 	case translate.Anthropic:
-		return translate.OpenAIResponseToAnthropic(hub)
+		return translate.OpenAIResponseToAnthropic(hub, reply)
 	case translate.Responses:
 		return translate.OpenAIResponseToResponses(hub, tools)
 	}
@@ -369,5 +370,5 @@ func (a *api) anyAnthropic(targets []store.Connection) bool {
 // no such endpoint, with the usual four characters per token. Clients use it to
 // size a context, so an estimate serves them better than an error.
 func countTokensEstimate(w http.ResponseWriter, body []byte) {
-	writeJSON(w, map[string]any{"input_tokens": len(body)/4 + 1})
+	writeJSON(w, map[string]any{"input_tokens": translate.EstimateTokens(body)})
 }

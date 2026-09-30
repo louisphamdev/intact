@@ -30,7 +30,7 @@ func (c capFlush) Flush() error                { return nil }
 func TestOpenAIStreamTruncationDoesNotFakeCompletion(t *testing.T) {
 	var buf bytes.Buffer
 	src := &truncReader{s: `data: {"id":"chatcmpl-x","model":"m","choices":[{"delta":{"content":"hel"}}]}` + "\n\n"}
-	OpenAIStreamToAnthropic(capFlush{&buf}, src)
+	OpenAIStreamToAnthropic(capFlush{&buf}, src, Reply{})
 	out := buf.String()
 	if strings.Contains(out, "message_stop") || strings.Contains(out, "end_turn") {
 		t.Errorf("truncated stream emitted a clean finish:\n%s", out)
@@ -66,7 +66,7 @@ func TestOpenAIStreamParallelToolCallsKeepAllArgs(t *testing.T) {
 		sb.WriteString("data: " + l + "\n\n")
 	}
 	var buf bytes.Buffer
-	OpenAIStreamToAnthropic(capFlush{&buf}, strings.NewReader(sb.String()))
+	OpenAIStreamToAnthropic(capFlush{&buf}, strings.NewReader(sb.String()), Reply{})
 	out := buf.String()
 	if n := strings.Count(out, "input_json_delta"); n < 2 {
 		t.Errorf("want 2 tool-arg deltas, got %d:\n%s", n, out)

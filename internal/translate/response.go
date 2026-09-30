@@ -29,28 +29,80 @@ func num(v any) int64 {
 
 // ---- errors
 
+// anthropicErrorTypes are the error types the Messages API defines.
+var anthropicErrorTypes = map[string]bool{
+	"invalid_request_error": true, "authentication_error": true, "permission_error": true,
+	"not_found_error": true, "request_too_large": true, "rate_limit_error": true, "api_error": true,
+	"timeout_error": true, "overloaded_error": true, "billing_error": true,
+}
+
+// openaiErrorTypes maps the types OpenAI-shaped upstreams write to Anthropic's.
+var openaiErrorTypes = map[string]string{
+	"rate_limit_exceeded": "rate_limit_error", "requests": "rate_limit_error", "tokens": "rate_limit_error",
+	"server_error": "api_error", "insufficient_quota": "billing_error", "invalid_api_key": "authentication_error",
+}
+
+// AnthropicErrorType names the Messages error type for an upstream type and an
+// HTTP status; the status decides when the type is not one Anthropic knows.
+func AnthropicErrorType(status int, typ string) string {
+	if anthropicErrorTypes[typ] {
+		return typ
+	}
+	if t := openaiErrorTypes[typ]; t != "" {
+		return t
+	}
+	switch {
+	case status == 401:
+		return "authentication_error"
+	case status == 402:
+		return "billing_error"
+	case status == 403:
+		return "permission_error"
+	case status == 404:
+		return "not_found_error"
+	case status == 413:
+		return "request_too_large"
+	case status == 429:
+		return "rate_limit_error"
+	case status == 504:
+		return "timeout_error"
+	case status == 529 || status == 503:
+		return "overloaded_error"
+	case status >= 400 && status < 500:
+		return "invalid_request_error"
+	}
+	return "api_error"
+}
+
 // Error converts an upstream error body to the caller's shape. A body that is
 // not a recognised error is wrapped as the message.
-func Error(body []byte, to string) []byte {
-	msg, typ := string(body), "api_error"
+func Error(status int, body []byte, to string) []byte {
+	msg, typ, code := string(body), "", any(nil)
 	if m, err := decode(body); err == nil {
 		switch e := m["error"].(type) {
 		case obj:
 			if s := str(e["message"]); s != "" {
 				msg = s
 			}
-			if s := str(e["type"]); s != "" {
-				typ = s
+			typ = str(e["type"])
+			if s := str(e["code"]); s != "" {
+				code = s
 			}
 		case string:
 			msg = e
 		}
 	}
 	if to == Anthropic {
-		b, _ := json.Marshal(obj{"type": "error", "error": obj{"type": typ, "message": msg}})
+		b, _ := json.Marshal(obj{"type": "error", "error": obj{"type": AnthropicErrorType(status, typ), "message": msg}})
 		return b
 	}
-	b, _ := json.Marshal(obj{"error": obj{"message": msg, "type": typ}})
+	if typ == "" {
+		typ = "invalid_request_error"
+		if status >= 500 {
+			typ = "server_error"
+		}
+	}
+	b, _ := json.Marshal(obj{"error": obj{"message": msg, "type": typ, "param": nil, "code": code}})
 	return b
 }
 
@@ -63,7 +115,7 @@ var anthropicStop = map[string]string{
 
 var openaiStop = map[string]string{
 	"stop": "end_turn", "length": "max_tokens", "tool_calls": "tool_use",
-	"function_call": "tool_use", "content_filter": "end_turn",
+	"function_call": "tool_use", "content_filter": "refusal",
 }
 
 // AnthropicResponseToOpenAI converts a Messages response to a Chat Completion.
@@ -122,8 +174,88 @@ func openaiUsage(u obj) obj {
 	return o
 }
 
+// Reply is what the caller's request says about the Messages answer it expects.
+type Reply struct {
+	// Model is the id the caller sent. Empty keeps the upstream's.
+	Model string
+	// InputTokens goes into message_start: an OpenAI stream reports usage
+	// only at its end, and clients size their context from message_start.
+	InputTokens int64
+	// Thinking is set when the caller enabled thinking. Only then does the
+	// upstream's reasoning leave as thinking blocks, as the Messages API does.
+	Thinking bool
+}
+
+// ReplyFor reads a Messages request for what its answer must carry. model is
+// the id the caller sent, before intact removed its provider prefix.
+func ReplyFor(body []byte, model string) Reply {
+	r := Reply{Model: model, InputTokens: EstimateTokens(body)}
+	if in, err := decode(body); err == nil {
+		switch str(asObj(in["thinking"])["type"]) {
+		case "enabled", "adaptive":
+			r.Thinking = true
+		}
+	}
+	return r
+}
+
+// EstimateTokens counts a request at four bytes per token, the estimate
+// count_tokens answers with for a provider that cannot count.
+func EstimateTokens(body []byte) int64 { return int64(len(body)/4 + 1) }
+
+func (r Reply) model(upstream any) any {
+	if r.Model != "" {
+		return r.Model
+	}
+	return upstream
+}
+
+// messageID keeps the upstream id under Anthropic's prefix, and mints one when
+// the upstream sent none.
+func messageID(id string) string {
+	if id = strings.TrimPrefix(id, "chatcmpl-"); id == "" {
+		return newID("msg_")
+	}
+	return "msg_" + id
+}
+
+func toolID(id string) string {
+	if id == "" {
+		return newID("toolu_")
+	}
+	return id
+}
+
+// reasoningOf reads the thinking of a delta or message under any of the names
+// OpenAI-shaped upstreams use.
+func reasoningOf(m obj) string {
+	if s := str(m["reasoning_content"]); s != "" {
+		return s
+	}
+	if s := str(m["reasoning"]); s != "" {
+		return s
+	}
+	var b strings.Builder
+	for _, d := range list(m["reasoning_details"]) {
+		b.WriteString(str(asObj(d)["text"]))
+	}
+	return b.String()
+}
+
+// textOf reads message content given as a string or as text parts.
+func textOf(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	var b strings.Builder
+	for _, p := range list(v) {
+		b.WriteString(str(asObj(p)["text"]))
+	}
+	return b.String()
+}
+
 // OpenAIResponseToAnthropic converts a Chat Completion to a Messages response.
-func OpenAIResponseToAnthropic(body []byte) ([]byte, error) {
+func OpenAIResponseToAnthropic(body []byte, r Reply) ([]byte, error) {
 	in, err := decode(body)
 	if err != nil {
 		return nil, err
@@ -131,45 +263,54 @@ func OpenAIResponseToAnthropic(body []byte) ([]byte, error) {
 	// An error payload is not a message with no content: convert it to an
 	// Anthropic error so the caller sees the failure, not an empty success.
 	if e := asObj(in["error"]); e != nil {
-		etype := str(e["type"])
-		if etype == "" {
-			etype = "api_error"
-		}
-		return json.Marshal(obj{"type": "error", "error": obj{"type": etype, "message": str(e["message"])}})
+		return json.Marshal(obj{"type": "error", "error": obj{"type": AnthropicErrorType(0, str(e["type"])), "message": str(e["message"])}})
 	}
-	var content []any
+	content := []any{}
 	stop := "end_turn"
 	if ch := asObj(firstOf(in["choices"])); ch != nil {
 		msg := asObj(ch["message"])
-		if t := str(msg["content"]); t != "" {
+		if t := reasoningOf(msg); t != "" && r.Thinking {
+			content = append(content, obj{"type": "thinking", "thinking": t, "signature": ""})
+		}
+		if t := textOf(msg["content"]) + str(msg["refusal"]); t != "" {
 			content = append(content, obj{"type": "text", "text": t})
 		}
-		for _, tc := range list(msg["tool_calls"]) {
+		calls := list(msg["tool_calls"])
+		if fc := asObj(msg["function_call"]); fc != nil {
+			calls = append(calls, obj{"function": fc})
+		}
+		for _, tc := range calls {
 			t := asObj(tc)
 			fn := asObj(t["function"])
-			content = append(content, obj{"type": "tool_use", "id": t["id"], "name": fn["name"],
+			content = append(content, obj{"type": "tool_use", "id": toolID(str(t["id"])), "name": fn["name"],
 				"input": parseArgs(str(fn["arguments"]))})
 		}
 		if s := openaiStop[str(ch["finish_reason"])]; s != "" {
 			stop = s
 		}
-	}
-	if content == nil {
-		content = []any{}
+		if stop == "tool_use" && len(calls) == 0 {
+			stop = "end_turn"
+		}
 	}
 	out := obj{
-		"id": "msg_" + strings.TrimPrefix(str(in["id"]), "chatcmpl-"), "type": "message", "role": "assistant",
-		"model": in["model"], "content": content, "stop_reason": stop, "stop_sequence": nil,
+		"id": messageID(str(in["id"])), "type": "message", "role": "assistant",
+		"model": r.model(in["model"]), "content": content, "stop_reason": stop, "stop_sequence": nil,
 		"usage": anthropicUsage(asObj(in["usage"])),
 	}
 	return json.Marshal(out)
 }
 
+// anthropicUsage splits OpenAI's prompt total into Anthropic's three input
+// counters, which do not overlap.
 func anthropicUsage(u obj) obj {
-	cached := num(asObj(u["prompt_tokens_details"])["cached_tokens"])
-	o := obj{"input_tokens": num(u["prompt_tokens"]) - cached, "output_tokens": num(u["completion_tokens"])}
+	details := asObj(u["prompt_tokens_details"])
+	cached, written := num(details["cached_tokens"]), num(details["cache_write_tokens"])
+	o := obj{"input_tokens": max(num(u["prompt_tokens"])-cached-written, 0), "output_tokens": num(u["completion_tokens"])}
 	if cached > 0 {
 		o["cache_read_input_tokens"] = cached
+	}
+	if written > 0 {
+		o["cache_creation_input_tokens"] = written
 	}
 	return o
 }
@@ -310,15 +451,18 @@ func AnthropicStreamToOpenAI(dst Flusher, src io.Reader) {
 
 // OpenAIStreamToAnthropic reads Chat Completions chunks and writes the
 // equivalent Messages event stream.
-func OpenAIStreamToAnthropic(dst Flusher, src io.Reader) {
+func OpenAIStreamToAnthropic(dst Flusher, src io.Reader, r Reply) {
 	send := func(event string, v obj) {
 		b, _ := json.Marshal(v)
 		io.WriteString(dst, "event: "+event+"\ndata: "+string(b)+"\n\n")
 		dst.Flush()
 	}
+	fail := func(typ, msg string) {
+		send("error", obj{"type": "error", "error": obj{"type": typ, "message": msg}})
+	}
 	started := false
 	block := -1     // index of the open content block, -1 when none
-	blockKind := "" // "text" or "tool"
+	blockKind := "" // "thinking" or "text"
 	// Tool calls are buffered by their OpenAI index and emitted as whole blocks
 	// at the end. Anthropic allows only one open content block at a time, so
 	// streaming a second tool call would close the first and drop the argument
@@ -326,6 +470,7 @@ func OpenAIStreamToAnthropic(dst Flusher, src io.Reader) {
 	type toolAcc struct{ id, name, args string }
 	tools := map[int64]*toolAcc{}
 	var toolOrder []int64
+	var lastTool int64 = -1
 	stop := ""
 	var usage obj
 	start := func(id, model string) {
@@ -334,36 +479,71 @@ func OpenAIStreamToAnthropic(dst Flusher, src io.Reader) {
 		}
 		started = true
 		send("message_start", obj{"type": "message_start", "message": obj{
-			"id": "msg_" + strings.TrimPrefix(id, "chatcmpl-"), "type": "message", "role": "assistant",
-			"model": model, "content": []any{}, "stop_reason": nil, "stop_sequence": nil,
-			"usage": obj{"input_tokens": 0, "output_tokens": 0}}})
+			"id": messageID(id), "type": "message", "role": "assistant",
+			"model": r.model(model), "content": []any{}, "stop_reason": nil, "stop_sequence": nil,
+			"usage": obj{"input_tokens": r.InputTokens, "output_tokens": 0}}})
+		send("ping", obj{"type": "ping"})
 	}
 	closeBlock := func() {
-		if block >= 0 {
-			send("content_block_stop", obj{"type": "content_block_stop", "index": block})
+		if block < 0 {
+			return
 		}
+		if blockKind == "thinking" {
+			send("content_block_delta", obj{"type": "content_block_delta", "index": block,
+				"delta": obj{"type": "signature_delta", "signature": ""}})
+		}
+		send("content_block_stop", obj{"type": "content_block_stop", "index": block})
+		block, blockKind = -1, ""
 	}
 	next := 0
-	open := func(kind string, cb obj) int {
+	open := func(kind string, cb obj) {
 		closeBlock()
 		block, blockKind = next, kind
 		next++
 		send("content_block_start", obj{"type": "content_block_start", "index": block, "content_block": cb})
-		return block
 	}
-	finish := func() {
-		start(newID("chatcmpl-"), "")
-		for _, ti := range toolOrder {
-			ta := tools[ti]
-			open("tool", obj{"type": "tool_use", "id": ta.id, "name": ta.name, "input": obj{}})
-			if ta.args != "" {
-				send("content_block_delta", obj{"type": "content_block_delta", "index": block,
-					"delta": obj{"type": "input_json_delta", "partial_json": ta.args}})
+	delta := func(kind string, cb, d obj) {
+		if blockKind != kind {
+			open(kind, cb)
+		}
+		send("content_block_delta", obj{"type": "content_block_delta", "index": block, "delta": d})
+	}
+	// tool finds the accumulator for one tool call fragment. A fragment with
+	// no index belongs to the call before it, unless it names a new id.
+	tool := func(tc obj) *toolAcc {
+		ti := num(tc["index"])
+		if tc["index"] == nil {
+			ti = max(lastTool, 0)
+			if id := str(tc["id"]); id != "" && tools[ti] != nil && tools[ti].id != "" && tools[ti].id != id {
+				ti = int64(len(toolOrder))
 			}
 		}
+		lastTool = ti
+		ta := tools[ti]
+		if ta == nil {
+			ta = &toolAcc{}
+			tools[ti] = ta
+			toolOrder = append(toolOrder, ti)
+		}
+		return ta
+	}
+	finish := func() {
+		start("", "")
 		closeBlock()
-		block = -1
+		for _, ti := range toolOrder {
+			ta := tools[ti]
+			open("tool", obj{"type": "tool_use", "id": toolID(ta.id), "name": ta.name, "input": obj{}})
+			// The whole-body path reads arguments with parseArgs; a stream that
+			// sent broken JSON gets the same object, not a parse error later.
+			args, _ := json.Marshal(parseArgs(ta.args))
+			send("content_block_delta", obj{"type": "content_block_delta", "index": block,
+				"delta": obj{"type": "input_json_delta", "partial_json": string(args)}})
+		}
+		closeBlock()
 		if stop == "" {
+			stop = "end_turn"
+		}
+		if stop == "tool_use" && len(toolOrder) == 0 {
 			stop = "end_turn"
 		}
 		u := obj{"output_tokens": 0}
@@ -385,7 +565,8 @@ func OpenAIStreamToAnthropic(dst Flusher, src io.Reader) {
 			return true
 		}
 		if e := asObj(ch["error"]); e != nil {
-			send("error", obj{"type": "error", "error": obj{"type": "api_error", "message": str(e["message"])}})
+			start("", "")
+			fail(AnthropicErrorType(0, str(e["type"])), str(e["message"]))
 			done = true
 			return false
 		}
@@ -398,22 +579,20 @@ func OpenAIStreamToAnthropic(dst Flusher, src io.Reader) {
 			return true
 		}
 		d := asObj(c["delta"])
-		if t := str(d["content"]); t != "" {
-			if blockKind != "text" || block < 0 {
-				open("text", obj{"type": "text", "text": ""})
-			}
-			send("content_block_delta", obj{"type": "content_block_delta", "index": block,
-				"delta": obj{"type": "text_delta", "text": t}})
+		if t := reasoningOf(d); t != "" && r.Thinking {
+			delta("thinking", obj{"type": "thinking", "thinking": "", "signature": ""},
+				obj{"type": "thinking_delta", "thinking": t})
 		}
-		for _, raw := range list(d["tool_calls"]) {
+		if t := str(d["content"]) + str(d["refusal"]); t != "" {
+			delta("text", obj{"type": "text", "text": ""}, obj{"type": "text_delta", "text": t})
+		}
+		calls := list(d["tool_calls"])
+		if fc := asObj(d["function_call"]); fc != nil {
+			calls = append(calls, obj{"index": json.Number("0"), "function": fc})
+		}
+		for _, raw := range calls {
 			tc := asObj(raw)
-			ti := num(tc["index"])
-			ta := tools[ti]
-			if ta == nil {
-				ta = &toolAcc{}
-				tools[ti] = ta
-				toolOrder = append(toolOrder, ti)
-			}
+			ta := tool(tc)
 			fn := asObj(tc["function"])
 			if id := str(tc["id"]); id != "" {
 				ta.id = id
@@ -428,16 +607,20 @@ func OpenAIStreamToAnthropic(dst Flusher, src io.Reader) {
 		}
 		return true
 	})
-	if !done {
-		if err != nil {
-			// A cut-short stream is not a completed message: signal the error
-			// instead of a clean stop, so the caller does not treat truncated
-			// text or a half-streamed tool call as a finished answer.
-			start(newID("chatcmpl-"), "")
-			send("error", obj{"type": "error", "error": obj{"type": "api_error",
-				"message": "upstream stream ended early: " + err.Error()}})
-			return
-		}
-		finish()
+	if done {
+		return
 	}
+	// A stream that ended without [DONE] and without a finish reason was cut:
+	// signal the error instead of a clean stop, so the caller does not treat
+	// truncated text or a half-streamed tool call as a finished answer.
+	if err != nil || stop == "" {
+		msg := "upstream stream ended early"
+		if err != nil {
+			msg += ": " + err.Error()
+		}
+		start("", "")
+		fail("api_error", msg)
+		return
+	}
+	finish()
 }

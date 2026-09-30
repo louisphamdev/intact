@@ -113,7 +113,7 @@ func TestResponsesBothWays(t *testing.T) {
 	if ch["finish_reason"] != "tool_calls" || j(m["usage"]) != `{"completion_tokens":3,"prompt_tokens":15,"prompt_tokens_details":{"cached_tokens":5},"total_tokens":18}` {
 		t.Errorf("openai = %s", oa)
 	}
-	back, err := OpenAIResponseToAnthropic(oa)
+	back, err := OpenAIResponseToAnthropic(oa, Reply{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestOpenAIStreamToAnthropic(t *testing.T) {
 		`data: {"id":"chatcmpl-1","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":2}}` + "\n\n" +
 		"data: [DONE]\n\n"
 	var out buf
-	OpenAIStreamToAnthropic(&out, strings.NewReader(src))
+	OpenAIStreamToAnthropic(&out, strings.NewReader(src), Reply{})
 	s := out.String()
 	order := []string{"event: message_start", `"text":"Hi","type":"text_delta"`, "event: content_block_stop",
 		`"type":"tool_use"`, `"partial_json":"{}"`, `"stop_reason":"tool_use"`, `"input_tokens":9`, "event: message_stop"}
@@ -170,10 +170,10 @@ func TestOpenAIStreamToAnthropic(t *testing.T) {
 }
 
 func TestErrorShapes(t *testing.T) {
-	if got := string(Error([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"slow"}}`), OpenAI)); got != `{"error":{"message":"slow","type":"rate_limit_error"}}` {
+	if got := string(Error(429, []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"slow"}}`), OpenAI)); got != `{"error":{"code":null,"message":"slow","param":null,"type":"rate_limit_error"}}` {
 		t.Errorf("to openai = %s", got)
 	}
-	if got := string(Error([]byte(`{"error":{"message":"bad","type":"invalid_request_error"}}`), Anthropic)); got != `{"error":{"message":"bad","type":"invalid_request_error"},"type":"error"}` {
+	if got := string(Error(400, []byte(`{"error":{"message":"bad","type":"invalid_request_error"}}`), Anthropic)); got != `{"error":{"message":"bad","type":"invalid_request_error"},"type":"error"}` {
 		t.Errorf("to anthropic = %s", got)
 	}
 }

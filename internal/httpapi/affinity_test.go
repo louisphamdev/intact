@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -365,4 +367,55 @@ func TestFirst429ParksTheAccountAtOnce(t *testing.T) {
 	if r := reads.Load(); r != 1 {
 		t.Errorf("quota was read %d times over all accounts, want 1: the forced read for a, none from routing", r)
 	}
+}
+
+// Headers a proxy in front of intact adds (cloudflared, a load balancer) name
+// the person behind the request; they never reach a provider.
+func TestOutboundDropsProxyHeaders(t *testing.T) {
+	var got http.Header
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.Write([]byte(`{"type":"message","content":[]}`))
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("claude", "a", "k")
+	h := New(s, map[string]string{"claude": up.URL})
+	r := sessionRequest("", "")
+	for k, v := range map[string]string{"Cf-Connecting-Ip": "203.0.113.7", "Cf-Ipcountry": "VN", "Cf-Ray": "r", "Cf-Visitor": "{}",
+		"Cf-Warp-Tag-Id": "w", "Cdn-Loop": "cloudflare", "X-Forwarded-For": "203.0.113.7", "X-Forwarded-Proto": "https",
+		"X-Real-Ip": "203.0.113.7", "Forwarded": "for=203.0.113.7", "True-Client-Ip": "203.0.113.7", "Cookie": "sid=1",
+		"X-Request-Id": "keep-me"} {
+		r.Header.Set(k, v)
+	}
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	for _, k := range []string{"Cf-Connecting-Ip", "Cf-Ipcountry", "Cf-Ray", "Cf-Visitor", "Cf-Warp-Tag-Id", "Cdn-Loop",
+		"X-Forwarded-For", "X-Forwarded-Proto", "X-Real-Ip", "Forwarded", "True-Client-Ip", "Cookie"} {
+		if v := got.Get(k); v != "" {
+			t.Errorf("%s = %q reached the provider", k, v)
+		}
+	}
+	if got.Get("X-Request-Id") != "keep-me" {
+		t.Error("a client header that names no person was dropped")
+	}
+}
+
+// A plain metadata.user_id names a user, not a conversation: no affinity from
+// it. Older Claude Code put the session inside it (..._session_<uuid>).
+func TestPlainUserIDNamesNoSession(t *testing.T) {
+	r := sessionRequest("", `"user-123"`)
+	if k := sessionKey(r, mustBody(r)); k != "" {
+		t.Errorf("plain user id gave session key %q", k)
+	}
+	r = sessionRequest("", `"user_ab12_account_cd34_session_5f0e8c1a-1b2c-4d5e-8f90-123456789abc"`)
+	if k := sessionKey(r, mustBody(r)); !strings.Contains(k, "5f0e8c1a-1b2c-4d5e-8f90-123456789abc") {
+		t.Errorf("legacy user id gave session key %q, want its session uuid", k)
+	}
+}
+
+func mustBody(r *http.Request) []byte {
+	b, _ := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(b))
+	return b
 }

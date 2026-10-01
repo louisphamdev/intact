@@ -44,6 +44,17 @@ var hopByHop = map[string]bool{
 	"Upgrade":             true,
 }
 
+// proxyAdded reports a header that a proxy in front of intact adds (cloudflared,
+// a load balancer) or a browser carries: it names the person behind the
+// request, so it never reaches a provider.
+func proxyAdded(k string) bool {
+	switch k {
+	case "Cdn-Loop", "Forwarded", "X-Real-Ip", "True-Client-Ip", "Cookie":
+		return true
+	}
+	return strings.HasPrefix(k, "Cf-") || strings.HasPrefix(k, "X-Forwarded-")
+}
+
 // newOutbound builds the upstream request for one connection: the target URL,
 // the caller's headers minus this hop's, the provider identity and defaults, and
 // the stored credential. Accept-Encoding is forced to identity so the usage tap
@@ -64,7 +75,7 @@ func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, path
 	for k, vs := range r.Header {
 		// Authorization and X-Api-Key carry intact's own token, which must never
 		// reach a provider; the account's credential replaces them below.
-		if hopByHop[k] || k == "Authorization" || k == "X-Api-Key" || k == "Host" || k == "Accept-Encoding" || strings.EqualFold(k, "X-Intact-Trace") {
+		if hopByHop[k] || proxyAdded(k) || k == "Authorization" || k == "X-Api-Key" || k == "Host" || k == "Accept-Encoding" || strings.EqualFold(k, "X-Intact-Trace") {
 			continue
 		}
 		for _, v := range vs {

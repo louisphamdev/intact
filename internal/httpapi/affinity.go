@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -81,14 +82,14 @@ func (f *affinity) prune() {
 
 // sessionKey names the caller's conversation: Claude Code's session header, or
 // the session_id inside metadata.user_id (a JSON string in current versions,
-// a plain string in older ones). Empty when the request names no session.
+// a _session_ suffix in older ones). Empty when the request names no session.
 func sessionKey(r *http.Request, body []byte) string {
 	return boundKey(principalOf(r).keyID, rawSessionKey(r, body))
 }
 
 // boundKey scopes a session to the caller's API key, so one key cannot move
 // another key's sessions, and hashes an id past 256 bytes so the map holds
-// short keys only. The s:/u: kind stays in front.
+// short keys only. The s: kind stays in front.
 func boundKey(keyID, k string) string {
 	if k == "" {
 		return ""
@@ -119,7 +120,12 @@ func rawSessionKey(r *http.Request, body []byte) string {
 	if json.Unmarshal([]byte(b.Metadata.UserID), &uid) == nil && uid.SessionID != "" {
 		return "s:" + uid.SessionID
 	}
-	return "u:" + b.Metadata.UserID
+	// Older Claude Code: user_<hash>_account_<uuid>_session_<uuid>. Any other
+	// plain user id names a person, not a conversation.
+	if i := strings.LastIndex(b.Metadata.UserID, "_session_"); i >= 0 && i+9 < len(b.Metadata.UserID) {
+		return "s:" + b.Metadata.UserID[i+9:]
+	}
+	return ""
 }
 
 // sessionOrder puts the session's account first, then the provider's rotation

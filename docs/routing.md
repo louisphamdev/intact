@@ -92,16 +92,36 @@ the top of the provider's Connections card, or at
   with its place in the turn (`next · 2/3`).
 - **Pools across providers.** A bare model listed by several providers pools
   their accounts. Such a pool turns on every request, per model.
+- **Sessions.** A provider keeps a prompt cache per organization, so a
+  conversation that moves to another account writes its whole prefix again.
+  intact reads the session from the `X-Claude-Code-Session-Id` header, or from
+  the `session_id` in `metadata.user_id`. A request of a known session goes to
+  the account that last answered that session. The other accounts follow in
+  rotation order, and standby accounts come last. A new session takes the
+  rotation, so the load spreads by session, not by request. intact keeps a
+  session for 1 hour after its last request, in memory. A restart forgets the
+  sessions. A plain `user_id` with no session in it does not pin anything.
+- **Spent quota.** An account whose [quota](quota-and-usage.md) for the model
+  is spent is skipped until the window of that quota resets. Then the account
+  takes turns again by itself. The check reads the quota cache only. When a
+  `429` arrives and the cached quota was read before it and still shows quota
+  left, intact reads the quota again, once per account in 30 seconds. Thus the
+  first real limit skips the account from the next request on. A fake `429`
+  leaves the quota as it is, so it skips nothing. When every account is spent,
+  intact skips none of them, and the client gets the provider's answer.
 
 Then, for each account, starting there:
 
 1. An OAuth token close to expiry is refreshed before use.
 2. The request is sent, after the [blacklist](blacklist.md) has run on the exact
-   bytes that will leave.
+   bytes that will leave. A request from the provider's own client (Bifrost)
+   gets no blacklist.
 3. A `401` from an OAuth account forces a token refresh and one retry.
    Copilot's exchanged token is re-exchanged instead.
 4. A busy answer (`429`, `500`, `503`, `409`) moves to the next account and
    writes a log line: `connection <id>: <provider> answered 429 on <model>`.
+   A `404` also moves to the next account, because model access differs per
+   account: one Claude account can refuse a model that another one serves.
 5. Any other answer, success or error, goes back to the client as it came. The
    last account's answer is returned even when it is busy.
 
@@ -145,6 +165,16 @@ identity recorded from the real tool's traffic, with its version constants in
 - the VS Code Copilot Chat headers;
 - Antigravity IDE user agent;
 - Claude Code user agent and beta flags.
+
+A request from the provider's own client keeps its own identity: intact
+changes only the credential ([Bifrost](class-a-claude.md#bifrost-claude-code-to-a-claude-code-account)).
+
+The headers that a proxy in front of intact adds never reach a provider:
+`Cf-*`, `Cdn-Loop`, `X-Forwarded-*`, `X-Real-Ip`, `Forwarded`,
+`True-Client-Ip`, and `Cookie`. They name the person behind the request.
+
+A request that intact translates to a provider of another shape does not
+carry the client's query string. The query belongs to the client's API.
 
 Some providers answer differently by client version. Antigravity, for example,
 lists the `-high/-medium/-low` variants only to IDE 2.11.0. Keep these

@@ -171,7 +171,7 @@ func TestProxyAppliesClassAIdentityAndDefaults(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
-	if gotUA != "claude-cli/2.1.278 (external, sdk-cli)" {
+	if gotUA != "claude-cli/2.1.281 (external, sdk-cli)" {
 		t.Errorf("User-Agent = %q: identity must replace whatever the caller sent", gotUA)
 	}
 	if gotApp != "cli" {

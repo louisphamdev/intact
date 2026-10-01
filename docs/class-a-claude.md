@@ -30,7 +30,7 @@ but it does not redact a body.
 | Header | Value | Class |
 | --- | --- | --- |
 | `Authorization` | the OAuth token | credential |
-| `User-Agent` | `claude-cli/2.1.278 (external, sdk-cli)` | identity |
+| `User-Agent` | `claude-cli/2.1.281 (external, sdk-cli)` | identity. The version is `ClaudeCLIVersion`. Anthropic refuses `claude-opus-5-5` to a version older than 2.1.280. |
 | `X-App` | `cli` | identity |
 | `Anthropic-Dangerous-Direct-Browser-Access` | `true` | identity |
 | `Anthropic-Version` | `2023-06-01` | default |

@@ -1,6 +1,10 @@
 package provider
 
-import "testing"
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
 
 func TestLookupReturnsClassBProviders(t *testing.T) {
 	p, ok := Lookup("groq")
@@ -19,6 +23,20 @@ func TestLookupReturnsClassBProviders(t *testing.T) {
 	}
 }
 
+// Anthropic refuses claude-opus-5-5 to a Claude Code older than 2.1.280
+// (claude_code_version_too_old, 2026-10-01). Both identities use one version.
+func TestClaudeIdentityIsNotTooOldForCurrentModels(t *testing.T) {
+	p, _ := Lookup("claude")
+	ua := p.Identity["User-Agent"]
+	if !strings.Contains(ua, "claude-cli/"+ClaudeCLIVersion+" ") || !strings.Contains(ClaudeInteractiveUserAgent, "claude-cli/"+ClaudeCLIVersion+" ") {
+		t.Errorf("User-Agent %q and %q must both carry ClaudeCLIVersion", ua, ClaudeInteractiveUserAgent)
+	}
+	var major, minor, patch int
+	if _, err := fmt.Sscanf(ClaudeCLIVersion, "%d.%d.%d", &major, &minor, &patch); err != nil || major*1e6+minor*1e3+patch < 2001280 {
+		t.Errorf("ClaudeCLIVersion = %q, want 2.1.280 or newer", ClaudeCLIVersion)
+	}
+}
+
 // Class A means the request must look like the genuine tool. The values come from
 // a capture of Claude Code 2.1.278 taken on 2026-09-20; see docs/class-a-claude.md.
 func TestClaudeCarriesTheIdentityOfTheRealTool(t *testing.T) {
@@ -32,7 +50,7 @@ func TestClaudeCarriesTheIdentityOfTheRealTool(t *testing.T) {
 	// Identity is what names the tool. A caller must never be able to replace it,
 	// because the point of this provider is that the upstream sees Claude Code.
 	for k, want := range map[string]string{
-		"User-Agent": "claude-cli/2.1.278 (external, sdk-cli)",
+		"User-Agent": "claude-cli/2.1.281 (external, sdk-cli)",
 		"X-App":      "cli",
 	} {
 		if p.Identity[k] != want {

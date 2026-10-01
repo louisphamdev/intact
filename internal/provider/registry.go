@@ -97,10 +97,13 @@ func (p Provider) WithAccount(accountID string) string {
 	return strings.ReplaceAll(p.BaseURL, "{accountId}", accountID)
 }
 
+// ClaudeCLIVersion is the Claude Code version intact presents. An old version loses models
+// (claude-opus-5-5 needs 2.1.280, 2026-10-01) and quota resets (ineligible:cli_version).
+const ClaudeCLIVersion = "2.1.281"
+
 // ClaudeInteractiveUserAgent names the interactive Claude Code CLI. Anthropic offers quota
-// resets only to this surface: the "sdk-cli" surface below gets ineligible:surface, and an
-// old version gets ineligible:cli_version. Measured on 2026-09-24 with Claude Code 2.1.281.
-const ClaudeInteractiveUserAgent = "claude-cli/2.1.281 (external, cli)"
+// resets only to this surface: the "sdk-cli" surface below gets ineligible:surface.
+const ClaudeInteractiveUserAgent = "claude-cli/" + ClaudeCLIVersion + " (external, cli)"
 
 // Captured from Claude Code 2.1.278 on 2026-09-20. The upstream rejects an OAuth
 // token without claude-code-20250219 and oauth-2025-04-20, so this list is part
@@ -235,7 +238,7 @@ var registry = map[string]Provider{
 		BifrostUA:      "claude-cli/",
 		CredentialBeta: []string{"claude-code-20250219", "oauth-2025-04-20"},
 		Identity: map[string]string{
-			"User-Agent": "claude-cli/2.1.278 (external, sdk-cli)",
+			"User-Agent": "claude-cli/" + ClaudeCLIVersion + " (external, sdk-cli)",
 			"X-App":      "cli",
 			"Anthropic-Dangerous-Direct-Browser-Access": "true",
 		},

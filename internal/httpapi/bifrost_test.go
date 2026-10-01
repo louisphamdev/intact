@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/louisphamdev/intact/internal/store"
 )
@@ -196,5 +197,33 @@ func TestModelMissingOnEveryAccountRelaysThe404(t *testing.T) {
 	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/x","max_tokens":5,"messages":[{"role":"user","content":"hi"}]}`)))
 	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "model: x") {
 		t.Errorf("status = %d body = %s, want the provider's 404", rec.Code, rec.Body.String())
+	}
+}
+
+// llm-switcher looks up one model (bifrost_ua) with a 3 s timeout. That lookup
+// must not wait for every other provider's model list to refresh.
+func TestOneModelLookupWaitsOnlyForItsProvider(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(3 * time.Second)
+		w.Write([]byte(`{"data":[{"id":"llama"}]}`))
+	}))
+	defer slow.Close()
+	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"data":[{"id":"claude-opus-5"}]}`))
+	}))
+	defer fast.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("claude", "a", "k")
+	s.CreateConnection("groq", "b", "k")
+	h := New(s, map[string]string{"groq": slow.URL, "claude": fast.URL})
+	start := time.Now()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("GET", "/v1/models/claude/claude-opus-5", nil))
+	if took := time.Since(start); took > time.Second {
+		t.Errorf("lookup took %v: it waited for another provider's list", took)
+	}
+	if !strings.Contains(rec.Body.String(), `"bifrost_ua":"claude-cli/"`) {
+		t.Errorf("status %d body %s", rec.Code, rec.Body.String())
 	}
 }

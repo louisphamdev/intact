@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -313,8 +314,16 @@ func (a *api) models(w http.ResponseWriter, r *http.Request) {
 // that only one provider lists.
 func (a *api) model(w http.ResponseWriter, r *http.Request) {
 	want := r.PathValue("model")
+	// A prefixed id needs one provider's list; waiting on every provider's
+	// refresh made llm-switcher's 3 s Bifrost lookup time out.
+	entries := []modelEntry(nil)
+	if prov, _ := a.splitModel(want); prov != "" && slices.Contains(a.activeProviders(), prov) {
+		entries = a.entriesOf(prov, a.providerModels(r.Context(), prov))
+	} else {
+		entries = a.modelEntries(r.Context())
+	}
 	var bare []modelEntry
-	for _, e := range a.modelEntries(r.Context()) {
+	for _, e := range entries {
 		if e.ID == want {
 			writeJSON(w, e)
 			return
@@ -365,21 +374,28 @@ func (a *api) modelEntries(ctx context.Context) []modelEntry {
 	wg.Wait()
 	data := []modelEntry{}
 	for i, p := range provs {
-		a.cat.mu.Lock()
-		infos, at := a.cat.m[p].info, a.cat.m[p].at
-		a.cat.mu.Unlock()
-		if at.IsZero() {
-			at = time.Now()
-		}
-		def, _ := provider.Lookup(p)
-		for _, id := range lists[i] {
-			in := infos[id]
-			data = append(data, modelEntry{ID: p + "/" + id, Object: "model", Created: at.Unix(), OwnedBy: p,
-				Type: "model", DisplayName: p + "/" + id, CreatedAt: at.UTC().Format(time.RFC3339),
-				ContextLength: in.Context, MaxInputTokens: in.Input, MaxOutputTokens: in.Output, BifrostUA: def.BifrostUA})
-		}
+		data = append(data, a.entriesOf(p, lists[i])...)
 	}
 	return data
+}
+
+// entriesOf builds one provider's entries from its model ids.
+func (a *api) entriesOf(p string, ids []string) []modelEntry {
+	a.cat.mu.Lock()
+	infos, at := a.cat.m[p].info, a.cat.m[p].at
+	a.cat.mu.Unlock()
+	if at.IsZero() {
+		at = time.Now()
+	}
+	def, _ := provider.Lookup(p)
+	out := make([]modelEntry, 0, len(ids))
+	for _, id := range ids {
+		in := infos[id]
+		out = append(out, modelEntry{ID: p + "/" + id, Object: "model", Created: at.Unix(), OwnedBy: p,
+			Type: "model", DisplayName: p + "/" + id, CreatedAt: at.UTC().Format(time.RFC3339),
+			ContextLength: in.Context, MaxInputTokens: in.Input, MaxOutputTokens: in.Output, BifrostUA: def.BifrostUA})
+	}
+	return out
 }
 
 // activeProviders returns the registered providers that have an active account.

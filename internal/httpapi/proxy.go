@@ -72,6 +72,14 @@ func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, path
 		}
 	}
 	out.Header.Set("Accept-Encoding", "identity")
+	if p.Bifrost(r.Header.Get("User-Agent")) {
+		// Bifrost: the provider's own client keeps its headers; only the credential changes.
+		out.Header.Set("Anthropic-Beta", withBetas(out.Header.Get("Anthropic-Beta"), p.CredentialBeta))
+		if p.AuthHeader != "" {
+			out.Header.Set(p.AuthHeader, p.AuthPrefix+secret)
+		}
+		return out, nil
+	}
 	for k, v := range p.Defaults {
 		if out.Header.Get(k) == "" {
 			out.Header.Set(k, v)
@@ -102,6 +110,23 @@ func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, path
 		out.Header.Set(p.AuthHeader, p.AuthPrefix+secret)
 	}
 	return out, nil
+}
+
+// withBetas adds the values a list lacks, keeping the caller's order.
+func withBetas(list string, need []string) string {
+	have := map[string]bool{}
+	for _, b := range strings.Split(list, ",") {
+		have[strings.TrimSpace(b)] = true
+	}
+	for _, b := range need {
+		if !have[b] {
+			if strings.TrimSpace(list) != "" {
+				list += ","
+			}
+			list += b
+		}
+	}
+	return list
 }
 
 // relayObserved relays a passthrough answer and shows it to the drift observer.

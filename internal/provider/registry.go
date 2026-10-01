@@ -55,6 +55,12 @@ type Provider struct {
 	ModelsURL string
 	// NoModelList: the provider has no list; Models is the list.
 	NoModelList bool
+	// BifrostUA is the User-Agent prefix of the provider's own client. A caller
+	// that sends it crosses Bifrost: intact changes only the credential.
+	BifrostUA string
+	// CredentialBeta lists the Anthropic-Beta values the credential cannot work
+	// without; they are added to a native client's own list when it lacks them.
+	CredentialBeta []string
 	// Watch turns on structure drift monitoring. It is set on the providers
 	// reached as a real tool (OAuth, impersonated clients), whose formats move
 	// with each tool release; a documented API does not need it.
@@ -223,9 +229,11 @@ var registry = map[string]Provider{
 		Watch:   true,
 		Setup:   "oauth",
 		// Anthropic's /models needs a live token; this list stands in without one.
-		Models:     []string{"claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-fable-5", "claude-haiku-4-5-20251001"},
-		AuthHeader: "Authorization",
-		AuthPrefix: "Bearer ",
+		Models:         []string{"claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-fable-5", "claude-haiku-4-5-20251001"},
+		AuthHeader:     "Authorization",
+		AuthPrefix:     "Bearer ",
+		BifrostUA:      "claude-cli/",
+		CredentialBeta: []string{"claude-code-20250219", "oauth-2025-04-20"},
 		Identity: map[string]string{
 			"User-Agent": "claude-cli/2.1.278 (external, sdk-cli)",
 			"X-App":      "cli",
@@ -254,6 +262,12 @@ const (
 // CodexCLIVersion is the Codex CLI version intact presents; the backend hides
 // models that need a newer client.
 const CodexCLIVersion = "0.155.1"
+
+// Bifrost reports that a caller with this User-Agent is the provider's own
+// client, which reaches its account with only the credential changed.
+func (p Provider) Bifrost(userAgent string) bool {
+	return p.BifrostUA != "" && strings.HasPrefix(userAgent, p.BifrostUA)
+}
 
 // Lookup returns the provider with this id.
 func Lookup(id string) (Provider, bool) {

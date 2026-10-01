@@ -335,6 +335,9 @@ type modelEntry struct {
 	ContextLength   int64 `json:"context_length,omitempty"`
 	MaxInputTokens  int64 `json:"max_input_tokens,omitempty"`
 	MaxOutputTokens int64 `json:"max_output_tokens,omitempty"`
+	// BifrostUA: a caller whose User-Agent starts with it is this provider's
+	// own client, and reaches it with only the credential changed (Bifrost).
+	BifrostUA string `json:"bifrost_ua,omitempty"`
 }
 
 // modelEntries lists every model an active account serves. A provider list
@@ -359,11 +362,12 @@ func (a *api) modelEntries(ctx context.Context) []modelEntry {
 		if at.IsZero() {
 			at = time.Now()
 		}
+		def, _ := provider.Lookup(p)
 		for _, id := range lists[i] {
 			in := infos[id]
 			data = append(data, modelEntry{ID: p + "/" + id, Object: "model", Created: at.Unix(), OwnedBy: p,
 				Type: "model", DisplayName: p + "/" + id, CreatedAt: at.UTC().Format(time.RFC3339),
-				ContextLength: in.Context, MaxInputTokens: in.Input, MaxOutputTokens: in.Output})
+				ContextLength: in.Context, MaxInputTokens: in.Input, MaxOutputTokens: in.Output, BifrostUA: def.BifrostUA})
 		}
 	}
 	return data
@@ -747,7 +751,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 				send, injected = withUsage(send)
 			}
 		}
-		send = filterFor(a, p, conn.Provider, send)
+		send = filterFor(a, r, p, conn.Provider, send)
 		tried++
 		resp, err := a.sendLogged(r, p, conn, path, secret, send, model)
 		if err != nil {
@@ -761,7 +765,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 				resp.Body.Close()
 				copilotResponsesModels.Store(model, true)
 				if err := prepare(); err == nil {
-					send = filterFor(a, p, conn.Provider, send)
+					send = filterFor(a, r, p, conn.Provider, send)
 					if resp, err = a.sendLogged(r, p, conn, path, secret, send, model); err != nil {
 						continue
 					}
@@ -837,8 +841,12 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 }
 
 // filterFor applies a provider's own request rules, then the blacklist, which
-// runs last on the exact bytes the provider will receive.
-func filterFor(a *api, p provider.Provider, prov string, body []byte) []byte {
+// runs last on the exact bytes the provider will receive. A Bifrost caller (the
+// provider's own client) is sent as it is: the blacklist exists for the others.
+func filterFor(a *api, r *http.Request, p provider.Provider, prov string, body []byte) []byte {
+	if p.Bifrost(r.Header.Get("User-Agent")) {
+		return body
+	}
 	body = adjustForProvider(p, body)
 	body, _ = filter.Apply(body, a.rulesFor(prov))
 	return body

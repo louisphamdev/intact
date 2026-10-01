@@ -100,3 +100,18 @@ the refresh token, the new one is stored too. See [Providers](providers.md).
 To add a connection, insert the token as the secret of a `claude` connection. The
 token never appears in a response: `/accounts` returns the id, the provider, the
 label and the active flag, and nothing else.
+
+## Bifrost: Claude Code to a Claude Code account
+
+Bifrost is the mode for the real Claude Code client. When the request comes from Claude Code, intact changes only the credential.
+
+intact turns Bifrost on by itself. The `claude` provider declares the User-Agent prefix of its own client, `claude-cli/`. When the `User-Agent` of a caller starts with this prefix, intact does these steps:
+
+- It keeps every header of the caller. It does not write its own `User-Agent`, `X-App`, or `Anthropic-Beta`.
+- It adds `claude-code-20250219` and `oauth-2025-04-20` to `Anthropic-Beta` if the caller did not send them. The OAuth token does not work without these two values.
+- It does not apply the blacklist to the body or to the headers.
+- It replaces `Authorization` and `X-Api-Key` with the token of the account.
+
+The model entry in `/v1/models` gives the prefix as `bifrost_ua`. A gateway in front of intact, for example llm-switcher, reads this field. With it, the gateway can send the request unchanged.
+
+A caller with a different `User-Agent` gets the old behavior: the identity of intact and the blacklist.

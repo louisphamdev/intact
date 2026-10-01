@@ -210,8 +210,17 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		countTokensEstimate(w, body)
 		return
 	}
-	targets, start := a.startFor(model, targets)
-	a.failover(w, r.WithContext(context.WithValue(r.Context(), callerModelKey{}, model)), body, targets, start, cap)
+	// A known session goes back to its account; a new one takes the rotation.
+	key := sessionKey(r, original)
+	start := a.homeOf(key, targets)
+	if start < 0 {
+		targets, start = a.startFor(model, targets)
+	}
+	ctx := context.WithValue(r.Context(), callerModelKey{}, model)
+	if key != "" {
+		ctx = context.WithValue(ctx, sessionKeyCtx{}, key)
+	}
+	a.failover(w, r.WithContext(ctx), body, targets, start, cap)
 }
 
 // splitModel reads a "<provider>/<model>" prefix. It reports the provider only
@@ -809,6 +818,9 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			continue
 		}
 		defer resp.Body.Close()
+		if key, _ := r.Context().Value(sessionKeyCtx{}).(string); key != "" && resp.StatusCode < 400 {
+			a.sessions.set(key, conn.ID)
+		}
 		if at.model != "" {
 			// The model that answered, when intact chose it (a level variant).
 			w.Header().Set("X-Intact-Model", at.model)

@@ -899,8 +899,11 @@ func (a *api) activeConnections(prov string) []store.Connection {
 }
 
 // retryableStatus reports a status that means "this account is busy, try another".
+// 404 is one too: model access differs per account (a Claude account answers
+// "model: claude-sonnet-5-5" not found while another serves it).
 func retryableStatus(code int) bool {
 	return code == http.StatusTooManyRequests ||
+		code == http.StatusNotFound ||
 		code == http.StatusInternalServerError ||
 		code == http.StatusServiceUnavailable ||
 		code == http.StatusConflict

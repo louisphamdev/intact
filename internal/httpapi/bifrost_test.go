@@ -148,3 +148,53 @@ func TestTranslatedRequestDropsTheCallerQuery(t *testing.T) {
 		t.Errorf("upstream got %s?%s, want /chat/completions with no query", gotPath, gotQuery)
 	}
 }
+
+// Model access differs per account: one Claude account answers 404 for a model
+// another serves. With fill-first rotation the first account takes every request,
+// so a 404 must move on to the next account instead of reaching the caller.
+func TestModelMissingOnOneAccountFailsOver(t *testing.T) {
+	var hits []string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		hits = append(hits, auth)
+		if auth == "Bearer no-sonnet" {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"type":"error","error":{"type":"not_found_error","message":"model: claude-sonnet-5-5"}}`))
+			return
+		}
+		w.Write([]byte(`{"type":"message","content":[{"type":"text","text":"ok"}]}`))
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("claude", "first", "no-sonnet")
+	s.CreateConnection("claude", "second", "has-sonnet")
+	s.SetSetting("rotation:claude", `{"mode":"fallback","sticky":1}`)
+	h := New(s, map[string]string{"claude": up.URL})
+	req := loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/claude-sonnet-5-5","max_tokens":5,"messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("User-Agent", "claude-cli/2.1.283 (external, cli)")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s), tried %v: a 404 on one account must try the next", rec.Code, rec.Body.String(), hits)
+	}
+}
+
+// When no account serves the model, the caller still sees the provider's 404.
+func TestModelMissingOnEveryAccountRelaysThe404(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"type":"error","error":{"type":"not_found_error","message":"model: x"}}`))
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("claude", "a", "k1")
+	s.CreateConnection("claude", "b", "k2")
+	h := New(s, map[string]string{"claude": up.URL})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/x","max_tokens":5,"messages":[{"role":"user","content":"hi"}]}`)))
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "model: x") {
+		t.Errorf("status = %d body = %s, want the provider's 404", rec.Code, rec.Body.String())
+	}
+}

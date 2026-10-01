@@ -29,7 +29,7 @@ intact does not serve a CORS preflight on `/v1`, and answers `OPTIONS` with 405.
 
 | Method and path | Purpose |
 | --- | --- |
-| `GET /v1/models` | Every model that is on, as `<provider>/<model>`. The format serves both OpenAI (`object`, `owned_by`) and Anthropic (`type`, `display_name`) clients. |
+| `GET /v1/models` | Every model that is on, as `<provider>/<model>`. The format serves both OpenAI (`object`, `owned_by`) and Anthropic (`type`, `display_name`) clients. A model of a provider with its own client also gives `bifrost_ua` ([Bifrost](class-a-claude.md#bifrost-claude-code-to-a-claude-code-account)). |
 | `POST /v1/chat/completions` | OpenAI shape, to any provider. |
 | `GET /v1/models/{model}` | One model, by `<provider>/<model>` or by a bare id that one provider serves. |
 | `POST /v1/messages` | Anthropic shape, to any provider. `max_tokens` is required, as at Anthropic. |

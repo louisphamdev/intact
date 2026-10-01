@@ -172,7 +172,8 @@
           "created_at": { "type": "string", "format": "date-time" },
           "context_length": { "type": "integer", "description": "Extension: the context window, when the provider gives it" },
           "max_input_tokens": { "type": "integer", "description": "Extension" },
-          "max_output_tokens": { "type": "integer", "description": "Extension" }
+          "max_output_tokens": { "type": "integer", "description": "Extension" },
+          "bifrost_ua": { "type": "string", "description": "Extension: the User-Agent prefix of the provider's own client. A caller that sends it gets Bifrost: only the credential changes." }
         }
       },
       "ModelList": {

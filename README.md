@@ -29,6 +29,11 @@ To build from source, see [Getting started](docs/getting-started.md).
 - **OpenAI and Anthropic shapes.** `/v1/chat/completions` and `/v1/messages`
   reach any provider. intact translates the request and the answer (streamed or
   whole) when the shapes differ. When they match, the bytes pass through untouched.
+- **Bifrost.** When Claude Code calls a Claude Code account, intact changes only
+  the token. The headers, the betas and the body of Claude Code stay as sent, and
+  the blacklist does not run. intact turns Bifrost on by itself from the
+  `User-Agent`. llm-switcher reads `bifrost_ua` from `/v1/models` and also sends
+  the request unchanged. [Bifrost](docs/class-a-claude.md#bifrost-claude-code-to-a-claude-code-account)
 - **Rotation and failover.** Requests rotate across a model's accounts. A busy
   answer (429, 500, 503, 409) moves to the next account. An expired OAuth token
   is refreshed and the request retried.
@@ -146,6 +151,9 @@ find and correct their own faults, in two loops.
   exchange and records each field that the conversion lost.
   `switch contract-check` then writes one failing test for each finding, and
   the fix goes into the converter.
+
+For Claude Code on a Claude Code account, the two tools use Bifrost instead.
+Neither tool converts or filters the request. Only the token changes.
 
 The rules stay in configuration, not in code. A person reads the alerts and
 the verdicts, and does not find each fault by hand.

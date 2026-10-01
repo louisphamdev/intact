@@ -19,6 +19,10 @@ effect on the next request, with no restart.
 A rule applies to one provider (its id) or to every provider (`*`). A rule can be
 switched off without deleting it.
 
+A Bifrost request does not get the blacklist. A Bifrost request comes from the
+own client of the provider, for example Claude Code to a Claude Code account.
+[Bifrost](class-a-claude.md#bifrost-claude-code-to-a-claude-code-account)
+
 ## Seeded rules
 
 On first start the blacklist is seeded with fixes found against real providers:

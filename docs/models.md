@@ -50,6 +50,15 @@ provider names them its own way:
 A limit that the list does not give stays empty. A list that gives only limits
 says nothing about thinking, so the `thinking` tag stays unknown.
 
+## Bifrost field
+
+The entry of a model gives `bifrost_ua` when the provider has its own client.
+The value is the start of the `User-Agent` of that client. Today only the
+`claude` provider gives it: `claude-cli/`. A gateway in front of intact, for
+example llm-switcher, compares this value with the `User-Agent` of its client.
+If they match, the gateway sends the request unchanged.
+[Bifrost](class-a-claude.md#bifrost-claude-code-to-a-claude-code-account)
+
 ## Switches
 
 The per-row switch turns a model on or off. A model that is off is gone from

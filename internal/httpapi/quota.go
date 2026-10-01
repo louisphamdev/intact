@@ -41,6 +41,10 @@ type AccountQuota struct {
 	// Block-present flags for Claude fresh read validation in claimReset.
 	HasJuniperTide bool `json:"-"`
 	HasCedarEmber  bool `json:"-"`
+
+	// doneAt is when the read finished, at full precision; FetchedAt is rounded
+	// to the second and marks the start.
+	doneAt time.Time
 }
 
 const quotaTTL = time.Minute
@@ -153,6 +157,7 @@ func (a *api) quotaFor(ctx context.Context, c store.Connection, refresh bool) Ac
 				}
 			}
 		}
+		res.doneAt = time.Now()
 		if res.Windows == nil {
 			res.Windows = []QuotaWindow{}
 		}

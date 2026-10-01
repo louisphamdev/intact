@@ -86,18 +86,19 @@ func sessionKey(r *http.Request, body []byte) string {
 	return boundKey(principalOf(r).keyID, rawSessionKey(r, body))
 }
 
-// boundKey scopes a session to the caller's key, so one key cannot move
-// another key's sessions, and hashes a long id: the map holds short keys only.
+// boundKey scopes a session to the caller's API key, so one key cannot move
+// another key's sessions, and hashes an id past 256 bytes so the map holds
+// short keys only. The s:/u: kind stays in front.
 func boundKey(keyID, k string) string {
 	if k == "" {
 		return ""
 	}
-	k = keyID + "|" + k
-	if len(k) > 64 {
-		sum := sha256.Sum256([]byte(k))
-		return "h:" + hex.EncodeToString(sum[:])
+	kind, id := k[:2], keyID+"|"+k[2:]
+	if len(id) > 256 {
+		sum := sha256.Sum256([]byte(id))
+		return kind + "h:" + hex.EncodeToString(sum[:])
 	}
-	return k
+	return kind + id
 }
 
 func rawSessionKey(r *http.Request, body []byte) string {

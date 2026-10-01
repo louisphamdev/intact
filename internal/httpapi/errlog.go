@@ -202,12 +202,12 @@ func (g *recheckGate) allow(id string) bool {
 func (a *api) classify429(id int64, conn store.Connection, model string, ms int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	answered := time.Now() // this runs as the 429 arrives
 	q := a.quotaFor(ctx, conn, false)
 	left := quotaLeft(q, model)
 	// The cache says quota is left but was read before this 429: read it now,
 	// so a spent account is skipped from the next request on.
-	sent := time.Now().Add(-time.Duration(ms) * time.Millisecond).Truncate(time.Second)
-	if t, err := time.Parse(time.RFC3339, q.FetchedAt); left > 0 && (err != nil || t.Before(sent)) && a.quotaRecheck.allow(conn.ID) {
+	if left > 0 && q.doneAt.Before(answered) && a.quotaRecheck.allow(conn.ID) {
 		left = quotaLeft(a.quotaFor(ctx, conn, true), model)
 	}
 	class := ClassRateLimit
@@ -245,7 +245,7 @@ func quotaClass(q AccountQuota, model string) (float64, []QuotaWindow) {
 		if w.UsedPct < 0 {
 			continue
 		}
-		left := 1 - w.UsedPct/100
+		left := max(0, 1-w.UsedPct/100) // above 100% is spent, not unknown
 		name := strings.TrimPrefix(w.Name, "model ")
 		switch {
 		case name == w.Name:

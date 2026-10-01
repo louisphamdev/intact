@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -221,6 +222,12 @@ func TestSpentUntilFollowsTheDecidingWindow(t *testing.T) {
 	if u := a.spentUntil("c", "m"); !u.IsZero() {
 		t.Errorf("the reset passed, yet spent until %v", u)
 	}
+	setQuota(a, "c", QuotaWindow{Name: "model X", UsedPct: 104, ResetAt: at(2 * time.Hour)})
+	near(t, a.spentUntil("c", "X"), 2*time.Hour)
+	setQuota(a, "c", QuotaWindow{Name: "model X", UsedPct: 100}, QuotaWindow{Name: "model Y", UsedPct: 100, ResetAt: at(time.Hour)})
+	if u := a.spentUntil("c", "X"); !u.IsZero() {
+		t.Errorf("X has no reset time; an unrelated window gave %v", u)
+	}
 	setQuota(a, "c", QuotaWindow{Name: "5h", UsedPct: -1})
 	if u := a.spentUntil("c", "m"); !u.IsZero() {
 		t.Errorf("unknown quota counted as spent until %v", u)
@@ -235,31 +242,31 @@ func TestSessionHitKeepsStandbyLast(t *testing.T) {
 	t.Cleanup(func() { s.Close() })
 	ca, _ := s.CreateConnection("claude", "A", "acct-a")
 	cs, _ := s.CreateConnection("claude", "S", "acct-s")
-	cb, _ := s.CreateConnection("claude", "B", "acct-b")
+	s.CreateConnection("claude", "B", "acct-b")
 	s.SetStandby(cs.ID, true)
 	a, h := newServer(s, map[string]string{"claude": up.URL}, nil)
-	_ = cb
-	a.sessions.set("s:sess-sb", ca.ID)
-	fail["acct-a"] = http.StatusTooManyRequests
+	a.sessions.set(sessionKey(sessionRequest("sess-sb", ""), nil), ca.ID)
+	fail["acct-a"], fail["acct-b"] = http.StatusTooManyRequests, http.StatusTooManyRequests
 	h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-sb", ""))
-	if got := strings.Join(*hits, ","); got != "acct-a,acct-b" {
-		t.Errorf("hits %s, want acct-a then the normal acct-b before the standby", got)
+	if got := strings.Join(*hits, ","); got != "acct-a,acct-b,acct-s" {
+		t.Errorf("hits %s, want acct-a,acct-b,acct-s: the session account, the normal one, the standby last", got)
 	}
 	*hits = nil
-	delete(fail, "acct-a")
-	a.sessions.set("s:sess-on-standby", cs.ID)
+	fail = map[string]int{}
+	a.sessions.set(sessionKey(sessionRequest("sess-on-standby", ""), nil), cs.ID)
 	h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-on-standby", ""))
-	if (*hits)[0] == "acct-s" {
+	if len(*hits) == 0 || (*hits)[0] == "acct-s" {
 		t.Errorf("a session pinned to a standby went there while normal accounts are healthy: %v", *hits)
 	}
 }
 
 // C3: a huge session id is stored as a short digest; an idle entry is gone.
 func TestSessionKeysAreBounded(t *testing.T) {
-	r := sessionRequest(strings.Repeat("x", 100<<10), "")
-	k := sessionKey(r, nil)
-	if len(k) > 70 {
-		t.Errorf("a 100 KB session id gave a %d byte key", len(k))
+	long := strings.Repeat("x", 100<<10)
+	k := sessionKey(sessionRequest(long, ""), nil)
+	k2 := sessionKey(sessionRequest(long[:256]+"y"+long[257:], ""), nil)
+	if len(k) > 70 || !strings.HasPrefix(k, "s:") || k == k2 {
+		t.Errorf("a 100 KB session id gave %q (%d bytes); a different id gave the same key: %v", k[:min(len(k), 80)], len(k), k == k2)
 	}
 	var f affinity
 	f.set("k", "conn")
@@ -309,35 +316,39 @@ func TestOnlyASuccessPinsTheSession(t *testing.T) {
 }
 
 // The first real 429 parks the account for the next request, even when the
-// quota cache is fresh and still says quota is left; a burst of 429s reads the
-// quota at most once per account per 30 s.
+// quota cache still says quota is left; a burst of 429s reads the quota at
+// most once per account per 30 s, and routing itself never reads it.
 func TestFirst429ParksTheAccountAtOnce(t *testing.T) {
 	var reads atomic.Int32
-	spent := atomic.Bool{}
 	stubClaudeQuota(t, func(label string) QuotaWindow {
 		if label == "a" {
 			reads.Add(1)
-			if spent.Load() {
-				return QuotaWindow{Name: "5h", UsedPct: 100, ResetAt: at(time.Hour)}
-			}
+			return QuotaWindow{Name: "5h", UsedPct: 100, ResetAt: at(time.Hour)}
 		}
 		return QuotaWindow{Name: "5h", UsedPct: 50}
 	})
-	fail := map[string]int{}
+	fail := map[string]int{"acct-a": http.StatusTooManyRequests}
 	up, hits := affinityServer(t, fail)
-	h := affinityAPI(t, up)
-	loadQuota(t, h) // fresh cache: a has quota left
-	time.Sleep(1100 * time.Millisecond) // the cached read is now older than the 429 below
-	spent.Store(true)
-	fail["acct-a"] = http.StatusTooManyRequests
-	for i := 0; i < 3; i++ { // reach a at least once
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	t.Cleanup(func() { s.Close() })
+	conns := map[string]string{}
+	for _, l := range []string{"a", "b", "c"} {
+		c, _ := s.CreateConnection("claude", l, "acct-"+l)
+		conns[l] = c.ID
+	}
+	a, h := newServer(s, map[string]string{"claude": up.URL}, nil)
+	old := time.Now().Add(-time.Minute / 2).UTC().Format(time.RFC3339) // read before the 429s, still fresh
+	for l, id := range conns {
+		a.quota.m[id] = AccountQuota{ConnectionID: id, Provider: "claude", Label: l, FetchedAt: old,
+			Windows: []QuotaWindow{{Name: "5h", UsedPct: 50}}}
+	}
+	for i := 0; i < 3; i++ {
 		h.ServeHTTP(httptest.NewRecorder(), sessionRequest("", ""))
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for reads.Load() < 2 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+	for a.spentUntil(conns["a"], "m").IsZero() && time.Now().Before(deadline) {
+		runtime.Gosched()
 	}
-	time.Sleep(50 * time.Millisecond) // let the cache write land
 	n := len(*hits)
 	for i := 0; i < 6; i++ {
 		h.ServeHTTP(httptest.NewRecorder(), sessionRequest("", ""))
@@ -347,7 +358,7 @@ func TestFirst429ParksTheAccountAtOnce(t *testing.T) {
 			t.Fatalf("after its first 429 the spent account was called again: %v", (*hits)[n:])
 		}
 	}
-	if r := reads.Load(); r > 2 {
-		t.Errorf("quota of a was read %d times: a 429 burst must refresh at most once per 30 s", r)
+	if r := reads.Load(); r != 1 {
+		t.Errorf("quota of a was read %d times, want 1: one forced read per 30 s, none from routing", r)
 	}
 }

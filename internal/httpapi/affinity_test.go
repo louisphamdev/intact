@@ -243,20 +243,23 @@ func TestSessionHitKeepsStandbyLast(t *testing.T) {
 	s.CreateConnection("claude", "A", "acct-a")
 	cs, _ := s.CreateConnection("claude", "S", "acct-s")
 	cb, _ := s.CreateConnection("claude", "B", "acct-b")
+	s.CreateConnection("claude", "C", "acct-c") // store order A, S, B, C
 	s.SetStandby(cs.ID, true)
 	a, h := newServer(s, map[string]string{"claude": up.URL}, nil)
 	// b is not the rotation's first pick, so only the session lookup sends it first.
 	a.sessions.set(sessionKey(sessionRequest("sess-sb", ""), nil), cb.ID)
-	fail["acct-a"], fail["acct-b"] = http.StatusTooManyRequests, http.StatusTooManyRequests
+	for _, k := range []string{"acct-a", "acct-b", "acct-c"} {
+		fail[k] = http.StatusTooManyRequests
+	}
 	h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-sb", ""))
-	if got := strings.Join(*hits, ","); got != "acct-b,acct-a,acct-s" {
-		t.Errorf("hits %s, want acct-b,acct-a,acct-s: the session account, the normal one, the standby last", got)
+	if got := strings.Join(*hits, ","); got != "acct-b,acct-a,acct-c,acct-s" {
+		t.Errorf("hits %s, want acct-b,acct-a,acct-c,acct-s: the session account, the normal ones, the standby last", got)
 	}
 	*hits = nil
 	clear(fail)
 	a.sessions.set(sessionKey(sessionRequest("sess-on-standby", ""), nil), cs.ID)
 	h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-on-standby", ""))
-	if len(*hits) == 0 || ((*hits)[0] != "acct-a" && (*hits)[0] != "acct-b") {
+	if len(*hits) == 0 || (*hits)[0] == "acct-s" {
 		t.Errorf("a session pinned to a standby went there while normal accounts are healthy: %v", *hits)
 	}
 }

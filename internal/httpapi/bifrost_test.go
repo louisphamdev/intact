@@ -121,3 +121,30 @@ func TestModelsNameTheBifrostClient(t *testing.T) {
 		t.Errorf("bifrost_ua = %v, want claude-cli/ (body %s)", e["bifrost_ua"], rec.Body.String())
 	}
 }
+
+// The query of the caller belongs to the caller's API (Anthropic's ?beta=true).
+// A translated request goes to an API of another shape and must not carry it:
+// Antigravity's path already holds ?alt=sse, and "?alt=sse?beta=true" is a 400.
+func TestTranslatedRequestDropsTheCallerQuery(t *testing.T) {
+	var gotQuery, gotPath string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery, gotPath = r.URL.RawQuery, r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"c","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`))
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("groq", "a", "k")
+	h := New(s, map[string]string{"groq": up.URL})
+	req := loopbackRequest("POST", "/v1/messages?beta=true", strings.NewReader(`{"model":"groq/m","max_tokens":5,"messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("User-Agent", "claude-cli/2.1.283 (external, cli)")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if gotPath != "/chat/completions" || gotQuery != "" {
+		t.Errorf("upstream got %s?%s, want /chat/completions with no query", gotPath, gotQuery)
+	}
+}

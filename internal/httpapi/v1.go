@@ -753,7 +753,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		}
 		send = filterFor(a, r, p, conn.Provider, send)
 		tried++
-		resp, err := a.sendLogged(r, p, conn, path, secret, send, model)
+		resp, err := a.sendLogged(forShape(r, to), p, conn, path, secret, send, model)
 		if err != nil {
 			log.Printf("connection %s: %v", conn.ID, err)
 			continue
@@ -766,7 +766,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 				copilotResponsesModels.Store(model, true)
 				if err := prepare(); err == nil {
 					send = filterFor(a, r, p, conn.Provider, send)
-					if resp, err = a.sendLogged(r, p, conn, path, secret, send, model); err != nil {
+					if resp, err = a.sendLogged(forShape(r, to), p, conn, path, secret, send, model); err != nil {
 						continue
 					}
 				}
@@ -778,7 +778,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			a.dropExchanged(conn.ID)
 			if fresh, err := a.exchanged(r.Context(), p, conn.ID, secret0(a, r, conn.ID)); err == nil {
 				resp.Body.Close()
-				if resp, err = a.sendLogged(r, p, conn, path, fresh, send, model); err != nil {
+				if resp, err = a.sendLogged(forShape(r, to), p, conn, path, fresh, send, model); err != nil {
 					continue
 				}
 			}
@@ -795,7 +795,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 					}
 				}
 				resp.Body.Close()
-				if resp, err = a.sendLogged(r, p, conn, path, fresh, send, model); err != nil {
+				if resp, err = a.sendLogged(forShape(r, to), p, conn, path, fresh, send, model); err != nil {
 					continue
 				}
 			}
@@ -850,6 +850,18 @@ func filterFor(a *api, r *http.Request, p provider.Provider, prov string, body [
 	body = adjustForProvider(p, body)
 	body, _ = filter.Apply(body, a.rulesFor(prov))
 	return body
+}
+
+// forShape keeps the caller's query only when the request goes out in the
+// caller's own shape. A translated request (to != "") reaches an API of another
+// shape, where that query means nothing or breaks the path's own (?alt=sse).
+func forShape(r *http.Request, to string) *http.Request {
+	if to == "" || r.URL.RawQuery == "" {
+		return r
+	}
+	out := r.Clone(r.Context())
+	out.URL.RawQuery = ""
+	return out
 }
 
 // isResponsesOnly reports Copilot's refusal of a model on /chat/completions.

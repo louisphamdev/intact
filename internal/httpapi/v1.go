@@ -213,8 +213,10 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 	}
 	// A known session goes back to its account; a new one takes the rotation.
 	key := sessionKey(r, original)
-	start := a.homeOf(key, targets)
-	if start < 0 {
+	var start int
+	if ordered, ok := a.sessionOrder(key, targets); ok {
+		targets = ordered
+	} else {
 		targets, start = a.startFor(model, targets)
 	}
 	ctx := context.WithValue(r.Context(), callerModelKey{}, model)
@@ -797,6 +799,9 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 					if resp, err = a.sendLogged(forShape(r, to), p, conn, path, secret, send, model); err != nil {
 						continue
 					}
+				} else {
+					log.Printf("connection %s: responses retry: %v", conn.ID, err)
+					resp.Body = io.NopCloser(bytes.NewReader(b))
 				}
 			} else {
 				resp.Body = io.NopCloser(bytes.NewReader(b))

@@ -2,10 +2,12 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -130,10 +132,9 @@ func loadQuota(t *testing.T, h http.Handler) {
 	}
 }
 
-// An account whose quota is spent is skipped until its window resets, then it
-// takes turns again with no one switching it back on.
+// An account whose quota is spent is skipped while its window is ahead.
 func TestSpentAccountIsSkippedUntilItsReset(t *testing.T) {
-	resetAt := time.Now().Add(2 * time.Second)
+	resetAt := time.Now().Add(time.Hour)
 	stubClaudeQuota(t, func(label string) QuotaWindow {
 		if label == "a" {
 			return QuotaWindow{Name: "5h", UsedPct: 100, ResetAt: resetAt.UTC().Format(time.RFC3339)}
@@ -151,18 +152,6 @@ func TestSpentAccountIsSkippedUntilItsReset(t *testing.T) {
 			t.Fatalf("a spent account was called: %v", *hits)
 		}
 	}
-	time.Sleep(time.Until(resetAt) + 1100*time.Millisecond) // the cached reset time passes
-	n := len(*hits)
-	for i := 0; i < 6; i++ {
-		h.ServeHTTP(httptest.NewRecorder(), sessionRequest("", ""))
-	}
-	used := false
-	for _, got := range (*hits)[n:] {
-		used = used || got == "acct-a"
-	}
-	if !used {
-		t.Errorf("after its reset the account never came back: %v", (*hits)[n:])
-	}
 }
 
 // When every account is spent, nothing is skipped: the caller gets the
@@ -178,5 +167,187 @@ func TestEverySpentAccountStillTries(t *testing.T) {
 	h.ServeHTTP(rec, sessionRequest("", ""))
 	if len(*hits) == 0 || rec.Code != http.StatusOK {
 		t.Errorf("status %d, upstream calls %v: every account spent must still be tried", rec.Code, *hits)
+	}
+}
+
+func spentAPI(t *testing.T) *api {
+	s, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	a, _ := newServer(s, nil, nil)
+	return a
+}
+
+func setQuota(a *api, id string, w ...QuotaWindow) {
+	a.quota.mu.Lock()
+	defer a.quota.mu.Unlock()
+	if a.quota.m == nil {
+		a.quota.m = map[string]AccountQuota{}
+	}
+	a.quota.m[id] = AccountQuota{ConnectionID: id, Windows: w}
+}
+
+func at(d time.Duration) string { return time.Now().Add(d).UTC().Format(time.RFC3339) }
+
+func near(t *testing.T, got time.Time, d time.Duration) {
+	t.Helper()
+	if want := time.Now().Add(d); got.Before(want.Add(-time.Minute)) || got.After(want.Add(time.Minute)) {
+		t.Errorf("until = %v, want about now+%v", got, d)
+	}
+}
+
+// The reset that matters is the one of the window that made the model spent.
+func TestSpentUntilFollowsTheDecidingWindow(t *testing.T) {
+	a := spentAPI(t)
+	setQuota(a, "c", QuotaWindow{Name: "model gemini-a", UsedPct: 100, ResetAt: at(120 * time.Hour)},
+		QuotaWindow{Name: "model gemini-b", UsedPct: 100, ResetAt: at(time.Hour)})
+	near(t, a.spentUntil("c", "gemini-b"), time.Hour)
+
+	setQuota(a, "c", QuotaWindow{Name: "5h", UsedPct: 100, ResetAt: at(2 * time.Hour)},
+		QuotaWindow{Name: "7d", UsedPct: 100, ResetAt: at(120 * time.Hour)})
+	near(t, a.spentUntil("c", "claude-opus-5-5"), 120*time.Hour)
+
+	setQuota(a, "c", QuotaWindow{Name: "model gemini-a", UsedPct: 100, ResetAt: at(120 * time.Hour)})
+	if u := a.spentUntil("c", "other-model"); !u.IsZero() {
+		t.Errorf("a model with no matching window is spent until %v", u)
+	}
+	setQuota(a, "c", QuotaWindow{Name: "5h", UsedPct: 100})
+	if u := a.spentUntil("c", "m"); !u.IsZero() {
+		t.Errorf("no reset time known, yet spent until %v: an account must never be parked for good", u)
+	}
+	setQuota(a, "c", QuotaWindow{Name: "5h", UsedPct: 100, ResetAt: at(-time.Minute)})
+	if u := a.spentUntil("c", "m"); !u.IsZero() {
+		t.Errorf("the reset passed, yet spent until %v", u)
+	}
+	setQuota(a, "c", QuotaWindow{Name: "5h", UsedPct: -1})
+	if u := a.spentUntil("c", "m"); !u.IsZero() {
+		t.Errorf("unknown quota counted as spent until %v", u)
+	}
+}
+
+// C1: a session hit keeps the rotation order with standby accounts last.
+func TestSessionHitKeepsStandbyLast(t *testing.T) {
+	fail := map[string]int{}
+	up, hits := affinityServer(t, fail)
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	t.Cleanup(func() { s.Close() })
+	ca, _ := s.CreateConnection("claude", "A", "acct-a")
+	cs, _ := s.CreateConnection("claude", "S", "acct-s")
+	cb, _ := s.CreateConnection("claude", "B", "acct-b")
+	s.SetStandby(cs.ID, true)
+	a, h := newServer(s, map[string]string{"claude": up.URL}, nil)
+	_ = cb
+	a.sessions.set("s:sess-sb", ca.ID)
+	fail["acct-a"] = http.StatusTooManyRequests
+	h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-sb", ""))
+	if got := strings.Join(*hits, ","); got != "acct-a,acct-b" {
+		t.Errorf("hits %s, want acct-a then the normal acct-b before the standby", got)
+	}
+	*hits = nil
+	delete(fail, "acct-a")
+	a.sessions.set("s:sess-on-standby", cs.ID)
+	h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-on-standby", ""))
+	if (*hits)[0] == "acct-s" {
+		t.Errorf("a session pinned to a standby went there while normal accounts are healthy: %v", *hits)
+	}
+}
+
+// C3: a huge session id is stored as a short digest; an idle entry is gone.
+func TestSessionKeysAreBounded(t *testing.T) {
+	r := sessionRequest(strings.Repeat("x", 100<<10), "")
+	k := sessionKey(r, nil)
+	if len(k) > 70 {
+		t.Errorf("a 100 KB session id gave a %d byte key", len(k))
+	}
+	var f affinity
+	f.set("k", "conn")
+	f.mu.Lock()
+	e := f.m["k"]
+	e.seen = time.Now().Add(-2 * affinityTTL)
+	f.m["k"] = e
+	f.mu.Unlock()
+	if got := f.get("k"); got != "" {
+		t.Errorf("an idle entry still pins %q", got)
+	}
+	f.mu.Lock()
+	_, kept := f.m["k"]
+	f.mu.Unlock()
+	if kept {
+		t.Error("an idle entry stays in the map")
+	}
+	for i := 0; i < affinityMax+10; i++ {
+		f.set(fmt.Sprintf("k%d", i), "c")
+	}
+	f.mu.Lock()
+	n, _ := len(f.m), 0
+	_, newest := f.m[fmt.Sprintf("k%d", affinityMax+9)]
+	f.mu.Unlock()
+	if n > affinityMax || !newest {
+		t.Errorf("map holds %d entries (max %d), newest present %v", n, affinityMax, newest)
+	}
+}
+
+// C5: only an answer below 400 pins the session.
+func TestOnlyASuccessPinsTheSession(t *testing.T) {
+	fail := map[string]int{"acct-a": 400, "acct-b": 400, "acct-c": 400}
+	up, hits := affinityServer(t, fail)
+	h := affinityAPI(t, up)
+	h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-400", ""))
+	if len(*hits) != 1 {
+		t.Fatalf("a 400 is not retried, yet hits = %v", *hits)
+	}
+	bad := (*hits)[0]
+	for k := range fail {
+		delete(fail, k)
+	}
+	h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-400", ""))
+	if got := (*hits)[1]; got == bad {
+		t.Errorf("a 400 answer pinned the session to %s", bad)
+	}
+}
+
+// The first real 429 parks the account for the next request, even when the
+// quota cache is fresh and still says quota is left; a burst of 429s reads the
+// quota at most once per account per 30 s.
+func TestFirst429ParksTheAccountAtOnce(t *testing.T) {
+	var reads atomic.Int32
+	spent := atomic.Bool{}
+	stubClaudeQuota(t, func(label string) QuotaWindow {
+		if label == "a" {
+			reads.Add(1)
+			if spent.Load() {
+				return QuotaWindow{Name: "5h", UsedPct: 100, ResetAt: at(time.Hour)}
+			}
+		}
+		return QuotaWindow{Name: "5h", UsedPct: 50}
+	})
+	fail := map[string]int{}
+	up, hits := affinityServer(t, fail)
+	h := affinityAPI(t, up)
+	loadQuota(t, h) // fresh cache: a has quota left
+	time.Sleep(1100 * time.Millisecond) // the cached read is now older than the 429 below
+	spent.Store(true)
+	fail["acct-a"] = http.StatusTooManyRequests
+	for i := 0; i < 3; i++ { // reach a at least once
+		h.ServeHTTP(httptest.NewRecorder(), sessionRequest("", ""))
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for reads.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond) // let the cache write land
+	n := len(*hits)
+	for i := 0; i < 6; i++ {
+		h.ServeHTTP(httptest.NewRecorder(), sessionRequest("", ""))
+	}
+	for _, got := range (*hits)[n:] {
+		if got == "acct-a" {
+			t.Fatalf("after its first 429 the spent account was called again: %v", (*hits)[n:])
+		}
+	}
+	if r := reads.Load(); r > 2 {
+		t.Errorf("quota of a was read %d times: a 429 burst must refresh at most once per 30 s", r)
 	}
 }

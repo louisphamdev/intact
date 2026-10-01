@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -173,13 +174,42 @@ func (a *api) sendLogged(r *http.Request, p provider.Provider, conn store.Connec
 	return resp, err
 }
 
+// recheckGate lets a 429 force one quota read per account per interval, so a
+// burst of 429s (fake ones included) cannot hammer a provider's quota endpoint.
+type recheckGate struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}
+
+const quotaRecheckEvery = 30 * time.Second
+
+func (g *recheckGate) allow(id string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.last == nil {
+		g.last = map[string]time.Time{}
+	}
+	if time.Since(g.last[id]) < quotaRecheckEvery {
+		return false
+	}
+	g.last[id] = time.Now()
+	return true
+}
+
 // classify429 reads the account's quota after a 429: a 429 answered in a
 // blink while the model's quota is far from spent is the provider refusing
 // the content (a fail-fast dressed as a rate limit), not a real limit.
 func (a *api) classify429(id int64, conn store.Connection, model string, ms int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	left := quotaLeft(a.quotaFor(ctx, conn, false), model)
+	q := a.quotaFor(ctx, conn, false)
+	left := quotaLeft(q, model)
+	// The cache says quota is left but was read before this 429: read it now,
+	// so a spent account is skipped from the next request on.
+	sent := time.Now().Add(-time.Duration(ms) * time.Millisecond).Truncate(time.Second)
+	if t, err := time.Parse(time.RFC3339, q.FetchedAt); left > 0 && (err != nil || t.Before(sent)) && a.quotaRecheck.allow(conn.ID) {
+		left = quotaLeft(a.quotaFor(ctx, conn, true), model)
+	}
 	class := ClassRateLimit
 	if left > fakeQuotaLeft && ms < fakeFastMs {
 		class = ClassFake429
@@ -192,8 +222,25 @@ func (a *api) classify429(id int64, conn store.Connection, model string, ms int6
 // Windows arrive in name order, so the longest prefix has to win: the window
 // of gemini-3.8-flash must not answer for gemini-3.8-flash-lite.
 func quotaLeft(q AccountQuota, model string) float64 {
-	best, exactModel, exactBase, prefix, prefixLen := -1.0, -1.0, -1.0, -1.0, -1
+	left, _ := quotaClass(q, model)
+	return left
+}
+
+// quotaClass returns quotaLeft and the windows of the class it decided from.
+func quotaClass(q AccountQuota, model string) (float64, []QuotaWindow) {
+	type class struct {
+		left float64
+		ws   []QuotaWindow
+	}
+	plain, exactModel, exactBase, prefix := class{left: -1}, class{left: -1}, class{left: -1}, class{left: -1}
+	prefixLen := -1
 	base, _ := splitVariant(model)
+	add := func(c *class, left float64, w QuotaWindow) {
+		if c.left < 0 || left < c.left {
+			c.left = left
+		}
+		c.ws = append(c.ws, w)
+	}
 	for _, w := range q.Windows {
 		if w.UsedPct < 0 {
 			continue
@@ -202,32 +249,26 @@ func quotaLeft(q AccountQuota, model string) float64 {
 		name := strings.TrimPrefix(w.Name, "model ")
 		switch {
 		case name == w.Name:
-			if best < 0 || left < best {
-				best = left
-			}
+			add(&plain, left, w)
 		case name == model:
-			if exactModel < 0 || left < exactModel {
-				exactModel = left
-			}
+			add(&exactModel, left, w)
 		case base != "" && name == base:
-			if exactBase < 0 || left < exactBase {
-				exactBase = left
-			}
+			add(&exactBase, left, w)
 		case strings.HasPrefix(model, name):
-			if len(name) > prefixLen || (len(name) == prefixLen && (prefix < 0 || left < prefix)) {
-				prefix, prefixLen = left, len(name)
+			if len(name) > prefixLen {
+				prefix, prefixLen = class{left: -1}, len(name)
+			}
+			if len(name) == prefixLen {
+				add(&prefix, left, w)
 			}
 		}
 	}
-	switch {
-	case exactModel >= 0:
-		return exactModel
-	case exactBase >= 0:
-		return exactBase
-	case prefix >= 0:
-		return prefix
+	for _, c := range []class{exactModel, exactBase, prefix} {
+		if c.left >= 0 {
+			return c.left, c.ws
+		}
 	}
-	return best
+	return plain.left, plain.ws
 }
 
 // refusalsSince counts a provider's answers that refused a request since a

@@ -31,6 +31,8 @@ type api struct {
 	rrNext map[string]rrCursor
 	// sessions keeps each conversation on the account that holds its prompt cache.
 	sessions affinity
+	// quotaRecheck bounds the quota reads that a 429 forces.
+	quotaRecheck recheckGate
 	// agSecretMu lets one sign-in look for the Antigravity client secret at a time.
 	agSecretMu sync.Mutex
 	// keyLim counts each API key's requests against its per-minute cap.

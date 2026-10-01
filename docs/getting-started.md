@@ -69,6 +69,9 @@ takes priority over the secret in the database.
    - For an API-key provider, paste the key.
    - For a coding-tool sign-in, follow the sign-in steps. See
      [Providers](providers.md#sign-in-flows).
+   - For the first Antigravity sign-in of an install, give intact the client
+     secret of the Antigravity app first. See
+     [The Antigravity client secret](providers.md#the-antigravity-client-secret).
 3. **Endpoint → API keys → Create**: copy the `sk-intact-…` key. It is shown
    again only when you press Reveal.
 4. Call it:

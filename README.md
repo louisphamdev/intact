@@ -109,6 +109,10 @@ it with the steps to add it to an authenticator app. Each install gets its own
 secret, kept in its database. To print the steps again, run
 `intact -db ./intact.db -show-totp`.
 
+An Antigravity sign-in needs the client secret of the Antigravity app, one time
+for each install. Before your first Antigravity sign-in, do the steps in
+[The Antigravity client secret](docs/providers.md#the-antigravity-client-secret).
+
 Open the dashboard, sign in with the code from the app, add an account under **Providers**,
 create an API key under **Endpoint → API keys**, then:
 

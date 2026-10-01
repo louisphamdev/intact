@@ -74,20 +74,6 @@ domain. Each flow therefore ends with you pasting what the page gave you.
 | Antigravity | PKCE; redirects to `http://localhost:51121/oauth-callback` | the full redirect URL (no Antigravity CLI needed) |
 | GitHub Copilot | Device flow | nothing: open the link, type the code shown, and intact polls until you approve |
 
-### The Antigravity client secret
-
-Google refuses the Antigravity sign-in without the client secret of the
-Antigravity desktop app. The secret starts with `GOCSPX-`, and it is in the
-files of the installed app. intact does not ship it.
-
-1. Install the Antigravity app on any computer.
-2. Search the files of the app for the text `GOCSPX-`. For example, on macOS:
-   `grep -rao 'GOCSPX-[A-Za-z0-9_-]*' /Applications/Antigravity.app | head -1`
-3. Put `INTACT_ANTIGRAVITY_CLIENT_SECRET=<the secret>` in the environment file of intact.
-4. Restart intact, then sign in to Antigravity from the dashboard.
-
-After the first sign-in, intact keeps the secret with the account.
-
 The steps:
 1. **Login** asks for a name for the account.
 2. It opens the provider's page.
@@ -96,6 +82,98 @@ The steps:
 A pending sign-in is stored in the database for 30 minutes, so a restart of
 intact in between does not lose it. The state is checked before the pending
 sign-in is used.
+
+### The Antigravity client secret
+
+Google refuses the Antigravity sign-in without the client secret of the
+Antigravity app. intact does not ship this secret. Each install needs it one
+time, before its first Antigravity sign-in.
+
+intact looks for the secret in this order:
+
+1. The environment variable `INTACT_ANTIGRAVITY_CLIENT_SECRET`.
+2. An Antigravity account that is already in the database of this install.
+
+If intact finds no secret, **Login** stops with this error:
+
+```text
+the Antigravity sign-in needs the client secret of the Antigravity app: set INTACT_ANTIGRAVITY_CLIENT_SECRET and restart intact (see docs/providers.md)
+```
+
+After the first sign-in, intact keeps the secret with the account. The next
+sign-ins on the same install do not need the variable. If you delete all the
+Antigravity accounts of an install, the install loses the secret. Then set the
+variable again.
+
+#### 1. Get the secret
+
+The secret starts with `GOCSPX-`. Get it from one of these sources:
+
+- **Another intact install that has an Antigravity account.** Run this on that
+  install, with the path of its database:
+
+  ```bash
+  sqlite3 /opt/intact/intact.db "SELECT client_secret FROM connections WHERE provider='antigravity' AND client_secret<>'' LIMIT 1;"
+  ```
+
+- **The files of the Antigravity app.** Install the app on any computer. Then
+  search the folder of the app for `GOCSPX-`. On macOS:
+
+  ```bash
+  grep -rao 'GOCSPX-[A-Za-z0-9_-]*' /Applications/Antigravity.app | head -1
+  ```
+
+  On Linux, use the same command with the install folder of the app. On
+  Windows, run it in Git Bash or WSL.
+
+CAUTION: Do not put the secret in a repository or in a shared file. Keep it
+in the environment of intact only.
+
+#### 2. Give the secret to intact
+
+intact reads the variable from its process environment. It does not read a
+`.env` file. Set the variable where intact starts, then start or restart intact.
+
+If you start intact from a shell (for example after `npm install -g intact-gateway`):
+
+```bash
+# macOS, Linux
+export INTACT_ANTIGRAVITY_CLIENT_SECRET='GOCSPX-…'
+intact -db ./intact.db -addr 127.0.0.1:20142
+```
+
+```powershell
+# Windows PowerShell
+$env:INTACT_ANTIGRAVITY_CLIENT_SECRET = 'GOCSPX-…'
+intact -db .\intact.db -addr 127.0.0.1:20142
+```
+
+The variable stays in that shell only. This is sufficient, because intact keeps
+the secret in its database after the first sign-in.
+
+If intact runs under systemd:
+
+1. Find the environment file of the service. It is the `EnvironmentFile=` line
+   of `systemctl cat intact`, for example `/opt/intact/intact.env`.
+2. Add this line to the file:
+
+   ```ini
+   INTACT_ANTIGRAVITY_CLIENT_SECRET=GOCSPX-…
+   ```
+
+3. Make sure that only the service user can read the file:
+   `sudo chmod 600 /opt/intact/intact.env`.
+4. Restart the service: `sudo systemctl restart intact`.
+
+#### 3. Sign in
+
+1. Open the dashboard.
+2. Go to **Providers**, pick Antigravity, and push **Login**.
+3. Do the steps of [Sign-in flows](#sign-in-flows).
+
+If **Login** shows the error again, the intact process did not get the
+variable. Make sure that you set it in the same shell or service that starts
+intact, and that you restarted intact after the change.
 
 ## Declared providers
 

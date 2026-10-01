@@ -240,22 +240,23 @@ func TestSessionHitKeepsStandbyLast(t *testing.T) {
 	up, hits := affinityServer(t, fail)
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	t.Cleanup(func() { s.Close() })
-	ca, _ := s.CreateConnection("claude", "A", "acct-a")
+	s.CreateConnection("claude", "A", "acct-a")
 	cs, _ := s.CreateConnection("claude", "S", "acct-s")
-	s.CreateConnection("claude", "B", "acct-b")
+	cb, _ := s.CreateConnection("claude", "B", "acct-b")
 	s.SetStandby(cs.ID, true)
 	a, h := newServer(s, map[string]string{"claude": up.URL}, nil)
-	a.sessions.set(sessionKey(sessionRequest("sess-sb", ""), nil), ca.ID)
+	// b is not the rotation's first pick, so only the session lookup sends it first.
+	a.sessions.set(sessionKey(sessionRequest("sess-sb", ""), nil), cb.ID)
 	fail["acct-a"], fail["acct-b"] = http.StatusTooManyRequests, http.StatusTooManyRequests
 	h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-sb", ""))
-	if got := strings.Join(*hits, ","); got != "acct-a,acct-b,acct-s" {
-		t.Errorf("hits %s, want acct-a,acct-b,acct-s: the session account, the normal one, the standby last", got)
+	if got := strings.Join(*hits, ","); got != "acct-b,acct-a,acct-s" {
+		t.Errorf("hits %s, want acct-b,acct-a,acct-s: the session account, the normal one, the standby last", got)
 	}
 	*hits = nil
-	fail = map[string]int{}
+	clear(fail)
 	a.sessions.set(sessionKey(sessionRequest("sess-on-standby", ""), nil), cs.ID)
 	h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-on-standby", ""))
-	if len(*hits) == 0 || (*hits)[0] == "acct-s" {
+	if len(*hits) == 0 || ((*hits)[0] != "acct-a" && (*hits)[0] != "acct-b") {
 		t.Errorf("a session pinned to a standby went there while normal accounts are healthy: %v", *hits)
 	}
 }
@@ -321,8 +322,8 @@ func TestOnlyASuccessPinsTheSession(t *testing.T) {
 func TestFirst429ParksTheAccountAtOnce(t *testing.T) {
 	var reads atomic.Int32
 	stubClaudeQuota(t, func(label string) QuotaWindow {
+		reads.Add(1) // every account: routing must read none
 		if label == "a" {
-			reads.Add(1)
 			return QuotaWindow{Name: "5h", UsedPct: 100, ResetAt: at(time.Hour)}
 		}
 		return QuotaWindow{Name: "5h", UsedPct: 50}
@@ -359,6 +360,6 @@ func TestFirst429ParksTheAccountAtOnce(t *testing.T) {
 		}
 	}
 	if r := reads.Load(); r != 1 {
-		t.Errorf("quota of a was read %d times, want 1: one forced read per 30 s, none from routing", r)
+		t.Errorf("quota was read %d times over all accounts, want 1: the forced read for a, none from routing", r)
 	}
 }

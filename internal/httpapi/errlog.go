@@ -208,7 +208,9 @@ func (a *api) classify429(id int64, conn store.Connection, model string, ms int6
 	// The cache says quota is left but was read before this 429: read it now,
 	// so a spent account is skipped from the next request on.
 	if left > 0 && q.doneAt.Before(answered) && a.quotaRecheck.allow(conn.ID) {
-		left = quotaLeft(a.quotaFor(ctx, conn, true), model)
+		if fresh := a.quotaFor(ctx, conn, true); fresh.Error == "" && len(fresh.Windows) > 0 {
+			left = quotaLeft(fresh, model)
+		}
 	}
 	class := ClassRateLimit
 	if left > fakeQuotaLeft && ms < fakeFastMs {

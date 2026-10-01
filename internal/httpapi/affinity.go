@@ -110,3 +110,45 @@ func (a *api) homeOf(key string, targets []store.Connection) int {
 	}
 	return -1
 }
+
+// spentUntil is when an account's quota for a model comes back, read from the
+// quota cache only (no fetch on the request path). Zero when it is not spent,
+// or when no reset time is known: an account is never parked for good.
+func (a *api) spentUntil(connID, model string) time.Time {
+	a.quota.mu.Lock()
+	q, ok := a.quota.m[connID]
+	a.quota.mu.Unlock()
+	if !ok || quotaLeft(q, model) > 0 {
+		return time.Time{}
+	}
+	var until time.Time
+	for _, w := range q.Windows {
+		if t, err := time.Parse(time.RFC3339, w.ResetAt); err == nil && w.UsedPct >= 100 && t.After(until) {
+			until = t
+		}
+	}
+	if !until.After(time.Now()) {
+		return time.Time{}
+	}
+	return until
+}
+
+// skipSpent drops the attempts whose account has spent its quota for the
+// model until the reset. With every account spent it keeps them all, so the
+// caller gets the provider's own answer.
+func (a *api) skipSpent(attempts []attempt, model string) []attempt {
+	kept := make([]attempt, 0, len(attempts))
+	for _, at := range attempts {
+		m := model
+		if at.model != "" {
+			m = at.model
+		}
+		if a.spentUntil(at.conn.ID, m).IsZero() {
+			kept = append(kept, at)
+		}
+	}
+	if len(kept) == 0 {
+		return attempts
+	}
+	return kept
+}

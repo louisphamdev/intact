@@ -1,11 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/louisphamdev/intact/internal/store"
 )
@@ -108,5 +110,73 @@ func TestSessionMovesWhenItsAccountFails(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-x", ""))
 	if got := (*hits)[len(*hits)-1]; got != moved {
 		t.Errorf("after the move the session went to %s, want %s (the account that answered); hits %v", got, moved, *hits)
+	}
+}
+
+// stubClaudeQuota makes the quota reader answer per account label.
+func stubClaudeQuota(t *testing.T, win func(label string) QuotaWindow) {
+	prev := quotaFetchers["claude"]
+	quotaFetchers["claude"] = func(_ *api, _ context.Context, c store.Connection, _ string) (AccountQuota, error) {
+		return AccountQuota{ConnectionID: c.ID, Provider: "claude", Windows: []QuotaWindow{win(c.Label)}}, nil
+	}
+	t.Cleanup(func() { quotaFetchers["claude"] = prev })
+}
+
+func loadQuota(t *testing.T, h http.Handler) {
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("GET", "/api/quota", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/api/quota: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// An account whose quota is spent is skipped until its window resets, then it
+// takes turns again with no one switching it back on.
+func TestSpentAccountIsSkippedUntilItsReset(t *testing.T) {
+	resetAt := time.Now().Add(2 * time.Second)
+	stubClaudeQuota(t, func(label string) QuotaWindow {
+		if label == "a" {
+			return QuotaWindow{Name: "5h", UsedPct: 100, ResetAt: resetAt.UTC().Format(time.RFC3339)}
+		}
+		return QuotaWindow{Name: "5h", UsedPct: 10}
+	})
+	up, hits := affinityServer(t, nil)
+	h := affinityAPI(t, up)
+	loadQuota(t, h)
+	for i := 0; i < 6; i++ {
+		h.ServeHTTP(httptest.NewRecorder(), sessionRequest("", ""))
+	}
+	for _, got := range *hits {
+		if got == "acct-a" {
+			t.Fatalf("a spent account was called: %v", *hits)
+		}
+	}
+	time.Sleep(time.Until(resetAt) + 1100*time.Millisecond) // the cached reset time passes
+	n := len(*hits)
+	for i := 0; i < 6; i++ {
+		h.ServeHTTP(httptest.NewRecorder(), sessionRequest("", ""))
+	}
+	used := false
+	for _, got := range (*hits)[n:] {
+		used = used || got == "acct-a"
+	}
+	if !used {
+		t.Errorf("after its reset the account never came back: %v", (*hits)[n:])
+	}
+}
+
+// When every account is spent, nothing is skipped: the caller gets the
+// provider's own answer instead of an empty route.
+func TestEverySpentAccountStillTries(t *testing.T) {
+	stubClaudeQuota(t, func(string) QuotaWindow {
+		return QuotaWindow{Name: "5h", UsedPct: 100, ResetAt: time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}
+	})
+	up, hits := affinityServer(t, nil)
+	h := affinityAPI(t, up)
+	loadQuota(t, h)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, sessionRequest("", ""))
+	if len(*hits) == 0 || rec.Code != http.StatusOK {
+		t.Errorf("status %d, upstream calls %v: every account spent must still be tried", rec.Code, *hits)
 	}
 }

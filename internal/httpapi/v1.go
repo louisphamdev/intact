@@ -689,6 +689,9 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 	translated := map[string][]byte{}
 	tried := 0
 	attempts := a.attemptsFor(r.Context(), targets, start, body)
+	if m, _ := bodyModel(body); m != "" {
+		attempts = a.skipSpent(attempts, m)
+	}
 	for i, at := range attempts {
 		conn := at.conn
 		p, ok := a.providerFor(conn)

@@ -86,26 +86,37 @@ sign-in is used.
 ### The Antigravity client secret
 
 Google refuses the Antigravity sign-in without the client secret of the
-Antigravity app. intact does not ship this secret. Each install needs it one
-time, before its first Antigravity sign-in.
+Antigravity app. intact does not ship this secret. It finds the secret by
+itself on the first Antigravity sign-in of an install.
 
-intact looks for the secret in this order:
+When you push **Login** for Antigravity, intact looks for the secret in this order:
 
 1. The environment variable `INTACT_ANTIGRAVITY_CLIENT_SECRET`.
 2. An Antigravity account that is already in the database of this install.
+3. The secret that this install found before. intact keeps it in its database.
+4. The Antigravity app, if it is installed on the same computer in its default
+   folder.
+5. The official Linux package of the app, from the APT repository of Google
+   (`us-central1-apt.pkg.dev/projects/antigravity-auto-updater-dev`). intact
+   downloads the newest package (about 160 MB) and reads the secret from it
+   as it downloads. It writes nothing to disk except the secret.
 
-If intact finds no secret, **Login** stops with this error:
+Steps 4 and 5 run one time for each install. Step 5 can take one minute, so
+the first **Login** shows "Starting…" for that time. intact then keeps the
+secret in its database, and the next sign-ins start at once.
+
+If all five steps fail, **Login** stops with an error that starts with:
 
 ```text
-the Antigravity sign-in needs the client secret of the Antigravity app: set INTACT_ANTIGRAVITY_CLIENT_SECRET and restart intact (see docs/providers.md)
+intact could not get the client secret of the Antigravity app
 ```
 
-After the first sign-in, intact keeps the secret with the account. The next
-sign-ins on the same install do not need the variable. If you delete all the
-Antigravity accounts of an install, the install loses the secret. Then set the
-variable again.
+The error gives the cause, for example a network error. Then give the secret
+to intact yourself, with the steps below.
 
-#### 1. Get the secret
+#### Give the secret by hand
+
+**1. Get the secret.**
 
 The secret starts with `GOCSPX-`. Get it from one of these sources:
 
@@ -117,10 +128,13 @@ The secret starts with `GOCSPX-`. Get it from one of these sources:
   ```
 
 - **The files of the Antigravity app.** Install the app on any computer. Then
-  search the folder of the app for `GOCSPX-`. On macOS:
+  search the folder of the app for the secret that follows the client id of
+  Antigravity. The folder holds a second `GOCSPX-` secret, which is not the
+  correct one. On macOS:
 
   ```bash
-  grep -rao 'GOCSPX-[A-Za-z0-9_-]*' /Applications/Antigravity.app | head -1
+  grep -raoE '1071006060591-tmhssin2h21lcre235vtolojh4g403ep\.apps\.googleusercontent\.com",[A-Za-z_$]+="GOCSPX-[A-Za-z0-9_-]+' \
+    /Applications/Antigravity.app | grep -o 'GOCSPX-[A-Za-z0-9_-]*' | head -1
   ```
 
   On Linux, use the same command with the install folder of the app. On
@@ -129,7 +143,7 @@ The secret starts with `GOCSPX-`. Get it from one of these sources:
 CAUTION: Do not put the secret in a repository or in a shared file. Keep it
 in the environment of intact only.
 
-#### 2. Give the secret to intact
+**2. Give the secret to intact.**
 
 intact reads the variable from its process environment. It does not read a
 `.env` file. Set the variable where intact starts, then start or restart intact.
@@ -165,7 +179,7 @@ If intact runs under systemd:
    `sudo chmod 600 /opt/intact/intact.env`.
 4. Restart the service: `sudo systemctl restart intact`.
 
-#### 3. Sign in
+**3. Sign in.**
 
 1. Open the dashboard.
 2. Go to **Providers**, pick Antigravity, and push **Login**.

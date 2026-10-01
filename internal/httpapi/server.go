@@ -29,6 +29,8 @@ type api struct {
 	// model for a pool across providers ("m:").
 	rrMu   sync.Mutex
 	rrNext map[string]rrCursor
+	// agSecretMu lets one sign-in look for the Antigravity client secret at a time.
+	agSecretMu sync.Mutex
 	// keyLim counts each API key's requests against its per-minute cap.
 	keyLim keyLimiter
 	// cat caches each provider's model list for resolving a bare model id.

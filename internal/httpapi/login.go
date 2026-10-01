@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/louisphamdev/intact/internal/agsecret"
 	"github.com/louisphamdev/intact/internal/provider"
 	"github.com/louisphamdev/intact/internal/store"
 )
@@ -103,11 +104,13 @@ func (a *api) loginStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "this provider has no sign-in")
 		return
 	}
-	// Google refuses the code exchange without it; say so before the user signs in.
-	if prov == "antigravity" && a.antigravityClientSecret() == "" {
-		writeError(w, http.StatusBadRequest, "the Antigravity sign-in needs the client secret of the Antigravity app: "+
-			"set INTACT_ANTIGRAVITY_CLIENT_SECRET and restart intact (see docs/providers.md)")
-		return
+	// Google refuses the code exchange without it; get it before the user signs in.
+	if prov == "antigravity" {
+		if err := a.ensureAntigravitySecret(r.Context()); err != nil {
+			writeError(w, http.StatusBadRequest, "intact could not get the client secret of the Antigravity app ("+
+				err.Error()+"): set INTACT_ANTIGRAVITY_CLIENT_SECRET and restart intact (see docs/providers.md)")
+			return
+		}
 	}
 	var in struct {
 		Label string `json:"label"`
@@ -353,14 +356,52 @@ func (a *api) saveOAuthAccount(prov, label string, t tokenAnswer, tokenURL, clie
 }
 
 // antigravityClientSecret is the Antigravity app's installed-client secret: the
-// environment, then an imported account. The source carries none.
+// environment, then an account, then the one this install found. The source carries none.
 func (a *api) antigravityClientSecret() string {
 	if s := os.Getenv("INTACT_ANTIGRAVITY_CLIENT_SECRET"); s != "" {
 		return s
 	}
 	var s string
 	a.store.DB.QueryRow(`SELECT client_secret FROM connections WHERE provider = 'antigravity' AND client_secret <> '' LIMIT 1`).Scan(&s)
+	if s == "" {
+		s, _ = a.store.GetSetting(antigravitySecretKey)
+	}
 	return s
+}
+
+const antigravitySecretKey = "antigravity.client_secret"
+
+// findAntigravitySecret reads the secret from an installed app, else from Google's
+// package of the app (about 160 MB, under a minute). Tests replace it.
+var findAntigravitySecret = func(ctx context.Context) (secret, source string, err error) {
+	if s := agsecret.FromInstalledApp(agsecret.InstalledAppPaths()); s != "" {
+		return s, "the installed Antigravity app", nil
+	}
+	s, err := agsecret.FromRepository(ctx, http.DefaultClient, agsecret.RepositoryURL)
+	return s, agsecret.RepositoryURL, err
+}
+
+// ensureAntigravitySecret finds and keeps the secret once per install. The lock
+// makes a second sign-in wait for the first lookup instead of downloading again.
+func (a *api) ensureAntigravitySecret(ctx context.Context) error {
+	a.agSecretMu.Lock()
+	defer a.agSecretMu.Unlock()
+	if a.antigravityClientSecret() != "" {
+		return nil
+	}
+	// Not the request's context: a tunnel can drop a slow request, and the lookup
+	// must still finish so the next attempt finds the secret kept.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+	defer cancel()
+	s, src, err := findAntigravitySecret(ctx)
+	if err != nil {
+		return err
+	}
+	if err := a.store.SetSetting(antigravitySecretKey, s); err != nil {
+		return err
+	}
+	log.Printf("antigravity: client secret read from %s", src)
+	return nil
 }
 
 // idTokenClaims reads the email and ChatGPT account id from an OpenAI id token.

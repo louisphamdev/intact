@@ -40,7 +40,7 @@ gate, intact answers a loopback `Host` header only.
 | `INTACT_SESSION_TTL` | Session lifetime in seconds (default 43200). |
 | `INTACT_OWNER_LOOPBACK` | `1` gives a loopback sign-in with no forwarding header an unlimited budget. Off by default. Read `docs/security.md` before you set it. |
 | `INTACT_ARENA_URL` | A mirror of the Hugging Face datasets server `/rows` API for the LMArena rankings (default `https://datasets-server.huggingface.co`). |
-| `INTACT_ANTIGRAVITY_CLIENT_SECRET` | The Google OAuth client secret of the Antigravity app. The Antigravity sign-in needs it, and intact does not ship it. See [The Antigravity client secret](providers.md#the-antigravity-client-secret). |
+| `INTACT_ANTIGRAVITY_CLIENT_SECRET` | The Google OAuth client secret of the Antigravity app. Optional: intact finds the secret by itself on the first Antigravity sign-in. Set it only when that lookup fails. See [The Antigravity client secret](providers.md#the-antigravity-client-secret). |
 
 ### Enroll the sign-in
 
@@ -69,8 +69,8 @@ takes priority over the secret in the database.
    - For an API-key provider, paste the key.
    - For a coding-tool sign-in, follow the sign-in steps. See
      [Providers](providers.md#sign-in-flows).
-   - For the first Antigravity sign-in of an install, give intact the client
-     secret of the Antigravity app first. See
+   - The first Antigravity sign-in of an install can take one minute, because
+     intact gets the client secret of the Antigravity app one time. See
      [The Antigravity client secret](providers.md#the-antigravity-client-secret).
 3. **Endpoint → API keys → Create**: copy the `sk-intact-…` key. It is shown
    again only when you press Reveal.

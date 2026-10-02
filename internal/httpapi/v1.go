@@ -913,6 +913,9 @@ func (a *api) send(r *http.Request, p provider.Provider, providerID, path, secre
 	if err != nil {
 		return nil, err
 	}
+	if !p.Bifrost(r.Header.Get("User-Agent")) {
+		a.fitLongContextBeta(out, providerID, body)
+	}
 	// The answer is relayed to the caller, so the wait for the headers and the
 	// gap between two reads are bounded, never the whole call: a stream that
 	// keeps sending must reach the caller whole.

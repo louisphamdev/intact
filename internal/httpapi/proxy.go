@@ -124,6 +124,30 @@ func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, path
 }
 
 // withBetas adds the values a list lacks, keeping the caller's order.
+// fitLongContextBeta drops the 1M-context beta for a model whose window, from
+// the provider's model list, is smaller: Anthropic refuses the whole request
+// for it. An unknown window keeps the flag.
+func (a *api) fitLongContextBeta(out *http.Request, providerID string, body []byte) {
+	beta := out.Header.Get("Anthropic-Beta")
+	if !strings.Contains(beta, "context-1m-") {
+		return
+	}
+	model, _ := bodyModel(body)
+	a.cat.mu.Lock()
+	input := a.cat.m[providerID].info[model].Input
+	a.cat.mu.Unlock()
+	if input == 0 || input >= 1_000_000 {
+		return
+	}
+	var keep []string
+	for _, b := range strings.Split(beta, ",") {
+		if !strings.HasPrefix(strings.TrimSpace(b), "context-1m-") {
+			keep = append(keep, b)
+		}
+	}
+	out.Header.Set("Anthropic-Beta", strings.Join(keep, ","))
+}
+
 func withBetas(list string, need []string) string {
 	have := map[string]bool{}
 	for _, b := range strings.Split(list, ",") {

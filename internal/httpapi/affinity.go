@@ -147,17 +147,24 @@ var compactMarkers = []string{
 
 // compactRestarts reports a compaction whose answer becomes the new start of
 // the conversation: no account holds a cache for what follows it. Only the
-// last message counts, so a quoted prompt earlier in the history does not.
+// last user message counts, so a quoted prompt earlier in the history does
+// not; Claude Code can put a system message after it.
 func compactRestarts(body []byte) bool {
 	var b struct {
 		Messages []struct {
+			Role    string          `json:"role"`
 			Content json.RawMessage `json:"content"`
 		} `json:"messages"`
 	}
-	if json.Unmarshal(body, &b) != nil || len(b.Messages) == 0 {
+	if json.Unmarshal(body, &b) != nil {
 		return false
 	}
-	raw := b.Messages[len(b.Messages)-1].Content
+	var raw json.RawMessage
+	for i := len(b.Messages) - 1; i >= 0 && raw == nil; i-- {
+		if b.Messages[i].Role == "user" {
+			raw = b.Messages[i].Content
+		}
+	}
 	var texts []string
 	var one string
 	var blocks []struct {

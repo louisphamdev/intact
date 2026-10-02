@@ -431,7 +431,8 @@ const (
 
 func compactRequest(session, prompt string) *http.Request {
 	last, _ := json.Marshal([]map[string]string{{"type": "text", "text": prompt}})
-	msgs := strings.TrimSuffix(compactHistory, "]") + `,{"role":"user","content":` + string(last) + `}]`
+	// Claude Code 2.1.287 puts a system message after the prompt.
+	msgs := strings.TrimSuffix(compactHistory, "]") + `,{"role":"user","content":` + string(last) + `},{"role":"system","content":"<total_tokens>1 tokens left</total_tokens>"}]`
 	r := loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m","max_tokens":5,"messages":`+msgs+`}`))
 	r.Header.Set("User-Agent", "claude-cli/2.1.287 (external, cli)")
 	r.Header.Set("X-Claude-Code-Session-Id", session)
@@ -478,19 +479,20 @@ func TestRecentCompactKeepsTheSession(t *testing.T) {
 	}
 }
 
-// Only the last message asks for the compaction; the same text earlier in the
-// history (a quoted prompt) is not one.
+// Only the last user message asks for the compaction; the same text earlier in
+// the history (a quoted prompt) is not one.
 func TestCompactIsReadFromTheLastMessageOnly(t *testing.T) {
 	quoted, _ := json.Marshal(compactFull)
 	cases := map[string]struct {
 		body string
 		want bool
 	}{
-		"string content": {`{"messages":[{"role":"user","content":` + string(quoted) + `}]}`, true},
-		"quoted earlier": {`{"messages":[{"role":"user","content":` + string(quoted) + `},{"role":"assistant","content":"x"},{"role":"user","content":"go on"}]}`, false},
-		"plain request":  {`{"messages":[{"role":"user","content":"hi"}]}`, false},
-		"no messages":    {`{}`, false},
-		"not json":       {`not json`, false},
+		"string content":  {`{"messages":[{"role":"user","content":` + string(quoted) + `}]}`, true},
+		"quoted earlier":  {`{"messages":[{"role":"user","content":` + string(quoted) + `},{"role":"assistant","content":"x"},{"role":"user","content":"go on"}]}`, false},
+		"system after it": {`{"messages":[{"role":"user","content":` + string(quoted) + `},{"role":"system","content":"x"}]}`, true},
+		"plain request":   {`{"messages":[{"role":"user","content":"hi"}]}`, false},
+		"no messages":     {`{}`, false},
+		"not json":        {`not json`, false},
 	}
 	for name, c := range cases {
 		if got := compactRestarts([]byte(c.body)); got != c.want {

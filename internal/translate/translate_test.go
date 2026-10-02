@@ -239,12 +239,16 @@ func TestOpenAIToGemini(t *testing.T) {
 	}
 	s := string(out)
 	for _, want := range []string{`"systemInstruction":{"parts":[{"text":"sys"}],"role":"user"}`, `"inlineData":{"data":"QUJD","mimeType":"image/png"}`,
-		`"thoughtSignature":"SIG1"`, `"functionResponse":{"id":"c1","name":"get_weather","response":{"result":{"t":30}}}`,
+		`"thoughtSignature":"SIG1"`, `"functionResponse":{"id":"c1","name":"get_weather","response":{"output":"{\"t\":30}"}}`,
 		`"maxOutputTokens":64000`, `"thinkingLevel":"low"`, `"name":"get_weather"`, `"city":{"type":"string"}`,
-		`"unit":{"enum":["c","f"],"type":"string"}`, `"n":{"enum":["3"],"type":"string"}`, `"required":["city"]`, `"mode":"VALIDATED"`} {
+		`"unit":{"enum":["c","f"],"type":"string"}`, `"n":{"enum":["3"],"type":"string"}`, `"required":["city"]`} {
 		if !strings.Contains(s, want) {
 			t.Errorf("gemini request missing %s:\n%s", want, s)
 		}
+	}
+	// The Antigravity CLI sends no toolConfig unless it names a tool choice.
+	if strings.Contains(s, "toolConfig") {
+		t.Errorf("toolConfig sent without a tool_choice: %s", s)
 	}
 	if strings.Contains(s, "$schema") || strings.Contains(s, "additionalProperties") || strings.Contains(s, "minLength") {
 		t.Errorf("unsupported schema keys left: %s", s)
@@ -329,7 +333,7 @@ func TestOpenAIToGeminiToolChoice(t *testing.T) {
 	if got != want {
 		t.Errorf("toolConfig = %s, want %s", got, want)
 	}
-	for choice, mode := range map[string]string{`"required"`: "ANY", `"none"`: "NONE", `"auto"`: "VALIDATED"} {
+	for choice, mode := range map[string]string{`"required"`: "ANY", `"none"`: "NONE"} {
 		out, err := OpenAIToGemini([]byte(req(choice)), memSigs{})
 		if err != nil {
 			t.Fatal(err)
@@ -338,6 +342,14 @@ func TestOpenAIToGeminiToolChoice(t *testing.T) {
 		if got := j(mustJSON(t, out)["toolConfig"]); got != want {
 			t.Errorf("tool_choice %s gave %s, want %s", choice, got, want)
 		}
+	}
+	// "auto" is Gemini's own default, so it needs no toolConfig.
+	out, err = OpenAIToGemini([]byte(req(`"auto"`)), memSigs{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tc, ok := mustJSON(t, out)["toolConfig"]; ok {
+		t.Errorf("tool_choice auto gave toolConfig %s", j(tc))
 	}
 }
 

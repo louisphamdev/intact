@@ -161,7 +161,7 @@ var registry = map[string]Provider{
 			"gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"},
 	},
 	// Antigravity: Google's Cloud Code Assist (v1internal) as the Antigravity
-	// IDE reaches it, with the Google OAuth token. The Gemini request travels
+	// CLI reaches it, with the Google OAuth token. The Gemini request travels
 	// inside an envelope naming the account's Cloud project.
 	"antigravity": {
 		ID:         "antigravity",
@@ -256,10 +256,11 @@ const (
 	CopilotAPIVersion    = "2025-04-01"
 )
 
-// AntigravityUserAgent is the IDE identity Antigravity calls carry.
+// AntigravityUserAgent is copied verbatim from a captured Antigravity CLI. Its
+// OAuth client is the one intact signs in with, so the pair stays consistent.
 const (
-	AntigravityVersion   = "2.11.0"
-	AntigravityUserAgent = "antigravity/ide/" + AntigravityVersion + " darwin/arm64"
+	AntigravityVersion   = "1.2.14"
+	AntigravityUserAgent = "antigravity/cli/" + AntigravityVersion + " (aidev_client; os_type=windows; arch=amd64; cl=990662481; auth_method=consumer)"
 )
 
 // CodexCLIVersion is the Codex CLI version intact presents; the backend hides

@@ -99,9 +99,6 @@ func TestAntigravityVariantsFoldAndFallBack(t *testing.T) {
 		}
 	}))
 	defer up.Close()
-	old := antigravityProdURL
-	antigravityProdURL = up.URL
-	defer func() { antigravityProdURL = old }()
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
 	s.CreateConnection("antigravity", "a1", "fake-token-a")

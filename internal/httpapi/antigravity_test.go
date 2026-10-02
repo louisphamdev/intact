@@ -27,9 +27,6 @@ func TestAntigravityWrapsAndTranslates(t *testing.T) {
 		}
 	}))
 	defer up.Close()
-	old := antigravityProdURL
-	antigravityProdURL = up.URL
-	defer func() { antigravityProdURL = old }()
 
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
@@ -40,7 +37,7 @@ func TestAntigravityWrapsAndTranslates(t *testing.T) {
 	if b := rec.Body.String(); !strings.Contains(b, `"content":"OK"`) || !strings.Contains(b, `"object":"chat.completion"`) {
 		t.Fatalf("caller got %s", b)
 	}
-	if gotPath != "/v1internal:streamGenerateContent?alt=sse" || !strings.HasPrefix(gotUA, "antigravity/ide/") {
+	if gotPath != "/v1internal:streamGenerateContent?alt=sse" || !strings.HasPrefix(gotUA, "antigravity/cli/") {
 		t.Errorf("upstream path=%s ua=%s", gotPath, gotUA)
 	}
 	for _, want := range []string{`"project":"proj-7"`, `"model":"gemini-3-flash"`, `"requestType":"agent"`, `"systemInstruction"`, `"sessionId":"-`} {

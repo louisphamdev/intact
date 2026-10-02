@@ -87,11 +87,8 @@ func OpenAIToGemini(body []byte, sigs Signatures) ([]byte, error) {
 			add("model", parts)
 		case "tool":
 			id := str(m["tool_call_id"])
-			text := contentText(m["content"])
-			var result any = obj{"result": text}
-			if v := parseArgs(text); len(asObj(v)) > 0 {
-				result = obj{"result": v}
-			}
+			// The Antigravity CLI hands a tool result back as its text under "output".
+			result := obj{"output": contentText(m["content"])}
 			add("user", []any{obj{"functionResponse": obj{"id": id, "name": names[id], "response": result}}})
 		}
 	}
@@ -166,7 +163,8 @@ func OpenAIToGemini(body []byte, sigs Signatures) ([]byte, error) {
 		}
 		if len(decls) > 0 {
 			out["tools"] = []any{obj{"functionDeclarations": decls}}
-			fc := obj{"mode": "VALIDATED"}
+			// No toolConfig leaves Gemini on its default, as the Antigravity CLI does.
+			fc := obj{}
 			switch tc := in["tool_choice"].(type) {
 			case string:
 				if tc == "required" {
@@ -182,7 +180,9 @@ func OpenAIToGemini(body []byte, sigs Signatures) ([]byte, error) {
 					fc["allowedFunctionNames"] = []any{name}
 				}
 			}
-			out["toolConfig"] = obj{"functionCallingConfig": fc}
+			if len(fc) > 0 {
+				out["toolConfig"] = obj{"functionCallingConfig": fc}
+			}
 		}
 	}
 	return json.Marshal(out)

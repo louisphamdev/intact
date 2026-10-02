@@ -332,8 +332,7 @@ func quotaAntigravity(a *api, ctx context.Context, c store.Connection, token str
 	if err != nil {
 		return AccountQuota{}, err
 	}
-	h := map[string]string{"Authorization": "Bearer " + token, "User-Agent": provider.AntigravityUserAgent,
-		"X-Client-Name": "antigravity", "X-Client-Version": provider.AntigravityVersion}
+	h := map[string]string{"Authorization": "Bearer " + token, "User-Agent": provider.AntigravityUserAgent}
 	base := antigravityQuotaURL
 	if over, ok := a.baseOverride["antigravity"]; ok {
 		base = over

@@ -194,11 +194,11 @@ func (a *api) recordUsage(connID, keyID string, body []byte, contentEncoding str
 	// A failure must not affect the request the caller already has; the counter
 	// is a convenience, not part of the proxy contract. Log it so a store fault
 	// (a lock, a full disk) is visible instead of losing counts in silence.
-	if err := a.store.AddUsage(day, connID, c.Model, c.InputTokens, c.OutputTokens); err != nil {
+	if err := a.store.AddUsage(day, connID, c.Model, c.InputTokens, c.OutputTokens, c.CachedTokens); err != nil {
 		log.Printf("record usage for connection %s: %v", connID, err)
 	}
 	if keyID != "" {
-		if err := a.store.AddKeyUsage(day, keyID, c.Model, c.InputTokens, c.OutputTokens); err != nil {
+		if err := a.store.AddKeyUsage(day, keyID, c.Model, c.InputTokens, c.OutputTokens, c.CachedTokens); err != nil {
 			log.Printf("record usage for api key %s: %v", keyID, err)
 		}
 	}

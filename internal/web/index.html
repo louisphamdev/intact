@@ -460,7 +460,7 @@ const VI={
 'Loading…':'Đang tải…','Starting…':'Đang bắt đầu…','All':'Tất cả','New':'Mới','None':'Không có','Enabled':'Đang bật','Enabled: {0}':'Đang bật: {0}',
 'Active':'Đang bật','Off':'Tắt','active':'đang bật','off':'tắt','Standby':'Dự phòng','standby':'dự phòng','Standby: this account takes no turns and serves only when every other active account fails or is busy.':'Dự phòng: account này không nhận lượt, chỉ được gọi khi mọi account đang bật khác lỗi hoặc bận.','Test':'Test','Clear':'Bỏ chọn','Add':'Thêm','Login':'Đăng nhập','Sign in':'Đăng nhập',
 'Provider':'Nhà cung cấp','Account':'Tài khoản','Model':'Model','Kind':'Loại','Note':'Ghi chú','Type':'Kiểu','Field':'Trường','Seen':'Số lần thấy','Sample':'Mẫu',
-'Direction':'Chiều','Day':'Ngày','All days':'Mọi ngày','Input':'Vào','Output':'Ra','Requests':'Request','Input tokens':'Token vào','Output tokens':'Token ra',
+'Direction':'Chiều','Day':'Ngày','All days':'Mọi ngày','Input':'Vào','Output':'Ra','Requests':'Request','Input tokens':'Token vào','Output tokens':'Token ra','Cached':'Cache','Cached tokens':'Token cache',
 // endpoint
 'API keys':'API key','Base URL':'Base URL','Models':'Model','Auth':'Xác thực','Anthropic Messages API':'Anthropic Messages API','OpenAI Chat Completions API':'OpenAI Chat Completions API',
 'MCP server':'MCP server','Transport':'Giao thức','Create key':'Tạo key','Edit expiry and rate limit':'Sửa hạn dùng và rate limit','{0}/min':'{0}/phút','No rate limit':'Không giới hạn rate','until {0}':'đến {0}','No expiry':'Không hết hạn','expires in {0} d':'còn {0} ngày','last used {0}':'dùng lần cuối {0}','never used':'chưa dùng','Limits · {0}':'Giới hạn · {0}','Empty: the key never expires. After this time the key is refused (401).':'Để trống: key không hết hạn. Sau thời điểm này key bị từ chối (401).','Requests per minute':'Request mỗi phút','No limit':'Không giới hạn','Empty or 0: no limit. Over it, a call gets 429 with Retry-After.':'Trống hoặc 0: không giới hạn. Vượt mức, lời gọi nhận 429 kèm Retry-After.','Requests per minute: a whole number from 0 to 100000.':'Request mỗi phút: số nguyên từ 0 đến 100000.','Usage · {0}':'Usage · {0}','Requests · 30 days':'Request · 30 ngày','Last minute':'Phút vừa qua','Requests per day, last 30 days':'Request mỗi ngày, 30 ngày qua','{0} requests':'{0} request','Requests per day':'Request mỗi ngày','By model':'Theo model','By day':'Theo ngày','No usage in the last 30 days':'Không có usage trong 30 ngày qua','Calls made with this key show up here.':'Các lời gọi dùng key này sẽ hiện ở đây.','No keys yet.':'Chưa có key nào.','Create API key':'Tạo API key','Key created':'Đã tạo key',
@@ -687,6 +687,8 @@ const ICON={copy:['M9 9h11v11H9z','M5 15H4V4h11v1'],clock:['M12 3a9 9 0 1 0 0 18
   plus:['M12 5v14M5 12h14'],back:['M19 12H5m0 0 6-6m-6 6 6 6'],layers:['M12 3 3 8l9 5 9-5-9-5Z','m3 13 9 5 9-5'],
   search:['M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Z','m20 20-3.5-3.5']};
 const fmt=n=>Number(n||0).toLocaleString('en-US');
+// Cached tokens are part of the input; the share shows how much of it the provider read from its cache.
+const cachedText=(c,inp)=>{if(!(inp>0))return fmt(c);const p=c/inp*100;return fmt(c)+' · '+(p>0&&p<1?'<1':Math.round(p))+'%'};
 const short=id=>id.slice(0,8);
 
 // Display names and colours for known providers. Anything else shows its id.
@@ -1643,17 +1645,17 @@ async function showKeyUsage(k){
   openModal('kModal');
   let d;
   try{d=await api('/keys/'+k.id+'/usage')}catch(e){$('kBody').replaceChildren(el('div',{class:'err-msg',text:e.message}));return}
-  const rows=d.rows||[],sum=f=>rows.reduce((s,r)=>s+r[f],0);
+  const rows=d.rows||[],sum=f=>rows.reduce((s,r)=>s+(r[f]||0),0);
   const byDay=new Map(),byModel=new Map();
   for(const r of rows){
-    const a=byDay.get(r.day)||{requests:0,inputTokens:0,outputTokens:0};
-    const b=byModel.get(r.model)||{requests:0,inputTokens:0,outputTokens:0};
-    for(const f of ['requests','inputTokens','outputTokens']){a[f]+=r[f];b[f]+=r[f]}
+    const a=byDay.get(r.day)||{requests:0,inputTokens:0,outputTokens:0,cachedTokens:0};
+    const b=byModel.get(r.model)||{requests:0,inputTokens:0,outputTokens:0,cachedTokens:0};
+    for(const f of ['requests','inputTokens','outputTokens','cachedTokens']){a[f]+=r[f]||0;b[f]+=r[f]||0}
     byDay.set(r.day,a);byModel.set(r.model,b);
   }
   const stat=(k2,v)=>el('div',{class:'stat'},el('div',{class:'k',text:t(k2)}),el('div',{class:'v',text:v}));
   const stats=el('div',{class:'stats',style:'margin-bottom:1rem'},
-    stat('Requests · 30 days',fmt(sum('requests'))),stat('Input tokens',fmt(sum('inputTokens'))),stat('Output tokens',fmt(sum('outputTokens'))),
+    stat('Requests · 30 days',fmt(sum('requests'))),stat('Input tokens',fmt(sum('inputTokens'))),stat('Cached tokens',cachedText(sum('cachedTokens'),sum('inputTokens'))),stat('Output tokens',fmt(sum('outputTokens'))),
     stat('Last minute',d.rpm?fmt(d.lastMinute)+' / '+fmt(d.rpm):fmt(d.lastMinute)));
   // The 30 days end today in the server's day, so an idle day shows as an empty slot.
   const days=[];const end=new Date(d.today+'T00:00:00Z');
@@ -1674,8 +1676,8 @@ async function showKeyUsage(k){
   });
   for(const i of [0,days.length-1]){const tx=mk('text',{x:i?W:0,y:H+14,'text-anchor':i?'end':'start','font-size':11,fill:'var(--muted)'});tx.textContent=days[i].slice(5);chart.append(tx)}
   const table=(head,entries)=>el('div',{class:'scroll'},el('table',{},
-    el('thead',{},el('tr',{},el('th',{},t(head)),el('th',{class:'num'},t('Requests')),el('th',{class:'num'},t('Input tokens')),el('th',{class:'num'},t('Output tokens')))),
-    el('tbody',{},entries.map(([name,x])=>el('tr',{},el('td',{class:head==='Model'?'mono':'',text:name}),el('td',{class:'num',text:fmt(x.requests)}),el('td',{class:'num',text:fmt(x.inputTokens)}),el('td',{class:'num',text:fmt(x.outputTokens)}))))));
+    el('thead',{},el('tr',{},el('th',{},t(head)),el('th',{class:'num'},t('Requests')),el('th',{class:'num'},t('Input')),el('th',{class:'num'},t('Cached')),el('th',{class:'num'},t('Output')))),
+    el('tbody',{},entries.map(([name,x])=>el('tr',{},el('td',{class:head==='Model'?'mono':'',text:name}),el('td',{class:'num',text:fmt(x.requests)}),el('td',{class:'num',text:fmt(x.inputTokens)}),el('td',{class:'num',text:fmt(x.cachedTokens)}),el('td',{class:'num',text:fmt(x.outputTokens)}))))));
   $('kBody').replaceChildren(stats,
     rows.length?el('div',{},
       el('h3',{style:'font-size:.9rem;margin:.25rem 0 .5rem'},t('Requests per day')),chart,
@@ -3183,13 +3185,14 @@ function viewUsage(v){
                 :el('span',{class:'mono faint',text:acctLabel(u)})}},
       {id:'model',label:'Model',type:'text',get:u=>u.model||'',cls:'mono'},
       {id:'in',label:'Input',type:'num',cls:'num',get:u=>u.inputTokens,td:u=>fmt(u.inputTokens)},
+      {id:'cached',label:'Cached',type:'num',cls:'num',get:u=>u.cachedTokens||0,td:u=>fmt(u.cachedTokens||0)},
       {id:'out',label:'Output',type:'num',cls:'num',get:u=>u.outputTokens,td:u=>fmt(u.outputTokens)},
       {id:'req',label:'Requests',type:'num',cls:'num',get:u=>u.requests,td:u=>fmt(u.requests)},
     ],
     // The totals are those of the rows the filters show.
-    onRender:rows=>{const sum=k=>rows.reduce((s,u)=>s+u[k],0);
-      stats.replaceChildren(...[['Requests',sum('requests')],['Input tokens',sum('inputTokens')],['Output tokens',sum('outputTokens')]]
-        .map(([k,n])=>el('div',{class:'stat'},el('div',{class:'k',text:k}),el('div',{class:'v',text:fmt(n)}))))},
+    onRender:rows=>{const sum=k=>rows.reduce((s,u)=>s+(u[k]||0),0);
+      stats.replaceChildren(...[['Requests',fmt(sum('requests'))],['Input tokens',fmt(sum('inputTokens'))],['Cached tokens',cachedText(sum('cachedTokens'),sum('inputTokens'))],['Output tokens',fmt(sum('outputTokens'))]]
+        .map(([k,v])=>el('div',{class:'stat'},el('div',{class:'k',text:k}),el('div',{class:'v',text:v}))))},
   });
   if(!S.usage.length){v.append(el('div',{class:'card'},el('div',{class:'empty'},el('b',{},'No usage recorded yet'),'Requests through /v1 show up here.')));return}
   v.append(stats,el('div',{style:'display:flex;justify-content:flex-end;margin-bottom:-1rem'},tbl.clearBtn),el('div',{class:'card scroll'},tbl.table));

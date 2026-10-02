@@ -77,3 +77,29 @@ func TestParseAnthropicCacheTokens(t *testing.T) {
 		t.Errorf("got %+v, want input=5210 output=20", c)
 	}
 }
+
+// Cached tokens are the prompt tokens read from the provider's cache. They are
+// part of the input, and are counted again on their own so a hit rate can be read.
+func TestParseCachedTokens(t *testing.T) {
+	cases := map[string]struct {
+		body            string
+		in, out, cached int64
+	}{
+		"openai":    {`{"model":"m","usage":{"prompt_tokens":1000,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":896}}}`, 1000, 5, 896},
+		"anthropic": {`{"model":"m","usage":{"input_tokens":4,"output_tokens":5,"cache_read_input_tokens":900,"cache_creation_input_tokens":96}}`, 1000, 5, 900},
+		"anthropic stream": {"event: message_start\n" +
+			`data: {"type":"message_start","message":{"model":"m","usage":{"input_tokens":4,"cache_read_input_tokens":900,"cache_creation_input_tokens":96,"output_tokens":1}}}` + "\n\n" +
+			`data: {"type":"message_delta","usage":{"output_tokens":5}}` + "\n\n", 1000, 5, 900},
+		"responses stream": {"event: response.created\n" +
+			`data: {"type":"response.created","response":{"model":"m","usage":null}}` + "\n\n" +
+			"event: response.completed\n" +
+			`data: {"type":"response.completed","response":{"model":"m","usage":{"input_tokens":1000,"output_tokens":5,"input_tokens_details":{"cached_tokens":768}}}}` + "\n\n", 1000, 5, 768},
+		"no cache": {`{"model":"m","usage":{"prompt_tokens":10,"completion_tokens":2}}`, 10, 2, 0},
+	}
+	for name, c := range cases {
+		got := Parse([]byte(c.body))
+		if !got.Found || got.InputTokens != c.in || got.OutputTokens != c.out || got.CachedTokens != c.cached {
+			t.Errorf("%s: got %+v, want input=%d output=%d cached=%d", name, got, c.in, c.out, c.cached)
+		}
+	}
+}

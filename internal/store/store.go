@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS usage_daily (
 	model         TEXT NOT NULL,
 	input_tokens  INTEGER NOT NULL DEFAULT 0,
 	output_tokens INTEGER NOT NULL DEFAULT 0,
+	cached_tokens INTEGER NOT NULL DEFAULT 0,
 	requests      INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (day, connection_id, model)
 );`
@@ -120,6 +121,10 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("migrate api keys: %w", err)
 	}
 	if err := st.migrateOAuth(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := st.migrateUsageCached(); err != nil {
 		db.Close()
 		return nil, err
 	}

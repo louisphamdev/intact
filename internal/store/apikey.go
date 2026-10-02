@@ -46,6 +46,7 @@ type KeyUsageRow struct {
 	Model        string `json:"model"`
 	InputTokens  int64  `json:"inputTokens"`
 	OutputTokens int64  `json:"outputTokens"`
+	CachedTokens int64  `json:"cachedTokens"`
 	Requests     int64  `json:"requests"`
 }
 
@@ -68,6 +69,7 @@ CREATE TABLE IF NOT EXISTS usage_key_daily (
 	model         TEXT NOT NULL,
 	input_tokens  INTEGER NOT NULL DEFAULT 0,
 	output_tokens INTEGER NOT NULL DEFAULT 0,
+	cached_tokens INTEGER NOT NULL DEFAULT 0,
 	requests      INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (day, key_id, model)
 );`
@@ -325,15 +327,16 @@ func (s *Store) SetAPIKeyLimits(id, expiresAt string, rpm int) error {
 
 // AddKeyUsage folds one request's token counts into the key's daily counter and
 // records when the key was last used.
-func (s *Store) AddKeyUsage(day, keyID, model string, inputTokens, outputTokens int64) error {
+func (s *Store) AddKeyUsage(day, keyID, model string, inputTokens, outputTokens, cachedTokens int64) error {
 	if _, err := s.DB.Exec(
-		`INSERT INTO usage_key_daily (day, key_id, model, input_tokens, output_tokens, requests)
-		 VALUES (?, ?, ?, ?, ?, 1)
+		`INSERT INTO usage_key_daily (day, key_id, model, input_tokens, output_tokens, cached_tokens, requests)
+		 VALUES (?, ?, ?, ?, ?, ?, 1)
 		 ON CONFLICT(day, key_id, model) DO UPDATE SET
 		   input_tokens  = input_tokens  + excluded.input_tokens,
 		   output_tokens = output_tokens + excluded.output_tokens,
+		   cached_tokens = cached_tokens + excluded.cached_tokens,
 		   requests      = requests + 1`,
-		day, keyID, model, inputTokens, outputTokens); err != nil {
+		day, keyID, model, inputTokens, outputTokens, cachedTokens); err != nil {
 		return fmt.Errorf("add key usage: %w", err)
 	}
 	_, err := s.DB.Exec(`UPDATE api_keys SET last_used = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339), keyID)
@@ -343,7 +346,7 @@ func (s *Store) AddKeyUsage(day, keyID, model string, inputTokens, outputTokens 
 // KeyUsage returns a key's daily counters from day since on, newest day first.
 func (s *Store) KeyUsage(keyID, since string) ([]KeyUsageRow, error) {
 	rows, err := s.DB.Query(
-		`SELECT day, model, input_tokens, output_tokens, requests FROM usage_key_daily
+		`SELECT day, model, input_tokens, output_tokens, cached_tokens, requests FROM usage_key_daily
 		 WHERE key_id = ? AND day >= ? ORDER BY day DESC, model`, keyID, since)
 	if err != nil {
 		return nil, fmt.Errorf("query key usage: %w", err)
@@ -352,7 +355,7 @@ func (s *Store) KeyUsage(keyID, since string) ([]KeyUsageRow, error) {
 	out := []KeyUsageRow{}
 	for rows.Next() {
 		var r KeyUsageRow
-		if err := rows.Scan(&r.Day, &r.Model, &r.InputTokens, &r.OutputTokens, &r.Requests); err != nil {
+		if err := rows.Scan(&r.Day, &r.Model, &r.InputTokens, &r.OutputTokens, &r.CachedTokens, &r.Requests); err != nil {
 			return nil, fmt.Errorf("scan key usage: %w", err)
 		}
 		out = append(out, r)

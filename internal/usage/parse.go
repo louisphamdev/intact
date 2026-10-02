@@ -15,19 +15,25 @@ type Counts struct {
 	Model        string
 	InputTokens  int64
 	OutputTokens int64
+	// CachedTokens are the input tokens read from the provider's cache, a part
+	// of InputTokens.
+	CachedTokens int64
 	Found        bool
 }
 
-// envelope covers every place the two providers put usage. A streamed
-// Anthropic chunk nests model and usage under "message"; every other shape puts
-// them at the top level.
+// envelope covers every place the providers put usage. A streamed Anthropic
+// chunk nests model and usage under "message", a Responses event under
+// "response"; every other shape puts them at the top level.
 type envelope struct {
-	Model   string `json:"model"`
-	Usage   *usage `json:"usage"`
-	Message *struct {
-		Model string `json:"model"`
-		Usage *usage `json:"usage"`
-	} `json:"message"`
+	Model    string  `json:"model"`
+	Usage    *usage  `json:"usage"`
+	Message  *nested `json:"message"`
+	Response *nested `json:"response"`
+}
+
+type nested struct {
+	Model string `json:"model"`
+	Usage *usage `json:"usage"`
 }
 
 type usage struct {
@@ -39,6 +45,13 @@ type usage struct {
 	// still prompt tokens the account paid for, so they count as input.
 	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+	// OpenAI Chat and Responses report the cached part inside the input.
+	PromptTokensDetails *struct {
+		CachedTokens int64 `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+	InputTokensDetails *struct {
+		CachedTokens int64 `json:"cached_tokens"`
+	} `json:"input_tokens_details"`
 }
 
 // Parse extracts token usage from a full response body. For a stream it merges
@@ -53,12 +66,15 @@ func Parse(body []byte) Counts {
 			continue
 		}
 		model, u := e.Model, e.Usage
-		if e.Message != nil {
-			if e.Message.Model != "" {
-				model = e.Message.Model
+		for _, n := range []*nested{e.Message, e.Response} {
+			if n == nil {
+				continue
 			}
-			if e.Message.Usage != nil {
-				u = e.Message.Usage
+			if n.Model != "" {
+				model = n.Model
+			}
+			if n.Usage != nil {
+				u = n.Usage
 			}
 		}
 		if model != "" && c.Model == "" {
@@ -74,6 +90,16 @@ func Parse(body []byte) Counts {
 		}
 		if out > c.OutputTokens {
 			c.OutputTokens = out
+		}
+		cached := u.CacheReadInputTokens
+		if d := u.PromptTokensDetails; d != nil {
+			cached += d.CachedTokens
+		}
+		if d := u.InputTokensDetails; d != nil {
+			cached += d.CachedTokens
+		}
+		if cached > c.CachedTokens {
+			c.CachedTokens = cached
 		}
 		if in > 0 || out > 0 {
 			c.Found = true

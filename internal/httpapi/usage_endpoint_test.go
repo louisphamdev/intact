@@ -13,7 +13,7 @@ import (
 func TestUsageEndpointReturnsDailyRows(t *testing.T) {
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	defer s.Close()
-	if err := s.AddUsage("2026-09-21", "acc-1", "claude-opus-4-8", 120, 45); err != nil {
+	if err := s.AddUsage("2026-09-21", "acc-1", "claude-opus-4-8", 120, 45, 0); err != nil {
 		t.Fatal(err)
 	}
 

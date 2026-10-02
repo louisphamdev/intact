@@ -33,6 +33,9 @@ func clientShape(path string) string {
 		return translate.Anthropic
 	case "responses":
 		return translate.Responses
+	case "v1internal:streamGenerateContent", "v1internal:generateContent":
+		// The Antigravity CLI's own Code Assist calls.
+		return translate.Antigravity
 	}
 	return ""
 }

@@ -13,11 +13,17 @@ import (
 // upstream as sent. A body that is not a JSON object, or has no top-level model,
 // comes back unchanged with ok false.
 func setModel(body []byte, model string) (out []byte, ok bool) {
-	start, end, err := topLevelValue(body, "model")
+	return setTopLevelString(body, "model", model)
+}
+
+// setTopLevelString splices a new string value for a top-level key, the same
+// way setModel does.
+func setTopLevelString(body []byte, key, value string) (out []byte, ok bool) {
+	start, end, err := topLevelValue(body, key)
 	if err != nil {
 		return body, false
 	}
-	val, err := json.Marshal(model)
+	val, err := json.Marshal(value)
 	if err != nil {
 		return body, false
 	}

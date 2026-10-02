@@ -148,6 +148,7 @@ var registry = map[string]Provider{
 		Watch:      true,
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
+		BifrostUA:  "codex_cli_rs/",
 		Identity: map[string]string{
 			"Originator": "codex_cli_rs",
 			"User-Agent": "codex_cli_rs/" + CodexCLIVersion,
@@ -170,6 +171,7 @@ var registry = map[string]Provider{
 		Watch:      true,
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
+		BifrostUA:  "antigravity/cli/",
 		Identity:   map[string]string{"User-Agent": AntigravityUserAgent},
 		Setup:      "oauth",
 	},

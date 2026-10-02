@@ -22,18 +22,41 @@ type Counts struct {
 }
 
 // envelope covers every place the providers put usage. A streamed Anthropic
-// chunk nests model and usage under "message", a Responses event under
-// "response"; every other shape puts them at the top level.
+// chunk nests model and usage under "message", a Responses event and a Code
+// Assist chunk under "response"; every other shape puts them at the top level.
 type envelope struct {
-	Model    string  `json:"model"`
-	Usage    *usage  `json:"usage"`
-	Message  *nested `json:"message"`
-	Response *nested `json:"response"`
+	Model         string       `json:"model"`
+	Usage         *usage       `json:"usage"`
+	ModelVersion  string       `json:"modelVersion"`
+	UsageMetadata *geminiUsage `json:"usageMetadata"`
+	Message       *nested      `json:"message"`
+	Response      *nested      `json:"response"`
 }
 
 type nested struct {
-	Model string `json:"model"`
-	Usage *usage `json:"usage"`
+	Model         string       `json:"model"`
+	Usage         *usage       `json:"usage"`
+	ModelVersion  string       `json:"modelVersion"`
+	UsageMetadata *geminiUsage `json:"usageMetadata"`
+}
+
+// geminiUsage is Gemini's vocabulary. Thought tokens are billed as output, and
+// the cached tokens are a part of the prompt.
+type geminiUsage struct {
+	PromptTokenCount        int64 `json:"promptTokenCount"`
+	CandidatesTokenCount    int64 `json:"candidatesTokenCount"`
+	ThoughtsTokenCount      int64 `json:"thoughtsTokenCount"`
+	CachedContentTokenCount int64 `json:"cachedContentTokenCount"`
+}
+
+func (g *geminiUsage) asUsage() *usage {
+	if g == nil {
+		return nil
+	}
+	return &usage{PromptTokens: g.PromptTokenCount, CompletionTokens: g.CandidatesTokenCount + g.ThoughtsTokenCount,
+		PromptTokensDetails: &struct {
+			CachedTokens int64 `json:"cached_tokens"`
+		}{g.CachedContentTokenCount}}
 }
 
 type usage struct {
@@ -65,16 +88,21 @@ func Parse(body []byte) Counts {
 		if err := json.Unmarshal(obj, &e); err != nil {
 			continue
 		}
-		model, u := e.Model, e.Usage
+		model, u := firstNonEmpty(e.Model, e.ModelVersion), e.Usage
+		if u == nil {
+			u = e.UsageMetadata.asUsage()
+		}
 		for _, n := range []*nested{e.Message, e.Response} {
 			if n == nil {
 				continue
 			}
-			if n.Model != "" {
-				model = n.Model
+			if m := firstNonEmpty(n.Model, n.ModelVersion); m != "" {
+				model = m
 			}
 			if n.Usage != nil {
 				u = n.Usage
+			} else if n.UsageMetadata != nil {
+				u = n.UsageMetadata.asUsage()
 			}
 		}
 		if model != "" && c.Model == "" {
@@ -139,4 +167,11 @@ func jsonObjects(body []byte) [][]byte {
 		return [][]byte{body}
 	}
 	return out
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }

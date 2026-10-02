@@ -103,3 +103,22 @@ func TestParseCachedTokens(t *testing.T) {
 		}
 	}
 }
+
+func TestParseCodeAssistStream(t *testing.T) {
+	// Code Assist wraps each Gemini chunk in "response"; the last one holds the
+	// totals. Thought tokens are billed as output.
+	body := []byte(`data: {"response": {"candidates": [{"content": {"parts": [{"text": "O"}]}}],"modelVersion": "gemini-3.8-flash"},"traceId": "t"}` + "\n\n" +
+		`data: {"response": {"candidates": [{"content": {"parts": [{"text": "K"}]},"finishReason": "STOP"}],"usageMetadata": {"promptTokenCount": 4446,"candidatesTokenCount": 29,"totalTokenCount": 4500,"thoughtsTokenCount": 25,"cachedContentTokenCount": 4425},"modelVersion": "gemini-3.8-flash"},"traceId": "t"}` + "\n\n")
+	c := Parse(body)
+	if !c.Found || c.Model != "gemini-3.8-flash" || c.InputTokens != 4446 || c.OutputTokens != 54 || c.CachedTokens != 4425 {
+		t.Errorf("got %+v, want model=gemini-3.8-flash input=4446 output=54 cached=4425", c)
+	}
+}
+
+func TestParseGeminiPlainJSON(t *testing.T) {
+	body := []byte(`{"candidates":[{"content":{"parts":[{"text":"OK"}]}}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":3},"modelVersion":"gemini-3-flash"}`)
+	c := Parse(body)
+	if !c.Found || c.Model != "gemini-3-flash" || c.InputTokens != 12 || c.OutputTokens != 3 {
+		t.Errorf("got %+v, want model=gemini-3-flash input=12 output=3", c)
+	}
+}

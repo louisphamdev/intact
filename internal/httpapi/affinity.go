@@ -108,9 +108,20 @@ func conversationHead(body []byte) string {
 			Content json.RawMessage `json:"content"`
 		} `json:"messages"`
 		Input json.RawMessage `json:"input"`
+		// A Code Assist envelope carries Gemini contents.
+		Request struct {
+			Contents []struct {
+				Role  string          `json:"role"`
+				Parts json.RawMessage `json:"parts"`
+			} `json:"contents"`
+		} `json:"request"`
 	}
 	if json.Unmarshal(body, &b) != nil {
 		return ""
+	}
+	if len(b.Messages) == 0 && len(b.Input) == 0 && len(b.Request.Contents) > 0 {
+		first := b.Request.Contents[0]
+		return headHash(first.Role, first.Parts)
 	}
 	if len(b.Messages) == 0 && len(b.Input) > 0 {
 		var text string
@@ -165,9 +176,18 @@ func rawSessionKey(r *http.Request, body []byte) string {
 			UserID string `json:"user_id"`
 		} `json:"metadata"`
 		PromptCacheKey string `json:"prompt_cache_key"`
+		// The Antigravity CLI names each conversation in its Code Assist labels.
+		Request struct {
+			Labels struct {
+				TrajectoryID string `json:"trajectory_id"`
+			} `json:"labels"`
+		} `json:"request"`
 	}
 	if json.Unmarshal(body, &b) != nil {
 		return ""
+	}
+	if t := b.Request.Labels.TrajectoryID; t != "" {
+		return "s:traj:" + t
 	}
 	// OpenAI's field for the requests that share one cache.
 	if b.PromptCacheKey != "" {

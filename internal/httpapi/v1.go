@@ -338,6 +338,19 @@ func (a *api) model(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, bare[0])
 		return
 	}
+	// A client that picks the level itself (the Antigravity CLI sends
+	// gemini-3.8-flash-high) names a variant of a folded base.
+	if prov, rest := a.splitModel(want); prov != "" {
+		if base := a.variantBase(prov, rest); base != rest {
+			for _, e := range entries {
+				if e.ID == prov+"/"+base {
+					e.ID = want
+					writeJSON(w, e)
+					return
+				}
+			}
+		}
+	}
 	writeAPIError(w, http.StatusNotFound, "model_not_found", "model", "model "+strconv.Quote(want)+" is not served")
 }
 
@@ -725,12 +738,29 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			if client == "" || !translatable(want) {
 				return nil
 			}
+			if want == client && want == translate.Antigravity {
+				// The CLI's envelope keeps its own path and bytes; only the
+				// project is the account's.
+				project, err := a.antigravityProject(r.Context(), conn, secret)
+				if err != nil {
+					return errSkipAccount{err}
+				}
+				withProject, set := setTopLevelString(body, "project", project)
+				if !set {
+					return errors.New("the Code Assist request names no project")
+				}
+				send = withProject
+				return nil
+			}
 			if want == client {
 				// Same shape: bytes pass through, at the provider's own path.
 				if wantPath != "" {
 					path = wantPath
 				}
 				return nil
+			}
+			if client == translate.Antigravity {
+				return errors.New("a Code Assist request reaches only an Antigravity account")
 			}
 			if want == translate.Antigravity {
 				// The envelope names the account's project, so it is built

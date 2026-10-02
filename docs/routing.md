@@ -27,6 +27,7 @@ The rules for a model:
 | `/v1/messages` | Anthropic Messages |
 | `/v1/messages/count_tokens` | Anthropic token count. It is estimated locally when no Anthropic account serves the model. |
 | `/v1/responses` | OpenAI Responses (Codex CLI) |
+| `/v1/v1internal:streamGenerateContent`, `/v1/v1internal:generateContent` | Code Assist (Antigravity CLI). It reaches an Antigravity account only. |
 | any other path (`/v1/systemone`, …) | Passed through to the provider at the same path |
 
 Each provider speaks one shape: OpenAI, Anthropic, Responses (Codex), or Gemini
@@ -53,9 +54,11 @@ Details worth knowing:
 - **Copilot** serves Claude models on `/v1/messages`. It serves some models
   only on `/responses`: intact learns those from Copilot's refusal and sends
   them there.
-- **Antigravity** requests are wrapped in its envelope: project, session id,
-  and a request id per call. Gemini thought signatures are kept between turns,
-  so tool calls survive a round trip.
+- **Antigravity** requests are wrapped in its envelope, in the shape of the
+  Antigravity CLI: project, labels, session id, and a request id per call. The
+  output limit and the thinking budget come from the model list. Gemini thought
+  signatures are kept between turns, so tool calls survive a round trip.
+  [Antigravity](class-a-antigravity.md)
 - **Tool calls, images and reasoning** are carried across shapes where both
   sides support them.
 - **Responses tools** reach a chat provider as function tools. A tool in a
@@ -101,12 +104,14 @@ the top of the provider's Connections card, or at
   - the API key of the caller, so two keys never share one;
   - the session that the client names, when it names one: the
     `X-Claude-Code-Session-Id` header, the `session_id` in `metadata.user_id`,
-    or the OpenAI `prompt_cache_key` field. A plain `user_id` adds nothing;
-  - the first message that is not a system message (the next bullet).
+    the OpenAI `prompt_cache_key` field, or the `labels.trajectory_id` of the
+    Antigravity CLI. A plain `user_id` adds nothing;
+  - the first message that is not a system message (the next bullet). In a
+    Code Assist body, this is the first entry of `request.contents`.
 
   intact keeps a conversation for 1 hour after its last request, in memory. A
-  restart forgets the conversations. A body with no messages and no input
-  (an embedding, a model list) takes the rotation.
+  restart forgets the conversations. A body with no messages, no input and no
+  contents (an embedding, a model list) takes the rotation.
 - **A compaction starts a new conversation.** The provider caches the start
   of the conversation, so the first message changes only when the cache
   cannot hit. intact does not need to know whether a new first message comes
@@ -187,7 +192,7 @@ identity recorded from the real tool's traffic, with its version constants in
 `internal/provider/registry.go`:
 - Codex CLI user agent and account header;
 - the VS Code Copilot Chat headers;
-- Antigravity IDE user agent;
+- Antigravity CLI user agent;
 - Claude Code user agent and beta flags.
 
 A request from the provider's own client keeps its own identity: intact
@@ -200,6 +205,5 @@ The headers that a proxy in front of intact adds never reach a provider:
 A request that intact translates to a provider of another shape does not
 carry the client's query string. The query belongs to the client's API.
 
-Some providers answer differently by client version. Antigravity, for example,
-lists the `-high/-medium/-low` variants only to IDE 2.11.0. Keep these
-constants current.
+Some providers answer differently by client version. Keep these constants
+current.

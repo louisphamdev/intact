@@ -53,7 +53,8 @@ API: `POST /quota/{connectionId}/reset` (requires a dashboard session). Machine 
 ## Usage
 
 intact reads the `usage` object of every answer: JSON or a stream,
-compressed or not, in the Chat, Messages and Responses shapes. It adds the
+compressed or not, in the Chat, Messages, Responses and Gemini shapes. For
+Gemini it reads `usageMetadata`. It adds the
 counts to a daily total per account and model, and per API key. It reads the
 answer and never changes it:
 - For a large answer, only the head and tail are read, which bounds memory.
@@ -68,8 +69,8 @@ Each total has three token counts:
 | Field | What it counts |
 | --- | --- |
 | `inputTokens` | Every prompt token, cached or not. Anthropic cache reads and cache writes are included. |
-| `cachedTokens` | The part of `inputTokens` that the provider read from its cache: `cache_read_input_tokens` (Anthropic), `cached_tokens` (OpenAI Chat and Responses). |
-| `outputTokens` | Every answer token, reasoning included. |
+| `cachedTokens` | The part of `inputTokens` that the provider read from its cache: `cache_read_input_tokens` (Anthropic), `cached_tokens` (OpenAI Chat and Responses), `cachedContentTokenCount` (Gemini). |
+| `outputTokens` | Every answer token, reasoning included. For Gemini this is `candidatesTokenCount` plus `thoughtsTokenCount`. |
 
 The **Cached tokens** tile shows the count and its share of the input tokens.
 That share tells how well [conversation pinning](routing.md) keeps each

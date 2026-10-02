@@ -83,3 +83,11 @@ protocol has a place for it.
   store the last value per connection.
 
 Neither is implemented yet.
+
+## Bifrost
+
+The `codex` provider declares `codex_cli_rs/` as the User-Agent prefix of its
+client. A caller with this prefix on `/v1/responses` keeps its own headers and
+body. intact changes only the token, the ChatGPT account id and the session id.
+This covers the HTTP transport. The WebSocket transport still needs the proxy
+that this page describes.

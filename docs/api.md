@@ -33,6 +33,7 @@ intact does not serve a CORS preflight on `/v1`, and answers `OPTIONS` with 405.
 | `POST /v1/chat/completions` | OpenAI shape, to any provider. |
 | `GET /v1/models/{model}` | One model, by `<provider>/<model>` or by a bare id that one provider serves. |
 | `POST /v1/messages` | Anthropic shape, to any provider. `max_tokens` is required, as at Anthropic. |
+| `POST /v1/v1internal:streamGenerateContent`, `POST /v1/v1internal:generateContent` | The Code Assist shape of the Antigravity CLI, to an Antigravity account only ([Antigravity](class-a-antigravity.md)). |
 | `POST /v1/messages/count_tokens` | Anthropic token count; estimated when no Anthropic account serves the model. |
 | `* /v1/{path}` | Any other path, passed through to the provider at that path (`/v1/responses`, `/v1/systemone`, …). |
 

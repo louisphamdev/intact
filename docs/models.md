@@ -53,10 +53,18 @@ says nothing about thinking, so the `thinking` tag stays unknown.
 ## Bifrost field
 
 The entry of a model gives `bifrost_ua` when the provider has its own client.
-The value is the start of the `User-Agent` of that client. Today only the
-`claude` provider gives it: `claude-cli/`. A gateway in front of intact, for
-example llm-switcher, compares this value with the `User-Agent` of its client.
-If they match, the gateway sends the request unchanged.
+The value is the start of the `User-Agent` of that client:
+
+| Provider | `bifrost_ua` |
+| --- | --- |
+| `claude` | `claude-cli/` |
+| `codex` | `codex_cli_rs/` |
+| `antigravity` | `antigravity/cli/` |
+
+A gateway in front of intact, for example llm-switcher, compares this value
+with the `User-Agent` of its client. If they match, the gateway sends the
+request unchanged. A level id such as `antigravity/gemini-3.8-flash-high` gets
+the entry of its folded base, with its own id.
 [Bifrost](class-a-claude.md#bifrost-claude-code-to-a-claude-code-account)
 
 ## Switches

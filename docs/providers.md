@@ -41,7 +41,10 @@ See [Quota and usage](quota-and-usage.md).
   id read from the token. A client may call `/v1/responses` with a Codex model
   and get Codex's own stream byte for byte.
 - **Antigravity.**
-  - intact loads the account's project on first use and keeps it.
+  - intact presents itself as the Antigravity CLI. The shape of each request
+    follows a capture of the CLI ([Antigravity](class-a-antigravity.md)).
+  - intact loads the account's project on first use, from the daily host, and
+    keeps it.
   - Level variants are folded (see [Routing](routing.md#antigravity-level-variants)).
   - The Claude Code billing line is blacklisted by default: Google answers a
     false 429 when it is present.

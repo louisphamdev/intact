@@ -29,11 +29,14 @@ To build from source, see [Getting started](docs/getting-started.md).
 - **OpenAI and Anthropic shapes.** `/v1/chat/completions` and `/v1/messages`
   reach any provider. intact translates the request and the answer (streamed or
   whole) when the shapes differ. When they match, the bytes pass through untouched.
-- **Bifrost.** When Claude Code calls a Claude Code account, intact changes only
-  the token. The headers, the betas and the body of Claude Code stay as sent, and
-  the blacklist does not run. intact turns Bifrost on by itself from the
-  `User-Agent`. llm-switcher reads `bifrost_ua` from `/v1/models` and also sends
-  the request unchanged. [Bifrost](docs/class-a-claude.md#bifrost-claude-code-to-a-claude-code-account)
+- **Bifrost.** When a coding tool calls an account of its own provider, intact
+  changes only the token. The headers and the body of the tool stay as sent, and
+  the blacklist does not run. This applies to Claude Code, the Codex CLI and the
+  Antigravity CLI (`agy`). For `agy`, intact also writes the project of the
+  account. intact turns Bifrost on by itself from the `User-Agent`. llm-switcher
+  reads `bifrost_ua` from `/v1/models` and also sends the request unchanged.
+  [Claude Code](docs/class-a-claude.md#bifrost-claude-code-to-a-claude-code-account) ·
+  [Antigravity CLI](docs/class-a-antigravity.md#bifrost-the-cli-to-an-antigravity-account)
 - **Rotation and failover.** Requests rotate across a model's accounts. A busy
   answer (429, 500, 503, 409, 404) moves to the next account. An expired OAuth
   token is refreshed and the request retried. A Claude Code session stays on
@@ -154,7 +157,8 @@ find and correct their own faults, in two loops.
   `switch contract-check` then writes one failing test for each finding, and
   the fix goes into the converter.
 
-For Claude Code on a Claude Code account, the two tools use Bifrost instead.
+For a coding tool on an account of its own provider, the two tools use Bifrost
+instead.
 Neither tool converts or filters the request. Only the token changes.
 
 The rules stay in configuration, not in code. A person reads the alerts and

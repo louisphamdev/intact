@@ -80,14 +80,18 @@ func (f *affinity) prune() {
 	}
 }
 
-// sessionKey names the caller's conversation: Claude Code's session header, or
-// the session_id inside metadata.user_id (a JSON string in current versions,
-// a _session_ suffix in older ones), plus the conversation's first message.
-// Empty when the request names no session.
+// sessionKey names the caller's conversation, scoped to the API key. A client
+// that names its session (Claude Code's header, the session_id inside
+// metadata.user_id, or OpenAI's prompt_cache_key) adds it in front; any other client is named by the
+// conversation alone. Empty when the body holds no conversation.
 func sessionKey(r *http.Request, body []byte) string {
+	head := conversationHead(body)
 	k := rawSessionKey(r, body)
-	if k != "" {
-		k += conversationHead(body)
+	switch {
+	case k != "":
+		k += head
+	case head != "":
+		k = "c:" + head
 	}
 	return boundKey(principalOf(r).keyID, k)
 }
@@ -96,37 +100,50 @@ func sessionKey(r *http.Request, body []byte) string {
 // start of what the provider caches. A compaction's summary starts a new
 // conversation, and a side request of the client is its own, so neither moves
 // the pinned conversation. cache_control marks move every turn: not hashed.
+// Chat and Messages bodies carry messages; a Responses body carries input.
 func conversationHead(body []byte) string {
 	var b struct {
 		Messages []struct {
 			Role    string          `json:"role"`
 			Content json.RawMessage `json:"content"`
 		} `json:"messages"`
+		Input json.RawMessage `json:"input"`
 	}
 	if json.Unmarshal(body, &b) != nil {
 		return ""
+	}
+	if len(b.Messages) == 0 && len(b.Input) > 0 {
+		var text string
+		if json.Unmarshal(b.Input, &text) == nil {
+			return headHash("user", b.Input)
+		}
+		json.Unmarshal(b.Input, &b.Messages)
 	}
 	for _, m := range b.Messages {
 		if m.Role == "system" || m.Role == "developer" {
 			continue
 		}
-		content := []byte(m.Content)
-		var blocks []map[string]any
-		if json.Unmarshal(m.Content, &blocks) == nil {
-			for _, bl := range blocks {
-				delete(bl, "cache_control")
-			}
-			content, _ = json.Marshal(blocks)
-		}
-		sum := sha256.Sum256(append([]byte(m.Role+"\x00"), content...))
-		return "#" + hex.EncodeToString(sum[:8])
+		return headHash(m.Role, m.Content)
 	}
 	return ""
 }
 
+func headHash(role string, content json.RawMessage) string {
+	raw := []byte(content)
+	var blocks []map[string]any
+	if json.Unmarshal(content, &blocks) == nil {
+		for _, bl := range blocks {
+			delete(bl, "cache_control")
+		}
+		raw, _ = json.Marshal(blocks)
+	}
+	sum := sha256.Sum256(append([]byte(role+"\x00"), raw...))
+	return "#" + hex.EncodeToString(sum[:8])
+}
+
 // boundKey scopes a session to the caller's API key, so one key cannot move
 // another key's sessions, and hashes an id past 256 bytes so the map holds
-// short keys only. The s: kind stays in front.
+// short keys only. The kind (s: or c:) stays in front.
 func boundKey(keyID, k string) string {
 	if k == "" {
 		return ""
@@ -147,8 +164,16 @@ func rawSessionKey(r *http.Request, body []byte) string {
 		Metadata struct {
 			UserID string `json:"user_id"`
 		} `json:"metadata"`
+		PromptCacheKey string `json:"prompt_cache_key"`
 	}
-	if json.Unmarshal(body, &b) != nil || b.Metadata.UserID == "" {
+	if json.Unmarshal(body, &b) != nil {
+		return ""
+	}
+	// OpenAI's field for the requests that share one cache.
+	if b.PromptCacheKey != "" {
+		return "s:pck:" + b.PromptCacheKey
+	}
+	if b.Metadata.UserID == "" {
 		return ""
 	}
 	var uid struct {

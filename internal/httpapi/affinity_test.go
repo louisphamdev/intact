@@ -401,12 +401,13 @@ func TestOutboundDropsProxyHeaders(t *testing.T) {
 	}
 }
 
-// A plain metadata.user_id names a user, not a conversation: no affinity from
-// it. Older Claude Code put the session inside it (..._session_<uuid>).
+// A plain metadata.user_id names a user, not a conversation: it adds nothing
+// to the key, which then comes from the conversation alone. Older Claude Code
+// put the session inside it (..._session_<uuid>).
 func TestPlainUserIDNamesNoSession(t *testing.T) {
 	r := sessionRequest("", `"user-123"`)
-	if k := sessionKey(r, mustBody(r)); k != "" {
-		t.Errorf("plain user id gave session key %q", k)
+	if k, plain := keyOf(r), keyOf(sessionRequest("", "")); k != plain || strings.Contains(k, "user-123") {
+		t.Errorf("plain user id gave key %q, want the conversation key %q", k, plain)
 	}
 	r = sessionRequest("", `"user_ab12_account_cd34_session_5f0e8c1a-1b2c-4d5e-8f90-123456789abc"`)
 	if k := sessionKey(r, mustBody(r)); !strings.Contains(k, "5f0e8c1a-1b2c-4d5e-8f90-123456789abc") {
@@ -505,5 +506,100 @@ func TestConversationHeadSkipsSystemMessages(t *testing.T) {
 	}
 	if !strings.Contains(a, "sess-o") {
 		t.Errorf("key %q lost the session", a)
+	}
+}
+
+// plainRequest is a client with no session id (Hermes, OpenCode, Codex).
+func plainRequest(path, body string) *http.Request {
+	r := loopbackRequest("POST", path, strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	return r
+}
+
+func chatBody(msgs ...string) string {
+	out := `{"model":"claude/m","max_tokens":5,"messages":[{"role":"system","content":"S"}`
+	for i, m := range msgs {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		out += `,{"role":"` + role + `","content":"` + m + `"}`
+	}
+	return out + `]}`
+}
+
+func responsesBody(msgs ...string) string {
+	out := `{"model":"claude/m","max_output_tokens":16,"instructions":"S","input":[`
+	for i, m := range msgs {
+		if i > 0 {
+			out += ","
+		}
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		out += `{"type":"message","role":"` + role + `","content":"` + m + `"}`
+	}
+	return out + `]}`
+}
+
+// Every provider caches by account, and most clients name no session. The
+// conversation itself is the key: it stays on its account while it grows, a
+// new one takes the rotation, and a compacted one (a new first message) moves.
+func TestConversationWithoutSessionStaysHome(t *testing.T) {
+	for _, c := range []struct {
+		name, path string
+		body       func(...string) string
+	}{{"chat", "/v1/chat/completions", chatBody}, {"responses", "/v1/responses", responsesBody}} {
+		t.Run(c.name, func(t *testing.T) {
+			up, hits := affinityServer(t, nil)
+			h := affinityAPI(t, up)
+			home := serve(h, plainRequest(c.path, c.body("plan the trip")), hits)
+			if got := serve(h, plainRequest(c.path, c.body("plan the trip", "ok", "and the hotel")), hits); got != home {
+				t.Fatalf("turn 2 went to %s, want %s: %v", got, home, *hits)
+			}
+			other := serve(h, plainRequest(c.path, c.body("write a poem")), hits)
+			if other == home {
+				t.Fatalf("a new conversation went to %s again: new conversations must rotate", home)
+			}
+			moved := serve(h, plainRequest(c.path, c.body("Summary: trip and hotel planned.")), hits)
+			if moved == home {
+				t.Fatalf("the compacted conversation stayed on %s: %v", home, *hits)
+			}
+			if got := serve(h, plainRequest(c.path, c.body("Summary: trip and hotel planned.", "ok", "book it")), hits); got != moved {
+				t.Errorf("the compacted conversation did not pin to %s: %v", moved, *hits)
+			}
+		})
+	}
+}
+
+// Two API keys never share a conversation, even with the same first message.
+func TestConversationKeysAreBoundToTheAPIKey(t *testing.T) {
+	a := sessionKey(plainRequest("/v1/chat/completions", chatBody("hi")), []byte(chatBody("hi")))
+	if a == "" {
+		t.Fatal("a conversation with no session got no key")
+	}
+	r := plainRequest("/v1/chat/completions", chatBody("hi"))
+	r = r.WithContext(context.WithValue(r.Context(), principalKey{}, principal{keyID: "k2"}))
+	if b := sessionKey(r, []byte(chatBody("hi"))); b == a || b == "" {
+		t.Errorf("keys %q and %q: another API key must get its own conversation", a, b)
+	}
+}
+
+// prompt_cache_key is the OpenAI field a client uses to say which requests
+// share a cache. It splits conversations the way a session id does.
+func TestPromptCacheKeyNamesTheGroup(t *testing.T) {
+	body := func(pck string) string {
+		return `{"model":"claude/m","prompt_cache_key":"` + pck + `","messages":[{"role":"user","content":"hi"}]}`
+	}
+	key := func(b string) string { return sessionKey(plainRequest("/v1/chat/completions", b), []byte(b)) }
+	if key(body("user-1")) != key(body("user-1")) {
+		t.Error("one prompt_cache_key gave two keys")
+	}
+	if key(body("user-1")) == key(body("user-2")) {
+		t.Error("two prompt_cache_keys share a key: their caches are kept apart")
+	}
+	if !strings.Contains(key(body("user-1")), "user-1") {
+		t.Errorf("key %q does not carry the prompt_cache_key", key(body("user-1")))
 	}
 }

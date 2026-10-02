@@ -113,7 +113,8 @@ func (a *api) antigravityEnvelope(ctx context.Context, conn store.Connection, to
 	if err := d.Decode(&req); err != nil {
 		return nil, err
 	}
-	// A stable session per account lets the upstream reuse its cache.
+	// The upstream cache follows the account, not this id: one stable id per
+	// account only makes the account look like one client.
 	h := sha256.Sum256([]byte("antigravity:" + conn.ID))
 	req["sessionId"] = "-" + strconv.FormatUint(binary.BigEndian.Uint64(h[:8])&0x7fffffffffffffff, 10)
 	contents, _ := req["contents"].([]any)

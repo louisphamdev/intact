@@ -92,19 +92,25 @@ the top of the provider's Connections card, or at
   with its place in the turn (`next · 2/3`).
 - **Pools across providers.** A bare model listed by several providers pools
   their accounts. Such a pool turns on every request, per model.
-- **Sessions.** A provider keeps a prompt cache per organization, so a
-  conversation that moves to another account writes its whole prefix again.
-  intact reads the session from the `X-Claude-Code-Session-Id` header, or from
-  the `session_id` in `metadata.user_id`. A request of a known session goes to
-  the account that last answered that session. The other accounts follow in
-  rotation order, and standby accounts come last. A new session takes the
-  rotation, so the load spreads by session, not by request. intact keeps a
-  session for 1 hour after its last request, in memory. A restart forgets the
-  sessions. A plain `user_id` with no session in it does not pin anything.
-- **A compaction starts a new conversation.** intact names a conversation by
-  its session and by its first message that is not a system message. The
-  provider caches the start of the conversation, so this name changes only
-  when the cache cannot hit:
+- **Conversations.** Every provider in the pool keeps a prompt cache per
+  account, so a conversation that moves to another account writes its whole
+  prefix again. intact sends each conversation back to the account that last
+  answered it. The other accounts follow in rotation order, and standby
+  accounts come last. A new conversation takes the rotation, so the load
+  spreads by conversation, not by request. intact names a conversation by:
+  - the API key of the caller, so two keys never share one;
+  - the session that the client names, when it names one: the
+    `X-Claude-Code-Session-Id` header, the `session_id` in `metadata.user_id`,
+    or the OpenAI `prompt_cache_key` field. A plain `user_id` adds nothing;
+  - the first message that is not a system message (the next bullet).
+
+  intact keeps a conversation for 1 hour after its last request, in memory. A
+  restart forgets the conversations. A body with no messages and no input
+  (an embedding, a model list) takes the rotation.
+- **A compaction starts a new conversation.** The provider caches the start
+  of the conversation, so the first message changes only when the cache
+  cannot hit. intact does not need to know whether a new first message comes
+  from a compaction or from a new session, because both take the rotation:
   - A compaction request (`/compact`, auto-compact, or one that Claude Code
     prepares in the background) still starts with the old first message. It
     goes to the account that holds the cache.
@@ -113,6 +119,10 @@ the top of the provider's Connections card, or at
     the account that answers.
   - A side request of the client in the same session has a first message of
     its own. It does not move the conversation.
+  - A client that keeps its first messages when it shortens the history (for
+    example Hermes) stays on its account, where the start is still cached.
+  - A client that changes its first message on every turn takes the rotation
+    on every turn.
   - `cache_control` marks are not part of the name, because the client moves
     them every turn.
 - **Spent quota.** An account whose [quota](quota-and-usage.md) for the model

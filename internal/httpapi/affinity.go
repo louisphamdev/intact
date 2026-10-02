@@ -33,6 +33,9 @@ const (
 // sessionKeyCtx carries the caller's session key from v1 to failover.
 type sessionKeyCtx struct{}
 
+// compactCtx marks a request whose success frees its session (compactRestarts).
+type compactCtx struct{}
+
 func (f *affinity) get(key string) string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -45,6 +48,12 @@ func (f *affinity) get(key string) string {
 		return ""
 	}
 	return e.conn
+}
+
+func (f *affinity) forget(key string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.m, key)
 }
 
 func (f *affinity) set(key, conn string) {
@@ -126,6 +135,49 @@ func rawSessionKey(r *http.Request, body []byte) string {
 		return "s:" + b.Metadata.UserID[i+9:]
 	}
 	return ""
+}
+
+// Claude Code's compaction prompts that replace the start of the history. The
+// third kind ("the RECENT portion") keeps the earlier messages, and so the
+// cached prefix: it is left out on purpose.
+var compactMarkers = []string{
+	"Your task is to create a detailed summary of the conversation so far",
+	"Your task is to create a detailed summary of this conversation. This summary will be placed at the start",
+}
+
+// compactRestarts reports a compaction whose answer becomes the new start of
+// the conversation: no account holds a cache for what follows it. Only the
+// last message counts, so a quoted prompt earlier in the history does not.
+func compactRestarts(body []byte) bool {
+	var b struct {
+		Messages []struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if json.Unmarshal(body, &b) != nil || len(b.Messages) == 0 {
+		return false
+	}
+	raw := b.Messages[len(b.Messages)-1].Content
+	var texts []string
+	var one string
+	var blocks []struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &one) == nil {
+		texts = []string{one}
+	} else if json.Unmarshal(raw, &blocks) == nil {
+		for _, bl := range blocks {
+			texts = append(texts, bl.Text)
+		}
+	}
+	for _, t := range texts {
+		for _, m := range compactMarkers {
+			if strings.Contains(t, m) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // sessionOrder puts the session's account first, then the provider's rotation

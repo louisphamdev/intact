@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -418,4 +419,82 @@ func mustBody(r *http.Request) []byte {
 	b, _ := io.ReadAll(r.Body)
 	r.Body = io.NopCloser(bytes.NewReader(b))
 	return b
+}
+
+// Prompt openings of Claude Code 2.1.287's compaction requests.
+const (
+	compactFull    = "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n\nYour task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions."
+	compactUpTo    = "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n\nYour task is to create a detailed summary of this conversation. This summary will be placed at the start of a continuing session; newer messages that build on this context will follow after your summary."
+	compactRecent  = "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n\nYour task is to create a detailed summary of the RECENT portion of the conversation — the messages that follow earlier retained context."
+	compactHistory = `[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"text","text":"ok"}]}]`
+)
+
+func compactRequest(session, prompt string) *http.Request {
+	last, _ := json.Marshal([]map[string]string{{"type": "text", "text": prompt}})
+	msgs := strings.TrimSuffix(compactHistory, "]") + `,{"role":"user","content":` + string(last) + `}]`
+	r := loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m","max_tokens":5,"messages":`+msgs+`}`))
+	r.Header.Set("User-Agent", "claude-cli/2.1.287 (external, cli)")
+	r.Header.Set("X-Claude-Code-Session-Id", session)
+	return r
+}
+
+// A compaction replaces the history the cache was built on, so the session
+// after it is free to take the rotation; the compaction itself still reads
+// the old cache on its home account.
+func TestCompactFreesTheSession(t *testing.T) {
+	for name, prompt := range map[string]string{"full": compactFull, "up_to": compactUpTo} {
+		t.Run(name, func(t *testing.T) {
+			up, hits := affinityServer(t, nil)
+			h := affinityAPI(t, up)
+			h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-c", ""))
+			home := (*hits)[0]
+			h.ServeHTTP(httptest.NewRecorder(), compactRequest("sess-c", prompt))
+			if got := (*hits)[1]; got != home {
+				t.Fatalf("the compaction went to %s, want its home %s for the cache hit", got, home)
+			}
+			h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-c", ""))
+			moved := (*hits)[2]
+			if moved == home {
+				t.Fatalf("after the compaction the session stayed on %s: %v", home, *hits)
+			}
+			h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-c", ""))
+			if got := (*hits)[3]; got != moved {
+				t.Errorf("the compacted session did not pin to its new account %s: %v", moved, *hits)
+			}
+		})
+	}
+}
+
+// A compaction of the recent part keeps the earlier messages, and so the
+// cached prefix: the session stays home.
+func TestRecentCompactKeepsTheSession(t *testing.T) {
+	up, hits := affinityServer(t, nil)
+	h := affinityAPI(t, up)
+	h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-r", ""))
+	h.ServeHTTP(httptest.NewRecorder(), compactRequest("sess-r", compactRecent))
+	h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-r", ""))
+	if (*hits)[0] != (*hits)[1] || (*hits)[1] != (*hits)[2] {
+		t.Errorf("a recent-part compaction moved the session: %v", *hits)
+	}
+}
+
+// Only the last message asks for the compaction; the same text earlier in the
+// history (a quoted prompt) is not one.
+func TestCompactIsReadFromTheLastMessageOnly(t *testing.T) {
+	quoted, _ := json.Marshal(compactFull)
+	cases := map[string]struct {
+		body string
+		want bool
+	}{
+		"string content": {`{"messages":[{"role":"user","content":` + string(quoted) + `}]}`, true},
+		"quoted earlier": {`{"messages":[{"role":"user","content":` + string(quoted) + `},{"role":"assistant","content":"x"},{"role":"user","content":"go on"}]}`, false},
+		"plain request":  {`{"messages":[{"role":"user","content":"hi"}]}`, false},
+		"no messages":    {`{}`, false},
+		"not json":       {`not json`, false},
+	}
+	for name, c := range cases {
+		if got := compactRestarts([]byte(c.body)); got != c.want {
+			t.Errorf("%s: compactRestarts = %v, want %v", name, got, c.want)
+		}
+	}
 }

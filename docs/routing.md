@@ -101,6 +101,13 @@ the top of the provider's Connections card, or at
   rotation, so the load spreads by session, not by request. intact keeps a
   session for 1 hour after its last request, in memory. A restart forgets the
   sessions. A plain `user_id` with no session in it does not pin anything.
+- **Compaction frees a session.** A Claude Code compaction (`/compact`, or the
+  automatic one) replaces the start of the history, so no account holds a
+  cache for the next request. The compaction request goes to the home account
+  of the session, because it reads the old cache. When it succeeds, intact
+  forgets the session. The next request takes the rotation and pins the
+  session to the account that answers. A compaction of only the recent part
+  keeps the earlier messages, so the session stays on its account.
 - **Spent quota.** An account whose [quota](quota-and-usage.md) for the model
   is spent is skipped until the window of that quota resets. Then the account
   takes turns again by itself. The check reads the quota cache only. When a

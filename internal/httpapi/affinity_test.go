@@ -3,7 +3,6 @@ package httpapi
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -250,7 +249,7 @@ func TestSessionHitKeepsStandbyLast(t *testing.T) {
 	s.SetStandby(cs.ID, true)
 	a, h := newServer(s, map[string]string{"claude": up.URL}, nil)
 	// b is not the rotation's first pick, so only the session lookup sends it first.
-	a.sessions.set(sessionKey(sessionRequest("sess-sb", ""), nil), cb.ID)
+	a.sessions.set(keyOf(sessionRequest("sess-sb", "")), cb.ID)
 	for _, k := range []string{"acct-a", "acct-b", "acct-c"} {
 		fail[k] = http.StatusTooManyRequests
 	}
@@ -260,7 +259,7 @@ func TestSessionHitKeepsStandbyLast(t *testing.T) {
 	}
 	*hits = nil
 	clear(fail)
-	a.sessions.set(sessionKey(sessionRequest("sess-on-standby", ""), nil), cs.ID)
+	a.sessions.set(keyOf(sessionRequest("sess-on-standby", "")), cs.ID)
 	h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-on-standby", ""))
 	if len(*hits) == 0 || (*hits)[0] == "acct-s" {
 		t.Errorf("a session pinned to a standby went there while normal accounts are healthy: %v", *hits)
@@ -415,88 +414,96 @@ func TestPlainUserIDNamesNoSession(t *testing.T) {
 	}
 }
 
+func keyOf(r *http.Request) string { return sessionKey(r, mustBody(r)) }
+
 func mustBody(r *http.Request) []byte {
 	b, _ := io.ReadAll(r.Body)
 	r.Body = io.NopCloser(bytes.NewReader(b))
 	return b
 }
 
-// Prompt openings of Claude Code 2.1.287's compaction requests.
-const (
-	compactFull    = "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n\nYour task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions."
-	compactUpTo    = "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n\nYour task is to create a detailed summary of this conversation. This summary will be placed at the start of a continuing session; newer messages that build on this context will follow after your summary."
-	compactRecent  = "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n\nYour task is to create a detailed summary of the RECENT portion of the conversation — the messages that follow earlier retained context."
-	compactHistory = `[{"role":"user","content":"hi"},{"role":"assistant","content":[{"type":"text","text":"ok"}]}]`
-)
-
-func compactRequest(session, prompt string) *http.Request {
-	last, _ := json.Marshal([]map[string]string{{"type": "text", "text": prompt}})
-	// Claude Code 2.1.287 puts a system message after the prompt.
-	msgs := strings.TrimSuffix(compactHistory, "]") + `,{"role":"user","content":` + string(last) + `},{"role":"system","content":"<total_tokens>1 tokens left</total_tokens>"}]`
-	r := loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m","max_tokens":5,"messages":`+msgs+`}`))
+// convRequest is a Claude Code request of one session with the given messages.
+func convRequest(session, messages string) *http.Request {
+	r := loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m","max_tokens":5,"messages":`+messages+`}`))
 	r.Header.Set("User-Agent", "claude-cli/2.1.287 (external, cli)")
 	r.Header.Set("X-Claude-Code-Session-Id", session)
 	return r
 }
 
-// A compaction replaces the history the cache was built on, so the session
-// after it is free to take the rotation; the compaction itself still reads
-// the old cache on its home account.
-func TestCompactFreesTheSession(t *testing.T) {
-	for name, prompt := range map[string]string{"full": compactFull, "up_to": compactUpTo} {
-		t.Run(name, func(t *testing.T) {
-			up, hits := affinityServer(t, nil)
-			h := affinityAPI(t, up)
-			h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-c", ""))
-			home := (*hits)[0]
-			h.ServeHTTP(httptest.NewRecorder(), compactRequest("sess-c", prompt))
-			if got := (*hits)[1]; got != home {
-				t.Fatalf("the compaction went to %s, want its home %s for the cache hit", got, home)
-			}
-			h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-c", ""))
-			moved := (*hits)[2]
-			if moved == home {
-				t.Fatalf("after the compaction the session stayed on %s: %v", home, *hits)
-			}
-			h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-c", ""))
-			if got := (*hits)[3]; got != moved {
-				t.Errorf("the compacted session did not pin to its new account %s: %v", moved, *hits)
-			}
-		})
-	}
+const (
+	turn1 = `[{"role":"user","content":[{"type":"text","text":"start","cache_control":{"type":"ephemeral"}}]}]`
+	turn2 = `[{"role":"user","content":[{"type":"text","text":"start"}]},{"role":"assistant","content":"ok"},` +
+		`{"role":"user","content":[{"type":"text","text":"next","cache_control":{"type":"ephemeral"}}]}]`
+	// Claude Code 2.1.287 appends the prompt to the history and a system message after it.
+	compaction = `[{"role":"user","content":[{"type":"text","text":"start"}]},{"role":"assistant","content":"ok"},` +
+		`{"role":"user","content":[{"type":"text","text":"next"},{"type":"text","text":"Your task is to create a detailed summary of the conversation so far"}]},` +
+		`{"role":"system","content":"<total_tokens>1 tokens left</total_tokens>"}]`
+	afterCompact1 = `[{"role":"user","content":"This session is being continued from a previous conversation. Summary: start, next."}]`
+	afterCompact2 = `[{"role":"user","content":"This session is being continued from a previous conversation. Summary: start, next."},` +
+		`{"role":"assistant","content":"ok"},{"role":"user","content":"more"}]`
+	sideRequest = `[{"role":"user","content":"Current state: working (for 0m)"}]`
+)
+
+func serve(h http.Handler, r *http.Request, hits *[]string) string {
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	return (*hits)[len(*hits)-1]
 }
 
-// A compaction of the recent part keeps the earlier messages, and so the
-// cached prefix: the session stays home.
-func TestRecentCompactKeepsTheSession(t *testing.T) {
+// The cache holds the start of the conversation. A compaction (by /compact,
+// by auto-compact, or prepared in the background) still starts with it and
+// goes home; the conversation after it starts with the summary, which no
+// account holds, so it takes the rotation and then pins there.
+func TestCompactionMovesTheConversation(t *testing.T) {
 	up, hits := affinityServer(t, nil)
 	h := affinityAPI(t, up)
-	h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-r", ""))
-	h.ServeHTTP(httptest.NewRecorder(), compactRequest("sess-r", compactRecent))
-	h.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess-r", ""))
-	if (*hits)[0] != (*hits)[1] || (*hits)[1] != (*hits)[2] {
-		t.Errorf("a recent-part compaction moved the session: %v", *hits)
+	home := serve(h, convRequest("sess-c", turn1), hits)
+	if got := serve(h, convRequest("sess-c", turn2), hits); got != home {
+		t.Fatalf("turn 2 went to %s, want %s: a moved cache_control mark changed the conversation", got, home)
+	}
+	if got := serve(h, convRequest("sess-c", compaction), hits); got != home {
+		t.Fatalf("the compaction went to %s, want its home %s for the cache hit", got, home)
+	}
+	if got := serve(h, convRequest("sess-c", turn2), hits); got != home {
+		t.Fatalf("a turn after a background compaction went to %s, want %s", got, home)
+	}
+	moved := serve(h, convRequest("sess-c", afterCompact1), hits)
+	if moved == home {
+		t.Fatalf("the compacted conversation stayed on %s: %v", home, *hits)
+	}
+	if got := serve(h, convRequest("sess-c", afterCompact2), hits); got != moved {
+		t.Errorf("the compacted conversation did not pin to %s: %v", moved, *hits)
 	}
 }
 
-// Only the last user message asks for the compaction; the same text earlier in
-// the history (a quoted prompt) is not one.
-func TestCompactIsReadFromTheLastMessageOnly(t *testing.T) {
-	quoted, _ := json.Marshal(compactFull)
-	cases := map[string]struct {
-		body string
-		want bool
-	}{
-		"string content":  {`{"messages":[{"role":"user","content":` + string(quoted) + `}]}`, true},
-		"quoted earlier":  {`{"messages":[{"role":"user","content":` + string(quoted) + `},{"role":"assistant","content":"x"},{"role":"user","content":"go on"}]}`, false},
-		"system after it": {`{"messages":[{"role":"user","content":` + string(quoted) + `},{"role":"system","content":"x"}]}`, true},
-		"plain request":   {`{"messages":[{"role":"user","content":"hi"}]}`, false},
-		"no messages":     {`{}`, false},
-		"not json":        {`not json`, false},
-	}
-	for name, c := range cases {
-		if got := compactRestarts([]byte(c.body)); got != c.want {
-			t.Errorf("%s: compactRestarts = %v, want %v", name, got, c.want)
+// Claude Code sends side requests of its own in the session. They never move
+// the conversation away from its account.
+func TestSideRequestsKeepTheConversationHome(t *testing.T) {
+	up, hits := affinityServer(t, nil)
+	h := affinityAPI(t, up)
+	home := serve(h, convRequest("sess-s", turn1), hits)
+	for i := 0; i < 3; i++ {
+		serve(h, convRequest("sess-s", sideRequest), hits)
+		if got := serve(h, convRequest("sess-s", turn2), hits); got != home {
+			t.Fatalf("after side request %d the conversation went to %s, want %s: %v", i, got, home, *hits)
 		}
+	}
+}
+
+// The conversation is named by its first message that is not a system
+// message, so the OpenAI shape (system first) splits on the user message.
+func TestConversationHeadSkipsSystemMessages(t *testing.T) {
+	key := func(msgs string) string {
+		r := convRequest("sess-o", msgs)
+		return sessionKey(r, mustBody(r))
+	}
+	a := key(`[{"role":"system","content":"S"},{"role":"user","content":"a"}]`)
+	if a != key(`[{"role":"system","content":"S"},{"role":"user","content":"a"},{"role":"assistant","content":"x"},{"role":"user","content":"c"}]`) {
+		t.Error("a later turn of one conversation got another key")
+	}
+	if a == key(`[{"role":"system","content":"S"},{"role":"user","content":"b"}]`) {
+		t.Error("two conversations with one system prompt got one key")
+	}
+	if !strings.Contains(a, "sess-o") {
+		t.Errorf("key %q lost the session", a)
 	}
 }

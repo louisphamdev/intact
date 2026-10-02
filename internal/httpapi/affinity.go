@@ -33,9 +33,6 @@ const (
 // sessionKeyCtx carries the caller's session key from v1 to failover.
 type sessionKeyCtx struct{}
 
-// compactCtx marks a request whose success frees its session (compactRestarts).
-type compactCtx struct{}
-
 func (f *affinity) get(key string) string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -48,12 +45,6 @@ func (f *affinity) get(key string) string {
 		return ""
 	}
 	return e.conn
-}
-
-func (f *affinity) forget(key string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	delete(f.m, key)
 }
 
 func (f *affinity) set(key, conn string) {
@@ -91,9 +82,46 @@ func (f *affinity) prune() {
 
 // sessionKey names the caller's conversation: Claude Code's session header, or
 // the session_id inside metadata.user_id (a JSON string in current versions,
-// a _session_ suffix in older ones). Empty when the request names no session.
+// a _session_ suffix in older ones), plus the conversation's first message.
+// Empty when the request names no session.
 func sessionKey(r *http.Request, body []byte) string {
-	return boundKey(principalOf(r).keyID, rawSessionKey(r, body))
+	k := rawSessionKey(r, body)
+	if k != "" {
+		k += conversationHead(body)
+	}
+	return boundKey(principalOf(r).keyID, k)
+}
+
+// conversationHead hashes the first message that is not a system message, the
+// start of what the provider caches. A compaction's summary starts a new
+// conversation, and a side request of the client is its own, so neither moves
+// the pinned conversation. cache_control marks move every turn: not hashed.
+func conversationHead(body []byte) string {
+	var b struct {
+		Messages []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	if json.Unmarshal(body, &b) != nil {
+		return ""
+	}
+	for _, m := range b.Messages {
+		if m.Role == "system" || m.Role == "developer" {
+			continue
+		}
+		content := []byte(m.Content)
+		var blocks []map[string]any
+		if json.Unmarshal(m.Content, &blocks) == nil {
+			for _, bl := range blocks {
+				delete(bl, "cache_control")
+			}
+			content, _ = json.Marshal(blocks)
+		}
+		sum := sha256.Sum256(append([]byte(m.Role+"\x00"), content...))
+		return "#" + hex.EncodeToString(sum[:8])
+	}
+	return ""
 }
 
 // boundKey scopes a session to the caller's API key, so one key cannot move
@@ -135,56 +163,6 @@ func rawSessionKey(r *http.Request, body []byte) string {
 		return "s:" + b.Metadata.UserID[i+9:]
 	}
 	return ""
-}
-
-// Claude Code's compaction prompts that replace the start of the history. The
-// third kind ("the RECENT portion") keeps the earlier messages, and so the
-// cached prefix: it is left out on purpose.
-var compactMarkers = []string{
-	"Your task is to create a detailed summary of the conversation so far",
-	"Your task is to create a detailed summary of this conversation. This summary will be placed at the start",
-}
-
-// compactRestarts reports a compaction whose answer becomes the new start of
-// the conversation: no account holds a cache for what follows it. Only the
-// last user message counts, so a quoted prompt earlier in the history does
-// not; Claude Code can put a system message after it.
-func compactRestarts(body []byte) bool {
-	var b struct {
-		Messages []struct {
-			Role    string          `json:"role"`
-			Content json.RawMessage `json:"content"`
-		} `json:"messages"`
-	}
-	if json.Unmarshal(body, &b) != nil {
-		return false
-	}
-	var raw json.RawMessage
-	for i := len(b.Messages) - 1; i >= 0 && raw == nil; i-- {
-		if b.Messages[i].Role == "user" {
-			raw = b.Messages[i].Content
-		}
-	}
-	var texts []string
-	var one string
-	var blocks []struct {
-		Text string `json:"text"`
-	}
-	if json.Unmarshal(raw, &one) == nil {
-		texts = []string{one}
-	} else if json.Unmarshal(raw, &blocks) == nil {
-		for _, bl := range blocks {
-			texts = append(texts, bl.Text)
-		}
-	}
-	for _, t := range texts {
-		for _, m := range compactMarkers {
-			if strings.Contains(t, m) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // sessionOrder puts the session's account first, then the provider's rotation

@@ -222,9 +222,6 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithValue(r.Context(), callerModelKey{}, model)
 	if key != "" {
 		ctx = context.WithValue(ctx, sessionKeyCtx{}, key)
-		if compactRestarts(original) {
-			ctx = context.WithValue(ctx, compactCtx{}, true)
-		}
 	}
 	a.failover(w, r.WithContext(ctx), body, targets, start, cap)
 }
@@ -846,12 +843,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		}
 		defer resp.Body.Close()
 		if key, _ := r.Context().Value(sessionKeyCtx{}).(string); key != "" && resp.StatusCode < 400 {
-			// After a compaction the old cache is useless: the next request takes the rotation.
-			if r.Context().Value(compactCtx{}) != nil {
-				a.sessions.forget(key)
-			} else {
-				a.sessions.set(key, conn.ID)
-			}
+			a.sessions.set(key, conn.ID)
 		}
 		if at.model != "" {
 			// The model that answered, when intact chose it (a level variant).

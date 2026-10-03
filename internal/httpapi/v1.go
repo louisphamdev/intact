@@ -750,6 +750,13 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 					return errors.New("the Code Assist request names no project")
 				}
 				send = withProject
+				// Code Assist knows only the level variants: a folded base such as
+				// gemini-3.8-flash answers 404, so the variant intact picked goes out.
+				if at.model != "" {
+					if withModel, ok := setTopLevelString(send, "model", at.model); ok {
+						send = withModel
+					}
+				}
 				return nil
 			}
 			if want == client {

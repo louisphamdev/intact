@@ -45,6 +45,10 @@ Each reset row shows:
 - Validity dates, expiration, or next available time.
 - Current status and blocked reason if unavailable.
 
+The dashboard hides a reset that has no use left: a used or expired reset, or a grant or credit with `left` 0.
+A weekly reset that waits for the 5-hour limit stays visible.
+A reset that you claimed on the open page also stays visible, so you can read the result.
+
 To claim a reset, click **Claim** on its row in the dashboard and confirm the dialog.
 A claim spends a limited resource and cannot be undone.
 

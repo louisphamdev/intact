@@ -2775,8 +2775,16 @@ function quotaResetRow(conn,r,onRequestQuota){
     actionBox);
 }
 
+// A weekly reset shows left 0 while it waits for the 5h wall, so only "used" means it is spent;
+// a row with a claim in this page keeps showing so the claim outcome stays readable.
+const resetSpent=r=>r.blocked==='used'||r.blocked==='expired'||(r.kind!=='weekly'&&r.left<=0);
+function visibleResets(conn){
+  const prefix=conn.connectionId+':';
+  return (conn.resets||[]).filter(r=>!resetSpent(r)||claimState.has(prefix+r.id));
+}
+
 function quotaResetsBlock(conn,onRequestQuota){
-  const resets=conn.resets||[];
+  const resets=visibleResets(conn);
   const prefix=conn.connectionId+':';
   const claimEntries=[...claimState.entries()].filter(([k])=>k.startsWith(prefix));
   if(!resets.length){
@@ -2809,10 +2817,10 @@ async function viewQuota(v,prov){
   let accounts=[],editing=false,draft=null;
   const render=()=>{
     const view=editing?draft:quotaView;
-    // Only accounts matching the predicate: windows (shown in view or editing), resets, or active claim
+    // Only accounts matching the predicate: windows (shown in view or editing), resets with a turn left, or active claim
     const list=accounts.filter(q=>{
       const wins=q.windows||[];
-      const rsts=q.resets||[];
+      const rsts=visibleResets(q);
       const prefix=q.connectionId+':';
       const hasClaim=[...claimState.keys()].some(k=>k.startsWith(prefix));
       return (wins.length&&(editing||shownWindows(q,view).length))||rsts.length||hasClaim;

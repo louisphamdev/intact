@@ -165,7 +165,7 @@ func withBetas(list string, need []string) string {
 }
 
 // relayObserved relays a passthrough answer and shows it to the drift observer.
-func (a *api) relayObserved(w http.ResponseWriter, resp *http.Response, connID, provider, path string, cap *contract.Capture) {
+func (a *api) relayObserved(w http.ResponseWriter, resp *http.Response, connID, provider, path, served string, cap *contract.Capture) {
 	a.rate.capture(connID, resp.Header)
 	for k, vs := range resp.Header {
 		if hopByHop[k] {
@@ -180,7 +180,7 @@ func (a *api) relayObserved(w http.ResponseWriter, resp *http.Response, connID, 
 		isSSE := isEventStream(resp, tapped)
 		_ = cap.Seal(isSSE, clientErr, upstreamErr)
 	}
-	a.recordUsage(connID, keyIDOf(resp), tapped, resp.Header.Get("Content-Encoding"))
+	a.recordUsage(connID, keyIDOf(resp), served, tapped, resp.Header.Get("Content-Encoding"))
 	if resp.StatusCode < 300 && resp.Header.Get("Content-Encoding") == "" && watched(provider) {
 		a.drift.Observe(drift.Response, provider, path, tapped, isEventStream(resp, tapped))
 	}
@@ -197,12 +197,13 @@ func isEventStream(resp *http.Response, body []byte) bool {
 
 // recordUsage reads the token counts out of a response the proxy already sent
 // and folds them into the daily counter. It never changes what the caller
-// received, and a body with no usage adds no row.
+// received, and a body with no usage adds no row. The row carries served, the
+// model intact routed, because a provider may answer under a variant name.
 //
 // A client that sends Accept-Encoding: gzip gets a gzip body that Go does not
 // auto-decompress, so the tap holds compressed bytes. The counter decompresses
 // its own copy; the caller still gets the original bytes untouched.
-func (a *api) recordUsage(connID, keyID string, body []byte, contentEncoding string) {
+func (a *api) recordUsage(connID, keyID, served string, body []byte, contentEncoding string) {
 	if contentEncoding == "gzip" {
 		if plain, err := gunzip(body); err == nil {
 			body = plain
@@ -213,6 +214,9 @@ func (a *api) recordUsage(connID, keyID string, body []byte, contentEncoding str
 	c := usage.Parse(body)
 	if !c.Found {
 		return
+	}
+	if served != "" {
+		c.Model = served
 	}
 	day := usageDay(time.Now())
 	// A failure must not affect the request the caller already has; the counter

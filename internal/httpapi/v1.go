@@ -895,10 +895,13 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		case to == translate.OpenAI:
 			out, finish = newReplyEditor(w, callerModel, model, false)
 		}
+		// Usage counts the model the operator turned on, not the level variant
+		// intact sent nor the name the provider answered under.
+		served, _ := bodyModel(body)
 		if to != "" {
-			a.relayVia(out, resp, conn.ID, to, via, stream, tools, reply, conn.Provider, path, cap)
+			a.relayVia(out, resp, conn.ID, to, via, stream, tools, reply, conn.Provider, path, served, cap)
 		} else {
-			a.relayObserved(out, resp, conn.ID, conn.Provider, path, cap)
+			a.relayObserved(out, resp, conn.ID, conn.Provider, path, served, cap)
 		}
 		finish()
 		return

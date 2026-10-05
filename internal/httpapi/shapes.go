@@ -121,7 +121,7 @@ const maxTranslatedBody = 32 << 20
 // provider's shape (via). stream is what the caller asked for; tools names the
 // Responses tools behind the chat tool names, for a Responses caller; reply
 // says what a Messages caller's answer must carry.
-func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, via string, stream bool, tools map[string]translate.ToolMeta, reply translate.Reply, provider, path string, cap *contract.Capture) {
+func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, via string, stream bool, tools map[string]translate.ToolMeta, reply translate.Reply, provider, path, served string, cap *contract.Capture) {
 	a.rate.capture(connID, resp.Header)
 	for k, vs := range resp.Header {
 		if hopByHop[k] || k == "Content-Length" || k == "Content-Type" || k == "Content-Encoding" {
@@ -175,7 +175,7 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 		if cap != nil {
 			_ = cap.Seal(false, writeErr, nil)
 		}
-		a.recordUsage(connID, keyIDOf(resp), body, "")
+		a.recordUsage(connID, keyIDOf(resp), served, body, "")
 		if watched(provider) {
 			a.drift.Observe(drift.Response, provider, path, body, false)
 		}
@@ -251,7 +251,7 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 	if cap != nil {
 		_ = cap.Seal(true, clientErr, nil)
 	}
-	a.recordUsage(connID, keyIDOf(resp), tap.bytes(), "")
+	a.recordUsage(connID, keyIDOf(resp), served, tap.bytes(), "")
 	if resp.StatusCode < 300 && watched(provider) {
 		a.drift.Observe(drift.Response, provider, path, raw.bytes(), true)
 	}

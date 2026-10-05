@@ -185,3 +185,31 @@ func TestProxyForcesIdentityEncodingUpstream(t *testing.T) {
 		t.Fatalf("usage not recorded: %+v", rows)
 	}
 }
+
+// The provider may name the model it ran as a variant of its own (Antigravity
+// answers gemini-3.8-flash with modelVersion "gemini-3.8-flash-n"); usage keeps
+// the model intact served, so the page lists only models the operator turned on.
+func TestUsageCountsTheServedModelNotTheProviderVariant(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"model":"llama-3.3-70b-versatile-n","choices":[{"message":{"content":"OK"}}],` +
+			`"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}`))
+	}))
+	defer up.Close()
+
+	s, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.CreateConnection("groq", "test", "gsk-abc")
+
+	h := New(s, map[string]string{"groq": up.URL})
+	h.ServeHTTP(httptest.NewRecorder(), loopbackRequest("POST", "/v1/chat/completions",
+		strings.NewReader(`{"model":"groq/llama-3.3-70b-versatile","messages":[]}`)))
+
+	rows, _ := s.Usage()
+	if len(rows) != 1 || rows[0].Model != "llama-3.3-70b-versatile" {
+		t.Fatalf("usage = %+v, want one row for llama-3.3-70b-versatile", rows)
+	}
+}

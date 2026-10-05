@@ -23,7 +23,7 @@ func TestRecordUsageLogsStoreError(t *testing.T) {
 	defer log.SetOutput(os.Stderr)
 
 	a := &api{store: s}
-	a.recordUsage(c.ID, "", []byte(`{"model":"m","usage":{"prompt_tokens":1,"completion_tokens":1}}`), "")
+	a.recordUsage(c.ID, "", "", []byte(`{"model":"m","usage":{"prompt_tokens":1,"completion_tokens":1}}`), "")
 
 	if !strings.Contains(logBuf.String(), "record usage") {
 		t.Errorf("store error was not logged: %q", logBuf.String())

@@ -23,7 +23,7 @@ func TestAntigravityWrapsAndTranslates(t *testing.T) {
 		default:
 			gotPath, gotUA, gotBody = r.URL.Path+"?"+r.URL.RawQuery, r.Header.Get("User-Agent"), string(b)
 			w.Header().Set("Content-Type", "text/event-stream")
-			io.WriteString(w, `data: {"response":{"responseId":"r","modelVersion":"gemini-3-flash","candidates":[{"content":{"parts":[{"text":"OK"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":1}}}`+"\n\n")
+			io.WriteString(w, `data: {"response":{"responseId":"r","modelVersion":"gemini-3-flash-n","candidates":[{"content":{"parts":[{"text":"OK"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":1}}}`+"\n\n")
 		}
 	}))
 	defer up.Close()
@@ -51,7 +51,7 @@ func TestAntigravityWrapsAndTranslates(t *testing.T) {
 		t.Errorf("meta = %v", list[0].Meta)
 	}
 	rows, _ := s.Usage()
-	if len(rows) != 1 || rows[0].ConnectionID != c.ID || rows[0].InputTokens != 4 {
+	if len(rows) != 1 || rows[0].ConnectionID != c.ID || rows[0].InputTokens != 4 || rows[0].Model != "gemini-3-flash" {
 		t.Errorf("usage = %+v", rows)
 	}
 	mrec := httptest.NewRecorder()

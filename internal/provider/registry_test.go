@@ -81,3 +81,22 @@ func TestNewProvidersRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestBifrostMatchesEveryDeclaredClientBinary(t *testing.T) {
+	// One provider, more than one client binary: `codex` and `codex exec` are the same
+	// client and both send a credential from the provider, not from intact.
+	p, ok := Lookup("codex")
+	if !ok {
+		t.Skip("no codex provider registered")
+	}
+	for _, ua := range []string{"codex_cli_rs/0.160.1", "codex_exec/0.160.1 (Debian 13.0.0; x86_64)"} {
+		if !p.Bifrost(ua) {
+			t.Errorf("Bifrost(%q) = false, want true", ua)
+		}
+	}
+	for _, ua := range []string{"codex_exec", "xcodex_exec/1", " curl"} {
+		if p.Bifrost(ua) {
+			t.Errorf("Bifrost(%q) = true, want false", ua)
+		}
+	}
+}

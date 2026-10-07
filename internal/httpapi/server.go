@@ -124,9 +124,9 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	// One base URL: the model in the body picks the provider and its accounts.
 	// The contract of /v1 is public, like the API it describes.
 	mux.HandleFunc("GET /openapi.json", serveOpenAPI)
-	mux.HandleFunc("GET /v1/models", v1API(a.requireToken(a.models)))
-	mux.HandleFunc("GET /v1/models/{model...}", v1API(a.requireToken(a.model)))
-	mux.HandleFunc("/v1/{path...}", v1API(a.requireToken(a.v1)))
+	mux.HandleFunc("GET /v1/models", v1API(a.requireProxyToken(a.models)))
+	mux.HandleFunc("GET /v1/models/{model...}", v1API(a.requireProxyToken(a.model)))
+	mux.HandleFunc("/v1/{path...}", v1API(a.requireProxyToken(a.v1)))
 	// Management API for machines: the same token as /v1.
 	mux.HandleFunc("GET /api/providers", a.requireToken(a.apiProviders))
 	mux.HandleFunc("GET /api/accounts", a.requireToken(a.accounts))
@@ -323,39 +323,49 @@ func (a *api) requireSession(next http.HandlerFunc) http.HandlerFunc {
 // which Anthropic clients send. Otherwise it answers 401 for the machine caller.
 func (a *api) requireToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tok := bearerToken(r)
-		// Who the caller is travels with the request: the master token is
-		// admin, and a dashboard key owns only what its key id caused. The key
-		// name is a label for drift and the error log, never a right.
-		if tok != "" && a.auth != nil && a.auth.CheckAPIToken("Bearer "+tok) {
-			next(w, withPrincipal(r, principal{admin: true, name: "env"}))
-			return
-		}
-		if k, ok := a.store.APIKeyByToken(tok); ok {
-			if k.Expired(time.Now()) {
-				writeError(w, http.StatusUnauthorized, "api key expired")
-				return
-			}
-			if k.RPM > 0 {
-				if ok, wait := a.keyLim.allow(k.ID, k.RPM, time.Now()); !ok {
-					w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
-					writeError(w, http.StatusTooManyRequests, "api key rate limit: "+strconv.Itoa(k.RPM)+" requests per minute")
-					return
-				}
-			}
-			next(w, withPrincipal(r, principal{keyID: k.ID, name: k.Name, models: k.Models}))
-			return
-		}
-		if ck, err := r.Cookie(sessionCookie); err == nil && a.auth != nil && a.auth.ValidSession(ck.Value) {
-			next(w, withPrincipal(r, principal{admin: true, name: "session"}))
-			return
-		}
-		if a.auth == nil {
-			next(w, withPrincipal(r, principal{admin: true}))
+		p, ok := a.tokenPrincipal(w, r)
+		if ok {
+			next(w, withPrincipal(r, p))
 			return
 		}
 		writeError(w, http.StatusUnauthorized, "missing or invalid bearer token")
 	}
+}
+
+// tokenPrincipal answers who a request is, when it carries a token intact knows: the
+// environment's master token, a dashboard key with its rate limit, or a signed-in session.
+// tokenPrincipal answers who a request is, when it carries a token intact knows: the
+// environment's master token, a dashboard key with its rate limit, or a signed-in session.
+// It writes the refusal itself, because a key over its rate limit has to be told to wait.
+func (a *api) tokenPrincipal(w http.ResponseWriter, r *http.Request) (principal, bool) {
+	tok := bearerToken(r)
+	// Who the caller is travels with the request: the master token is admin, and a
+	// dashboard key owns only what its key id caused. The key name is a label for
+	// drift and the error log, never a right.
+	if tok != "" && a.auth != nil && a.auth.CheckAPIToken("Bearer "+tok) {
+		return principal{admin: true, name: "env"}, true
+	}
+	if k, ok := a.store.APIKeyByToken(tok); ok {
+		if k.Expired(time.Now()) {
+			writeError(w, http.StatusUnauthorized, "api key expired")
+			return principal{}, false
+		}
+		if k.RPM > 0 {
+			if ok, wait := a.keyLim.allow(k.ID, k.RPM, time.Now()); !ok {
+				w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
+				writeError(w, http.StatusTooManyRequests, "api key rate limit: "+strconv.Itoa(k.RPM)+" requests per minute")
+				return principal{}, false
+			}
+		}
+		return principal{keyID: k.ID, name: k.Name, models: k.Models}, true
+	}
+	if ck, err := r.Cookie(sessionCookie); err == nil && a.auth != nil && a.auth.ValidSession(ck.Value) {
+		return principal{admin: true, name: "session"}, true
+	}
+	if a.auth == nil {
+		return principal{admin: true}, true
+	}
+	return principal{}, false
 }
 
 // requireAdmin gates management that can redirect a stored credential or wipe a

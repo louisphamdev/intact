@@ -118,6 +118,14 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "model is not permitted for this api key")
 		return
 	}
+	// A caller that came in as the provider's own client may only reach that provider. Without
+	// this the User-Agent would be a costume: any client could name itself codex and then ask
+	// intact for a model on any account it holds.
+	if caller.providerClient != "" && prov != "" && prov != caller.providerClient {
+		writeError(w, http.StatusForbidden,
+			"the "+caller.providerClient+" client may only reach the "+caller.providerClient+" provider")
+		return
+	}
 
 	traceHeader := r.Header.Get("X-Intact-Trace")
 	r.Header.Del("X-Intact-Trace")

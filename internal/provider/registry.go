@@ -148,7 +148,7 @@ var registry = map[string]Provider{
 		Watch:      true,
 		AuthHeader: "Authorization",
 		AuthPrefix: "Bearer ",
-		BifrostUA:  "codex_cli_rs/",
+		BifrostUA:  "codex_cli_rs/,codex_exec/",
 		Identity: map[string]string{
 			"Originator": "codex_cli_rs",
 			"User-Agent": "codex_cli_rs/" + CodexCLIVersion,
@@ -272,7 +272,12 @@ const CodexCLIVersion = "0.155.1"
 // Bifrost reports that a caller with this User-Agent is the provider's own
 // client, which reaches its account with only the credential changed.
 func (p Provider) Bifrost(userAgent string) bool {
-	return p.BifrostUA != "" && strings.HasPrefix(userAgent, p.BifrostUA)
+	for _, ua := range strings.Split(p.BifrostUA, ",") {
+		if ua = strings.TrimSpace(ua); ua != "" && strings.HasPrefix(userAgent, ua) {
+			return true
+		}
+	}
+	return false
 }
 
 // Lookup returns the provider with this id.
@@ -301,4 +306,17 @@ func IDs() []string {
 	out = append(out, DeclaredIDs()...)
 	sort.Strings(out)
 	return out
+}
+
+// BifrostProviderIDs lists the providers whose own client intact recognises by User-Agent.
+// The order follows the registry, so two providers claiming the same prefix would be a startup
+// error rather than a coin toss.
+func BifrostProviderIDs() []string {
+	var ids []string
+	for _, id := range IDs() {
+		if p, ok := Lookup(id); ok && p.BifrostUA != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }

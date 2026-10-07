@@ -16,6 +16,11 @@ type principal struct {
 	// models lists the "<provider>/<model>" ids a dashboard key may call;
 	// empty allows every model.
 	models []string
+	// providerClient names the provider whose own client sent the request, when
+	// it was let in without a token. It grants nothing: no key id, not admin.
+	// It is here so the request can be checked against the provider it claims
+	// and the log can say where it came from.
+	providerClient string
 }
 
 // allowsAllModels reports whether p may call any model: admin callers, intact's

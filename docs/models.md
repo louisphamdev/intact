@@ -46,9 +46,26 @@ provider names them its own way:
 | Gemini | | `inputTokenLimit` | `outputTokenLimit` |
 | Groq | `context_window` | | `max_completion_tokens` |
 | Cloudflare | property `context_window` | | |
+| Codex | `max_context_window` | | |
 
 A limit that the list does not give stays empty. A list that gives only limits
 says nothing about thinking, so the `thinking` tag stays unknown.
+
+## The compact window
+
+Codex publishes two windows: the whole one (`max_context_window`, 872000) and a
+smaller one its client compresses at (`context_window`, 272000). intact reads
+the whole one as the context window, and the smaller one as the compact window:
+the point at which a client is advised to compress before it runs out of context.
+
+The entry of a Codex model therefore gives `context_length: 872000` and
+`compact_window: 272000`. A provider with a single window has no compact window,
+so the field stays absent. When a base model is folded from variants, the
+smallest compact window wins: compressing later than one variant allows would
+overrun that variant's window.
+
+`GET /v1/models` serves the compact window as `compact_window`, next to
+`context_length`, so a client such as llm-switcher can size a session from it.
 
 ## Bifrost field
 

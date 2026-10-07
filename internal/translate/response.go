@@ -184,6 +184,17 @@ type Reply struct {
 	// Thinking is set when the caller enabled thinking. Only then does the
 	// upstream's reasoning leave as thinking blocks, as the Messages API does.
 	Thinking bool
+	// Tools is the name translation built when the request went out. A tool call comes back under the
+	// name the provider knows, and the caller only runs the names it declared.
+	Tools *ToolNames
+}
+
+// callerName is the tool name the caller declared, for a call the model made.
+func (r Reply) callerName(name string) string {
+	if r.Tools == nil {
+		return name
+	}
+	return r.Tools.ToClient(name)
 }
 
 // ReplyFor reads a Messages request for what its answer must carry. model is
@@ -282,7 +293,7 @@ func OpenAIResponseToAnthropic(body []byte, r Reply) ([]byte, error) {
 		for _, tc := range calls {
 			t := asObj(tc)
 			fn := asObj(t["function"])
-			content = append(content, obj{"type": "tool_use", "id": toolID(str(t["id"])), "name": fn["name"],
+			content = append(content, obj{"type": "tool_use", "id": toolID(str(t["id"])), "name": r.callerName(str(fn["name"])),
 				"input": parseArgs(str(fn["arguments"]))})
 		}
 		if s := openaiStop[str(ch["finish_reason"])]; s != "" {
@@ -532,7 +543,7 @@ func OpenAIStreamToAnthropic(dst Flusher, src io.Reader, r Reply) {
 		closeBlock()
 		for _, ti := range toolOrder {
 			ta := tools[ti]
-			open("tool", obj{"type": "tool_use", "id": toolID(ta.id), "name": ta.name, "input": obj{}})
+			open("tool", obj{"type": "tool_use", "id": toolID(ta.id), "name": r.callerName(ta.name), "input": obj{}})
 			// The whole-body path reads arguments with parseArgs; a stream that
 			// sent broken JSON gets the same object, not a parse error later.
 			args, _ := json.Marshal(parseArgs(ta.args))

@@ -43,7 +43,7 @@ func TestOpenAIStreamTruncationDoesNotFakeCompletion(t *testing.T) {
 func TestGeminiStreamTruncationDoesNotFakeCompletion(t *testing.T) {
 	var buf bytes.Buffer
 	src := &truncReader{s: `data: {"candidates":[{"content":{"parts":[{"text":"hel"}]}}]}` + "\n\n"}
-	GeminiStreamToOpenAI(capFlush{&buf}, src, nil)
+	GeminiStreamToOpenAI(capFlush{&buf}, src, nil, nil)
 	out := buf.String()
 	if strings.Contains(out, "[DONE]") || strings.Contains(out, `"finish_reason":"stop"`) {
 		t.Errorf("truncated Gemini stream emitted a clean finish:\n%s", out)

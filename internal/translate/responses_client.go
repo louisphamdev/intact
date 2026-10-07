@@ -147,19 +147,52 @@ func walkResponsesTools(tools []any, each func(chatName string, meta ToolMeta, t
 }
 
 // ResponsesTools maps each chat tool name that ResponsesToOpenAI declares to
-// the Responses tool the caller declared.
-func ResponsesTools(body []byte) map[string]ToolMeta {
+// the Responses tool the caller declared. vocab is the same translation the request goes out with, so
+// the key is the name the provider answers and the value still carries the caller's own.
+// ResponsesToolNames reads the function tool names a Responses request declares, skipping the custom
+// tools and the harness's own local_shell: neither is renamed, so neither is a rename target.
+func ResponsesToolNames(body []byte) []string {
+	in, err := decode(body)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	walkResponsesTools(responsesToolList(in), func(name string, meta ToolMeta, _ obj) {
+		if meta.Kind == "function" {
+			out = append(out, name)
+		}
+	})
+	return out
+}
+
+// ResponsesTools maps each chat tool name that ResponsesToOpenAI declares to
+// the Responses tool the caller declared. vocab is the same translation the request goes out with, so
+// the key is the name the provider answers and the value still carries the caller's own.
+func ResponsesTools(body []byte, vocab *ToolNames) map[string]ToolMeta {
 	in, err := decode(body)
 	if err != nil {
 		return nil
 	}
 	out := map[string]ToolMeta{}
-	walkResponsesTools(responsesToolList(in), func(name string, meta ToolMeta, _ obj) { out[name] = meta })
+	walkResponsesTools(responsesToolList(in), func(name string, meta ToolMeta, _ obj) {
+		// A custom tool carries a grammar written for its name, and local_shell is the harness's own:
+		// neither is renamed, so their key is the name they already have.
+		key := name
+		if meta.Kind == "function" {
+			key = vocab.ToProvider(name)
+		}
+		out[key] = meta
+	})
 	return out
 }
 
-// ResponsesToOpenAI converts a Responses request to a Chat Completions request.
-func ResponsesToOpenAI(body []byte) ([]byte, error) {
+// ResponsesToOpenAI converts a Responses request to a Chat Completions request. vocab translates the
+// function tool names to the vocabulary the provider is going to read; custom tools and the harness's
+// own local_shell keep theirs, because a freeform tool's grammar is written for its name.
+func ResponsesToOpenAI(body []byte, vocab *ToolNames) ([]byte, error) {
+	if vocab == nil {
+		vocab = &ToolNames{}
+	}
 	in, err := decode(body)
 	if err != nil {
 		return nil, err
@@ -237,7 +270,7 @@ func ResponsesToOpenAI(body []byte) ([]byte, error) {
 				if args == "" {
 					args = "{}"
 				}
-				pushCall(callID(it), responsesToolName(str(it["namespace"]), str(it["name"])), args)
+				pushCall(callID(it), vocab.ToProvider(responsesToolName(str(it["namespace"]), str(it["name"]))), args)
 			case typ == "custom_tool_call":
 				input, ok := it["input"].(string)
 				if !ok {
@@ -285,6 +318,9 @@ func ResponsesToOpenAI(body []byte) ([]byte, error) {
 	var tools []any
 	walkResponsesTools(responsesToolList(in), func(name string, meta ToolMeta, t obj) {
 		fn := obj{"name": name}
+		if meta.Kind == "function" {
+			fn["name"] = vocab.ToProvider(name)
+		}
 		switch meta.Kind {
 		case "custom":
 			fn["description"], fn["parameters"] = customToolDescription(t), customToolParams

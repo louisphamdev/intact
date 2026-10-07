@@ -32,11 +32,15 @@ type Signatures interface {
 }
 
 // OpenAIToGemini converts a Chat Completions request to the inner Gemini
-// request (contents, systemInstruction, generationConfig, tools).
-func OpenAIToGemini(body []byte, sigs Signatures) ([]byte, error) {
+// request (contents, systemInstruction, generationConfig, tools). vocab translates the tool names to
+// the names Gemini is trained on, and is nil for a request that needs no translation.
+func OpenAIToGemini(body []byte, sigs Signatures, vocab *ToolNames) ([]byte, error) {
 	in, err := decode(body)
 	if err != nil {
 		return nil, err
+	}
+	if vocab == nil {
+		vocab = &ToolNames{}
 	}
 	model := str(in["model"])
 	out := obj{}
@@ -150,7 +154,9 @@ func OpenAIToGemini(body []byte, sigs Signatures) ([]byte, error) {
 		seen := map[string]bool{}
 		for _, t := range tools {
 			fn := asObj(asObj(t)["function"])
-			name := geminiName(str(fn["name"]))
+			// The declaration goes out under the name Gemini is trained on, so a model answers with a
+			// name intact can map back. The caller's schema travels with it, so no argument key moves.
+			name := geminiName(vocab.ToProvider(str(fn["name"])))
 			if fn == nil || name == "" || seen[name] {
 				continue
 			}
@@ -415,8 +421,12 @@ var geminiFinish = map[string]string{
 
 // GeminiStreamToOpenAI reads a Gemini (or Antigravity-wrapped) event stream
 // and writes Chat Completions chunks. Thought signatures of function calls are
-// recorded so the next turn can send them back.
-func GeminiStreamToOpenAI(dst Flusher, src io.Reader, sigs Signatures) {
+// recorded so the next turn can send them back. vocab maps the names Gemini answers with back to the
+// names the caller declared, and is nil when the request was not translated.
+func GeminiStreamToOpenAI(dst Flusher, src io.Reader, sigs Signatures, vocab *ToolNames) {
+	if vocab == nil {
+		vocab = &ToolNames{}
+	}
 	id, model := newID("chatcmpl-"), ""
 	created := time.Now().Unix()
 	started := false
@@ -480,7 +490,7 @@ func GeminiStreamToOpenAI(dst Flusher, src io.Reader, sigs Signatures) {
 				pendingSig = ""
 				args, _ := json.Marshal(fc["args"])
 				emit(obj{"tool_calls": []any{obj{"index": calls, "id": cid, "type": "function",
-					"function": obj{"name": fc["name"], "arguments": string(args)}}}}, nil, nil)
+					"function": obj{"name": vocab.ToClient(str(fc["name"])), "arguments": string(args)}}}}, nil, nil)
 				calls++
 			case part["thought"] == true:
 				if t := str(part["text"]); t != "" {

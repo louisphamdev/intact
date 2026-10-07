@@ -240,3 +240,20 @@ func TestV1ModelsCarryTokenLimits(t *testing.T) {
 		}
 	}
 }
+
+// A Codex model publishes two windows: the whole one and the smaller one its
+// client compresses at. The whole one is the context length; the smaller one is
+// the compact threshold, so a client can compress before it runs out.
+func TestV1ModelsCarryCodexCompactWindow(t *testing.T) {
+	f := &fakeProvider{models: `{"models":[{"slug":"gpt-6-astra","context_window":272000,"max_context_window":872000}]}`}
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("codex", "acc", "codex-token")
+	h := New(s, map[string]string{"codex": f.start(t)})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("GET", "/v1/models", nil))
+	want := `"context_length":872000,"compact_window":272000`
+	if !strings.Contains(rec.Body.String(), want) {
+		t.Errorf("/v1/models lacks %s\n%s", want, rec.Body.String())
+	}
+}

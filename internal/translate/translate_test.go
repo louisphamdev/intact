@@ -72,7 +72,7 @@ func TestAnthropicToOpenAIRequest(t *testing.T) {
 	  {"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"ok"}]},{"type":"text","text":"next"}]}],
 	 "tools":[{"name":"f","input_schema":{"type":"object"}},{"type":"web_search_20250305","name":"web_search"}],
 	 "tool_choice":{"type":"tool","name":"f"}}`
-	out, err := AnthropicToOpenAI([]byte(in))
+	out, err := AnthropicToOpenAI([]byte(in), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestOpenAIToGemini(t *testing.T) {
 	 {"role":"tool","tool_call_id":"c1","content":"{\"t\":30}"},{"role":"tool","tool_call_id":"c9","content":"done"}],
 	 "tools":[{"type":"function","function":{"name":"get weather","parameters":{"type":"object","$schema":"x","additionalProperties":false,
 	   "properties":{"city":{"type":["string","null"],"minLength":1},"unit":{"anyOf":[{"type":"null"},{"type":"string","enum":["c","f"]}]},"n":{"const":3}},"required":["city","gone"]}}}]}`
-	out, err := OpenAIToGemini([]byte(in), sigs)
+	out, err := OpenAIToGemini([]byte(in), sigs, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestGeminiStreamToOpenAI(t *testing.T) {
 	src := `data: {"response":{"responseId":"r1","modelVersion":"gemini-3-flash","candidates":[{"content":{"role":"model","parts":[{"text":"think","thought":true,"thoughtSignature":"S"}]}}]}}` + "\n\n" +
 		`data: {"response":{"candidates":[{"content":{"parts":[{"text":"Hi"},{"functionCall":{"id":"fc1","name":"f","args":{"a":1}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3,"thoughtsTokenCount":2}}}` + "\n\n"
 	var o buf
-	GeminiStreamToOpenAI(&o, strings.NewReader(src), sigs)
+	GeminiStreamToOpenAI(&o, strings.NewReader(src), sigs, nil)
 	s := o.String()
 	for _, want := range []string{`"reasoning_content":"think"`, `"content":"Hi"`, `"arguments":"{\"a\":1}"`, `"id":"fc1"`,
 		`"finish_reason":"tool_calls"`, `"prompt_tokens":7`, `"completion_tokens":5`, "[DONE]"} {
@@ -324,7 +324,7 @@ func TestOpenAIToGeminiToolChoice(t *testing.T) {
 		          {"type":"function","function":{"name":"2fa","parameters":{"type":"object"}}}],
 		 "tool_choice":` + choice + `}`
 	}
-	out, err := OpenAIToGemini([]byte(req(`{"type":"function","function":{"name":"2fa"}}`)), memSigs{})
+	out, err := OpenAIToGemini([]byte(req(`{"type":"function","function":{"name":"2fa"}}`)), memSigs{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestOpenAIToGeminiToolChoice(t *testing.T) {
 		t.Errorf("toolConfig = %s, want %s", got, want)
 	}
 	for choice, mode := range map[string]string{`"required"`: "ANY", `"none"`: "NONE"} {
-		out, err := OpenAIToGemini([]byte(req(choice)), memSigs{})
+		out, err := OpenAIToGemini([]byte(req(choice)), memSigs{}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -344,7 +344,7 @@ func TestOpenAIToGeminiToolChoice(t *testing.T) {
 		}
 	}
 	// "auto" is Gemini's own default, so it needs no toolConfig.
-	out, err = OpenAIToGemini([]byte(req(`"auto"`)), memSigs{})
+	out, err = OpenAIToGemini([]byte(req(`"auto"`)), memSigs{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,12 +432,12 @@ func TestAnthropicToOpenAIReasoning(t *testing.T) {
 		budget string
 		want   string
 	}{{"1500", "low"}, {"6000", "medium"}, {"10000", "high"}} {
-		m := mustJSON(t, mb(AnthropicToOpenAI([]byte(req(`{"type":"enabled","budget_tokens":`+c.budget+`}`)))))
+		m := mustJSON(t, mb(AnthropicToOpenAI([]byte(req(`{"type":"enabled","budget_tokens":`+c.budget+`}`)), nil)))
 		if m["reasoning_effort"] != c.want {
 			t.Errorf("budget %s gave reasoning_effort %s, want %q", c.budget, j(m["reasoning_effort"]), c.want)
 		}
 	}
-	m := mustJSON(t, mb(AnthropicToOpenAI([]byte(req(`{"type":"disabled"}`)))))
+	m := mustJSON(t, mb(AnthropicToOpenAI([]byte(req(`{"type":"disabled"}`)), nil)))
 	if _, ok := m["reasoning_effort"]; ok {
 		t.Errorf("disabled thinking set reasoning_effort: %s", j(m))
 	}
@@ -446,7 +446,7 @@ func TestAnthropicToOpenAIReasoning(t *testing.T) {
 func TestReasoningEffortFilterRemovesFieldFromTranslatedRequest(t *testing.T) {
 	mb := mustBytes(t)
 	anthropicReq := `{"model":"m","max_tokens":20000,"thinking":{"type":"enabled","budget_tokens":10000},"messages":[{"role":"user","content":"hi"}]}`
-	openaiReqBytes := mb(AnthropicToOpenAI([]byte(anthropicReq)))
+	openaiReqBytes := mb(AnthropicToOpenAI([]byte(anthropicReq), nil))
 
 	m := mustJSON(t, openaiReqBytes)
 	if m["reasoning_effort"] != "high" {
@@ -488,7 +488,7 @@ func TestStructuredOutputCrossesEveryTranslator(t *testing.T) {
 	schema := `{"additionalProperties":false,"properties":{"title":{"type":"string"}},"required":["title"],"type":"object"}` // keys sorted, as json.Marshal writes them
 	chat := `{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_schema","json_schema":{"name":"t","strict":true,"schema":` + schema + `}}}`
 
-	g, err := OpenAIToGemini([]byte(chat), nil)
+	g, err := OpenAIToGemini([]byte(chat), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -505,14 +505,14 @@ func TestStructuredOutputCrossesEveryTranslator(t *testing.T) {
 	if got := j(mustJSON(t, r)["text"]); got != `{"format":{"name":"t","schema":`+schema+`,"strict":true,"type":"json_schema"},"verbosity":"low"}` {
 		t.Errorf("responses text = %s", got)
 	}
-	o, _ := AnthropicToOpenAI([]byte(`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"}],"output_config":{"format":{"type":"json_schema","schema":` + schema + `}}}`))
+	o, _ := AnthropicToOpenAI([]byte(`{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"}],"output_config":{"format":{"type":"json_schema","schema":`+schema+`}}}`), nil)
 	if got := j(mustJSON(t, o)["response_format"]); got != `{"json_schema":{"name":"response","schema":`+schema+`},"type":"json_schema"}` {
 		t.Errorf("openai response_format = %s", got)
 	}
 
 	// JSON mode without a schema: Gemini and Responses have it, Anthropic does not.
 	jm := `{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_object"}}`
-	g, _ = OpenAIToGemini([]byte(jm), nil)
+	g, _ = OpenAIToGemini([]byte(jm), nil, nil)
 	if gen := mustJSON(t, g)["generationConfig"].(map[string]any); gen["responseMimeType"] != "application/json" || gen["responseSchema"] != nil {
 		t.Errorf("gemini json mode = %s", j(gen))
 	}

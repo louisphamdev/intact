@@ -17,7 +17,9 @@ The rules for a model:
 - An inactive account is skipped.
 - `GET /v1/models` lists every model that is on, as `<provider>/<model>`. When
   the provider's list gives token limits, an entry also has `context_length`,
-  `max_input_tokens` and `max_output_tokens` ([Models](models.md#token-limits)).
+  `max_input_tokens` and `max_output_tokens`, plus `compact_window` for a model
+  that publishes a window to compress at
+  ([Models](models.md#token-limits)).
 
 ## Request shapes and translation
 

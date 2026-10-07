@@ -87,26 +87,33 @@ func translatable(shape string) bool {
 	return false
 }
 
-// toProvider converts a caller's request to the provider's shape.
-func toProvider(body []byte, client, want string) ([]byte, error) {
+// toProvider converts a caller's request to the provider's shape. provider names the account the
+// request is going to, which decides whether the tool names are translated into that agent's
+// vocabulary; the translation is returned so the answer comes back in the caller's own names.
+func toProvider(body []byte, client, want, provider string) ([]byte, *translate.ToolNames, error) {
 	hub := body
+	var names *translate.ToolNames
 	var err error
 	switch client {
 	case translate.Anthropic:
-		hub, err = translate.AnthropicToOpenAI(body)
+		names = translate.NewToolNames(translate.AnthropicToolNames(body), provider)
+		hub, err = translate.AnthropicToOpenAI(body, names)
 	case translate.Responses:
-		hub, err = translate.ResponsesToOpenAI(body)
+		names = translate.NewToolNames(translate.ResponsesToolNames(body), provider)
+		hub, err = translate.ResponsesToOpenAI(body, names)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	switch want {
 	case translate.Anthropic:
-		return translate.OpenAIToAnthropic(hub)
+		out, err := translate.OpenAIToAnthropic(hub)
+		return out, names, err
 	case translate.Responses:
-		return translate.OpenAIToResponses(hub)
+		out, err := translate.OpenAIToResponses(hub)
+		return out, names, err
 	}
-	return hub, nil
+	return hub, names, nil
 }
 
 // alwaysStreams reports whether a provider shape is only ever called streaming.
@@ -195,7 +202,7 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 		if cap != nil {
 			src = io.TeeReader(resp.Body, captureWriter{cap: cap})
 		}
-		a.toChatChunks(pipeFlusher{pw}, io.TeeReader(src, tapWriter{raw}), via)
+		a.toChatChunks(pipeFlusher{pw}, io.TeeReader(src, tapWriter{raw}), via, reply)
 	}()
 	tap := &respTap{headLimit: usageTapHeadLimit, tailLimit: usageTapTailLimit}
 	chunks := io.TeeReader(pr, tapWriter{tap})
@@ -269,10 +276,10 @@ func isErrorBody(b []byte) bool {
 }
 
 // toChatChunks converts a provider's event stream to Chat Completions chunks.
-func (a *api) toChatChunks(dst translate.Flusher, src io.Reader, via string) {
+func (a *api) toChatChunks(dst translate.Flusher, src io.Reader, via string, reply translate.Reply) {
 	switch via {
 	case translate.Antigravity:
-		translate.GeminiStreamToOpenAI(dst, src, &a.sigs)
+		translate.GeminiStreamToOpenAI(dst, src, &a.sigs, reply.Tools)
 	case translate.Anthropic:
 		translate.AnthropicStreamToOpenAI(dst, src)
 	case translate.Responses:

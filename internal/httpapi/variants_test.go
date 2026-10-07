@@ -210,7 +210,9 @@ func TestModelLimits(t *testing.T) {
 			`{"x":{"thinking":true,"efforts":["high","low"],"default":"high","context":1048576,"output":65535}}`},
 		"limits only": {`{"data":[{"id":"z","context_length":8192}]}`, `{"z":{"context":8192}}`},
 		"codex max_context_window": {`{"models":[{"slug":"gpt-6-astra","context_window":272000,"max_context_window":872000}]}`,
-			`{"gpt-6-astra":{"context":872000}}`},
+			`{"gpt-6-astra":{"context":872000,"compact":272000}}`},
+		"codex one window": {`{"models":[{"slug":"gpt-5.4","context_window":272000}]}`,
+			`{"gpt-5.4":{"context":272000}}`},
 	}
 	for name, c := range cases {
 		infos := modelInfos([]byte(c[0]))

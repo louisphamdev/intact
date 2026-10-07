@@ -334,10 +334,35 @@ func oaToolChoice(v any) obj {
 // ---- Anthropic Messages -> OpenAI Chat Completions
 
 // AnthropicToOpenAI converts a Messages request to a Chat Completions request.
-func AnthropicToOpenAI(body []byte) ([]byte, error) {
+// AnthropicToOpenAI converts a Messages request to the OpenAI Chat shape. names translates the tool
+// names to the vocabulary the provider is going to read, and is nil for a request whose provider takes
+// the names the caller sent.
+// AnthropicToolNames reads the tools a Messages request declares, skipping the ones no provider runs
+// as a function tool: a server tool carries a dated type and no input_schema, so it is not one of the
+// caller's own tools and never a rename target.
+func AnthropicToolNames(body []byte) []string {
+	in, err := decode(body)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, raw := range list(in["tools"]) {
+		t := asObj(raw)
+		if t["input_schema"] == nil || str(t["name"]) == "" {
+			continue
+		}
+		out = append(out, str(t["name"]))
+	}
+	return out
+}
+
+func AnthropicToOpenAI(body []byte, names *ToolNames) ([]byte, error) {
 	in, err := decode(body)
 	if err != nil {
 		return nil, err
+	}
+	if names == nil {
+		names = &ToolNames{}
 	}
 	out := obj{"model": in["model"]}
 	var msgs []any
@@ -378,7 +403,7 @@ func AnthropicToOpenAI(body []byte) ([]byte, error) {
 			case "tool_use":
 				args, _ := json.Marshal(blk["input"])
 				calls = append(calls, obj{"id": blk["id"], "type": "function",
-					"function": obj{"name": blk["name"], "arguments": string(args)}})
+					"function": obj{"name": names.ToProvider(str(blk["name"])), "arguments": string(args)}})
 			case "tool_result":
 				// A tool result is its own message in OpenAI, and it must follow
 				// the assistant turn that called the tool, before any user text.
@@ -459,7 +484,7 @@ func AnthropicToOpenAI(body []byte) ([]byte, error) {
 			if td["input_schema"] == nil {
 				continue // a server tool (web search, …) has no OpenAI counterpart
 			}
-			fn := obj{"name": td["name"], "parameters": td["input_schema"]}
+			fn := obj{"name": names.ToProvider(str(td["name"])), "parameters": td["input_schema"]}
 			if d := str(td["description"]); d != "" {
 				fn["description"] = d
 			}

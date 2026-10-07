@@ -368,6 +368,9 @@ type modelEntry struct {
 	ContextLength   int64 `json:"context_length,omitempty"`
 	MaxInputTokens  int64 `json:"max_input_tokens,omitempty"`
 	MaxOutputTokens int64 `json:"max_output_tokens,omitempty"`
+	// CompactWindow: the point the client is advised to compress at, below
+	// context_length for a Codex model (272K against 872K).
+	CompactWindow int64 `json:"compact_window,omitempty"`
 	// BifrostUA: a caller whose User-Agent starts with it is this provider's
 	// own client, and reaches it with only the credential changed (Bifrost).
 	BifrostUA string `json:"bifrost_ua,omitempty"`
@@ -408,7 +411,8 @@ func (a *api) entriesOf(p string, ids []string) []modelEntry {
 		in := infos[id]
 		out = append(out, modelEntry{ID: p + "/" + id, Object: "model", Created: at.Unix(), OwnedBy: p,
 			Type: "model", DisplayName: p + "/" + id, CreatedAt: at.UTC().Format(time.RFC3339),
-			ContextLength: in.Context, MaxInputTokens: in.Input, MaxOutputTokens: in.Output, BifrostUA: def.BifrostUA})
+			ContextLength: in.Context, MaxInputTokens: in.Input, MaxOutputTokens: in.Output,
+			CompactWindow: in.Compact, BifrostUA: def.BifrostUA})
 	}
 	return out
 }
@@ -692,10 +696,10 @@ func bodyModel(body []byte) (string, bool) {
 func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targets []store.Connection, start int, cap *contract.Capture) {
 	client := clientShape(r.PathValue("path"))
 	stream := translate.Stream(body)
+	// The Responses client keeps a map from the name the provider answers to the tool the caller
+	// declared, so its call comes back in its own shape. It is keyed with the same translation the
+	// request goes out with, which is set once an account is chosen.
 	var tools map[string]translate.ToolMeta
-	if client == translate.Responses {
-		tools = translate.ResponsesTools(body)
-	}
 	var reply translate.Reply
 	if client == translate.Anthropic {
 		callerModel, _ := r.Context().Value(callerModelKey{}).(string)
@@ -772,11 +776,11 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			if want == translate.Antigravity {
 				// The envelope names the account's project, so it is built
 				// per account from the chat form of the request.
-				hub, err := toProvider(body, client, translate.OpenAI)
+				hub, geminiNames, err := toProvider(body, client, translate.OpenAI, p.ID)
 				if err != nil {
 					return err
 				}
-				inner, err := translate.OpenAIToGemini(hub, &a.sigs)
+				inner, err := translate.OpenAIToGemini(hub, &a.sigs, geminiNames)
 				if err != nil {
 					return err
 				}
@@ -784,16 +788,41 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 				if err != nil {
 					return errSkipAccount{err}
 				}
+				if client == translate.Anthropic {
+					reply.Tools = geminiNames
+				}
+				if client == translate.Responses {
+					tools = translate.ResponsesTools(body, geminiNames)
+				}
 				path, send, to, via = wantPath, env, client, want
 				return nil
 			}
-			tb, ok := translated[want]
+			// The translation depends on which account takes the request, so it is memoized with the
+			// provider as well as the shape: two accounts of one request speak different vocabularies.
+			key := want + "|" + p.ID
+			tb, ok := translated[key]
 			if !ok {
 				var err error
-				if tb, err = toProvider(body, client, want); err != nil {
+				var names *translate.ToolNames
+				if tb, names, err = toProvider(body, client, want, p.ID); err != nil {
 					return err
 				}
-				translated[want] = tb
+				translated[key] = tb
+				reply.Tools = names
+				if client == translate.Responses {
+					tools = translate.ResponsesTools(body, names)
+				}
+			} else {
+				// A memoized body was built for this same provider, so the maps are rebuilt rather than
+				// left from an account that lost the request.
+				switch client {
+				case translate.Anthropic:
+					reply.Tools = translate.NewToolNames(translate.AnthropicToolNames(body), p.ID)
+				case translate.Responses:
+					names := translate.NewToolNames(translate.ResponsesToolNames(body), p.ID)
+					reply.Tools = names
+					tools = translate.ResponsesTools(body, names)
+				}
 			}
 			path, send, to, via = wantPath, tb, client, want
 			return nil

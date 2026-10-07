@@ -29,7 +29,7 @@ const codexRequest = `{"model":"m","instructions":"be a coding agent","stream":t
   {"type":"web_search","external_web_access":false}]}`
 
 func TestResponsesToOpenAIRequest(t *testing.T) {
-	out, err := ResponsesToOpenAI([]byte(codexRequest))
+	out, err := ResponsesToOpenAI([]byte(codexRequest), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func events(t *testing.T, s string) []map[string]any {
 }
 
 func TestOpenAIStreamToResponses(t *testing.T) {
-	tools := ResponsesTools([]byte(codexRequest))
+	tools := ResponsesTools([]byte(codexRequest), nil)
 	chat := strings.Join([]string{
 		`data: {"id":"chatcmpl-1","model":"m","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"think"}}]}`,
 		`data: {"id":"chatcmpl-1","model":"m","choices":[{"index":0,"delta":{"content":"Hel"}}]}`,
@@ -173,7 +173,7 @@ func TestOpenAIStreamToResponsesErrors(t *testing.T) {
 }
 
 func TestOpenAIResponseToResponses(t *testing.T) {
-	tools := ResponsesTools([]byte(codexRequest))
+	tools := ResponsesTools([]byte(codexRequest), nil)
 	chat := `{"id":"chatcmpl-1","object":"chat.completion","model":"m","choices":[{"index":0,
 	 "message":{"role":"assistant","content":"done","reasoning_content":"hmm",
 	 "tool_calls":[{"id":"call_1","type":"function","function":{"name":"mcp__oracle__connect_to_db","arguments":"{}"}}]},

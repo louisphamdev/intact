@@ -22,6 +22,9 @@ type ModelInfo struct {
 	Context int64 `json:"context,omitempty"`
 	Input   int64 `json:"input,omitempty"`
 	Output  int64 `json:"output,omitempty"`
+	// Compact: the window the client is advised to compress at, which is
+	// below Context for a model that publishes both. 0 is unknown.
+	Compact int64 `json:"compact,omitempty"`
 }
 
 // modelInfos reads thinking support from a model list answer. Each provider
@@ -75,11 +78,11 @@ func modelInfos(raw []byte) map[string]ModelInfo {
 	said := map[string]bool{}
 	for id, m := range items {
 		info, ok := readInfo(m)
-		info.Context, info.Input, info.Output = readLimits(m)
+		info.Context, info.Input, info.Output, info.Compact = readLimits(m)
 		if ok {
 			said[id] = true
 		}
-		if ok || info.Context+info.Input+info.Output > 0 {
+		if ok || info.Context+info.Input+info.Output+info.Compact > 0 {
 			out[id] = info
 		}
 	}
@@ -103,7 +106,11 @@ func modelInfos(raw []byte) map[string]ModelInfo {
 
 // readLimits reads a model's token limits under each provider's own field
 // names; the first field found wins. The names are listed in docs/models.md.
-func readLimits(m map[string]any) (context, input, output int64) {
+//
+// Codex publishes two windows: the whole one (max_context_window) and the
+// smaller one its client compresses at (context_window). The whole one is the
+// context length, and the smaller one is the recommended compact threshold.
+func readLimits(m map[string]any) (context, input, output, compact int64) {
 	pick := func(dst *int64, v any) {
 		if n := tokenCount(v); n > 0 && *dst == 0 {
 			*dst = n
@@ -122,6 +129,11 @@ func readLimits(m map[string]any) (context, input, output int64) {
 	for _, k := range []string{"max_context_window", "context_length", "context_window", "maxTokens"} {
 		pick(&context, m[k])
 	}
+	// A model with two windows names the smaller one for compaction, so it is
+	// read as the threshold rather than dropped.
+	if w := tokenCount(m["context_window"]); w > 0 && context > w {
+		compact = w
+	}
 	for _, k := range []string{"max_input_tokens", "inputTokenLimit"} {
 		pick(&input, m[k])
 	}
@@ -135,7 +147,7 @@ func readLimits(m map[string]any) (context, input, output int64) {
 			}
 		}
 	}
-	return context, input, output
+	return context, input, output, compact
 }
 
 // tokenCount reads a count given as a number or as a numeric string.
@@ -259,6 +271,11 @@ func foldInfos(infos map[string]ModelInfo, groups map[string]variantSet) map[str
 			merged.Context = max(merged.Context, i.Context)
 			merged.Input = max(merged.Input, i.Input)
 			merged.Output = max(merged.Output, i.Output)
+			// The smallest threshold wins: compressing later than one variant
+			// allows would overrun that variant's window.
+			if i.Compact > 0 && (merged.Compact == 0 || i.Compact < merged.Compact) {
+				merged.Compact = i.Compact
+			}
 			delete(infos, g.ids[l])
 		}
 		merged.Efforts = g.Variants()

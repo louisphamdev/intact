@@ -173,6 +173,7 @@
           "context_length": { "type": "integer", "description": "Extension: the context window, when the provider gives it" },
           "max_input_tokens": { "type": "integer", "description": "Extension" },
           "max_output_tokens": { "type": "integer", "description": "Extension" },
+          "compact_window": { "type": "integer", "description": "Extension: the window to compress at, when the provider gives one below context_length (a Codex model: 272000 against 872000)" },
           "bifrost_ua": { "type": "string", "description": "Extension: the User-Agent prefix of the provider's own client. A caller that sends it gets Bifrost: only the credential changes." }
         }
       },

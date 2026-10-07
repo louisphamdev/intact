@@ -7,7 +7,7 @@ import (
 
 func toOpenAI(t *testing.T, body string) map[string]any {
 	t.Helper()
-	out, err := AnthropicToOpenAI([]byte(body))
+	out, err := AnthropicToOpenAI([]byte(body), nil)
 	if err != nil {
 		t.Fatalf("translate: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestUnsupportedContentIsRefusedNotDropped(t *testing.T) {
 		`{"model":"m","max_tokens":9,"messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"QQ=="}},{"type":"text","text":"sum"}]}]}`,
 		`{"model":"m","max_tokens":9,"messages":[{"role":"user","content":[{"type":"image","source":{"type":"file","file_id":"f1"}}]}]}`,
 	} {
-		if _, err := AnthropicToOpenAI([]byte(body)); err == nil || !strings.Contains(err.Error(), "not supported") {
+		if _, err := AnthropicToOpenAI([]byte(body), nil); err == nil || !strings.Contains(err.Error(), "not supported") {
 			t.Errorf("%s: err = %v", body, err)
 		}
 	}

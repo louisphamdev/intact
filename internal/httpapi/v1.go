@@ -223,7 +223,24 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 	if key != "" {
 		ctx = context.WithValue(ctx, sessionKeyCtx{}, key)
 	}
+	// Codex asks for compaction with a compaction_trigger item and accepts nothing but a single
+	// compaction output item back. Answered as an ordinary turn it refuses the thread outright,
+	// with no way out, so the trigger is served here: the provider is asked for the summary as an
+	// ordinary completion, and the answer is put in the shape Codex demands.
+	if client := clientShape(r.PathValue("path")); client == translate.Responses && compactionTrigger(body) {
+		a.compaction(w, r, body, targets, start, model, streamRequested(body), cap)
+		return
+	}
 	a.failover(w, r.WithContext(ctx), body, targets, start, cap)
+}
+
+// streamRequested reports whether the caller asked for a streamed answer.
+func streamRequested(body []byte) bool {
+	var req struct {
+		Stream bool `json:"stream"`
+	}
+	json.Unmarshal(body, &req)
+	return req.Stream
 }
 
 // splitModel reads a "<provider>/<model>" prefix. It reports the provider only
@@ -707,6 +724,9 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 	}
 	translated := map[string][]byte{}
 	tried := 0
+	// Set once the history has been shortened for a 429, so a second rate limit in the
+	// same request retries with the shortened body and never compacts again.
+	shortened := false
 	attempts := a.attemptsFor(r.Context(), targets, start, body)
 	if m, _ := bodyModel(body); m != "" {
 		attempts = a.skipSpent(attempts, m)
@@ -904,6 +924,22 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			log.Printf("connection %s: %s answered %d%s", conn.ID, conn.Provider, resp.StatusCode, modelNote(at.model))
 		}
 		if retryableStatus(resp.StatusCode) && i < len(attempts)-1 {
+			// A 429 is counted in tokens per minute, and the account that answers next
+			// holds no cache for this prefix: it never saw the first answer. So the retry
+			// carries the history shortened, which is the one change that makes it both
+			// cheaper and likelier to be taken. Once per request: a second 429 means the
+			// limit is the account's, not the conversation's length.
+			if resp.StatusCode == http.StatusTooManyRequests && !shortened {
+				var rest []store.Connection
+				for _, next := range attempts[i+1:] {
+					rest = append(rest, next.conn)
+				}
+				if shorter, st, ok := a.compactForRateLimit(conn.Provider, rest, body); ok {
+					body, shortened = shorter, true
+					log.Printf("connection %s: 429, retrying %d bytes shorter (%d -> %d, %d messages cut, %d tools cut)",
+						conn.ID, st.saved(), st.before, st.after, st.droppedMiddle, st.droppedToolOnly)
+				}
+			}
 			resp.Body.Close()
 			continue
 		}

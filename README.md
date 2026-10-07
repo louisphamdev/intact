@@ -38,10 +38,16 @@ To build from source, see [Getting started](docs/getting-started.md).
   [Claude Code](docs/class-a-claude.md#bifrost-claude-code-to-a-claude-code-account) ·
   [Antigravity CLI](docs/class-a-antigravity.md#bifrost-the-cli-to-an-antigravity-account)
 - **Rotation and failover.** Requests rotate across a model's accounts. A busy
-  answer (429, 500, 503, 409, 404) moves to the next account. An expired OAuth
-  token is refreshed and the request retried. A Claude Code session stays on
-  one account, so its prompt cache hits. An account with spent quota is skipped
-  until its window resets. [Routing](docs/routing.md#rotation-and-failover)
+  answer (429, 500, 503, 409, 404) moves to the next account. A 429 on a long
+  conversation retries with the history shortened, because the next account has
+  no cache for it either. An expired OAuth token is refreshed and the request
+  retried. A Claude Code session stays on one account, so its prompt cache hits.
+  An account with spent quota is skipped until its window resets.
+  [Routing](docs/routing.md#rotation-and-failover)
+- **Codex compaction.** A compaction request from Codex is answered here, with
+  the single output item Codex requires, instead of being passed to a provider
+  that does not know the item type and leaving the thread unresumable.
+  [Codex compaction](docs/routing.md#codex-compaction)
 - **Providers.** API-key providers (Groq, NVIDIA, OpenRouter, Cloudflare Workers
   AI, TypeSafe), the sign-ins of coding tools (Claude Code, Codex, Antigravity,
   GitHub Copilot). Any other provider is declared from the dashboard without

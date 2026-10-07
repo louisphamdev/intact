@@ -162,6 +162,89 @@ Every error answer, and every attempt that got no answer, is kept in the
 When no account can be used, the client gets `500 no usable account`. When
 every account failed without an answer, it gets `502 all accounts failed`.
 
+### A 429 on a long conversation retries shorter
+
+A `429` is counted in tokens per minute, so the next account meets the same
+conversation against the same wall. The account that answers next holds no
+cache for this prefix either, because it never saw the first answer: the long
+history costs it full price and returns nothing. So when a rate-limited request
+is long enough to be worth shortening, intact retries it with the history
+shortened. Measured on a 32 KB agent conversation, the retry goes out at 10 KB.
+
+It happens under two conditions and no others:
+
+- **The provider is in round-robin rotation with another account ready to take
+  the session.** A provider set to fallback pins one account per session, and
+  has nowhere to send a shortened conversation, so shortening it would only
+  have thrown history away. A standby account does not count as ready: it is
+  tried after every other account, and only when they all fail.
+- **It is a real `429`.** A `500` is retried too, and a shorter conversation
+  would not help it: the provider is broken, not full.
+
+The shortening keeps the opening request and the last 6 messages exactly as
+the client wrote them, because the next turn's reasoning leans on the recent
+tool results verbatim. The messages between them are reduced to their text --
+the words are kept, the tool calls and their outputs are not, and those are
+most of the weight. One message says what was cut and why, so the model reads
+the gap as something that was cut rather than something it forgot. It works on
+all four request shapes intact speaks: Messages, Chat Completions, Responses
+and the Code Assist envelope.
+
+Not a model-written summary, deliberately: that would cost a request which can
+itself be rate limited, and would fail in exactly the situation where the retry
+matters.
+
+Set with the `cache:rate-limit-compact` setting, as JSON:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | on | Off leaves every request exactly as the client wrote it. |
+| `keepRecent` | 6 | Messages at the end kept verbatim. |
+| `headBytes` | 6000 | Bytes of the opening request kept before it is cut. |
+| `userBytes` | 3000 | Bytes kept per middle user message. |
+| `assistantBytes` | 1500 | Bytes kept per middle assistant message. |
+| `minBytes` | 24000 | Below this the conversation is left alone. |
+| `marker` | on | Off drops the message that says what was cut. |
+
+## Codex compaction
+
+Codex 0.160 asks for compaction with an ordinary Responses request whose last
+input item is `{"type":"compaction_trigger"}`, and accepts the answer only if it
+carries exactly one output item of type `compaction`. A provider that answers as
+an ordinary completion gives zero of them, and Codex treats that as a fatal
+error raised *before* it replaces the history. The thread then stays exactly as
+long as it was, so every `codex resume` compacts again and dies the same way.
+The feature cannot be switched off, so the thread is unrecoverable once this
+happens.
+
+intact answers the trigger itself. The provider is asked for the summary as an
+ordinary completion -- the one thing every provider can do -- and the answer is
+put back into the shape Codex demands:
+
+```json
+{"type":"compaction","id":"cmp_...","encrypted_content":"<the summary>"}
+```
+
+`encrypted_content` is opaque to Codex: it is stored in the history as the
+summary item and never decoded, so a plain-text summary is a valid payload. What
+is not negotiable is the count, because the check is on the count.
+
+Points worth knowing:
+
+- **The client's own settings are carried over.** The summary request is the
+  client's body with the trigger dropped and an instruction appended. OpenAI's
+  Responses refuses a request that does not set `store` to false, and refuses
+  one that does not set `stream` to true, so both pass through with the rest.
+- **An account that only speaks the streamed shape gets one retry** with the
+  flag set, since the answer is read either way.
+- **The summary is capped at 24 KB**, because it replaces the history and an
+  uncapped one would put the next turn straight back over the window. An
+  over-long summary is cut at a paragraph, then a sentence.
+- **An empty summary is never stored.** A provider that answers with a tool call
+  or with nothing usable gets an error instead, because a blank summary would
+  replace the whole history with nothing. The provider's own words are in the
+  intact log, so the reason is visible.
+
 ## Antigravity level variants
 
 Antigravity lists one model several times, once per thinking level:

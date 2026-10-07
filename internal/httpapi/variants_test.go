@@ -209,6 +209,8 @@ func TestModelLimits(t *testing.T) {
 		"antigravity": {`{"models":{"x-high":{"supportsThinking":true,"maxTokens":1048576,"maxOutputTokens":65535},"x-low":{"supportsThinking":true,"maxTokens":1048576,"maxOutputTokens":65535}}}`,
 			`{"x":{"thinking":true,"efforts":["high","low"],"default":"high","context":1048576,"output":65535}}`},
 		"limits only": {`{"data":[{"id":"z","context_length":8192}]}`, `{"z":{"context":8192}}`},
+		"codex max_context_window": {`{"models":[{"slug":"gpt-6-astra","context_window":272000,"max_context_window":872000}]}`,
+			`{"gpt-6-astra":{"context":872000}}`},
 	}
 	for name, c := range cases {
 		infos := modelInfos([]byte(c[0]))

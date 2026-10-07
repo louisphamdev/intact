@@ -119,7 +119,7 @@ func readLimits(m map[string]any) (context, input, output int64) {
 		pick(&context, tp["context_length"])
 		pick(&output, tp["max_completion_tokens"])
 	}
-	for _, k := range []string{"context_length", "context_window", "maxTokens"} {
+	for _, k := range []string{"max_context_window", "context_length", "context_window", "maxTokens"} {
 		pick(&context, m[k])
 	}
 	for _, k := range []string{"max_input_tokens", "inputTokenLimit"} {

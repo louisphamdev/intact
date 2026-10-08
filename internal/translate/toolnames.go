@@ -215,8 +215,7 @@ func namespaceOf(name string) string {
 }
 
 // ToolNames translates one request's tool names in both directions. A nil or zero value changes
-// nothing, so a request with no tools, or one going to a provider with no vocabulary of its own, needs
-// no check.
+// nothing, so a request with no tools needs no check.
 type ToolNames struct {
 	// toProvider is caller name -> provider name.
 	toProvider map[string]string
@@ -224,8 +223,8 @@ type ToolNames struct {
 	toClient map[string]string
 	// caps is caller name -> capability, for the case where the model ignores the list it was given.
 	caps map[string]string
-	// declared counts the caller's tools a provider name may be chosen for. One tool has no second
-	// answer to pick between.
+	// declared counts the caller's tools a name may be chosen for. One tool has no second answer to
+	// pick between.
 	declared int
 }
 
@@ -234,15 +233,17 @@ type ToolNames struct {
 //
 // Only client-executed tools are offered: the caller sends these as function tools with a schema, and
 // a hosted tool of its own is not among them.
+//
+// The caller's tools are counted for every provider, because a model reaching for its own vocabulary
+// is a property of the model and not of the provider it was trained for: a Zen or Qwen model answers
+// `shell` whichever OpenAI-compatible endpoint serves it. Counting is what lets ToClient match that
+// answer back. A provider with no vocabulary of its own only skips the other half, the choice of which
+// name to send, which is the part that is genuinely provider-specific.
 func NewToolNames(clientTools []string, provider string) *ToolNames {
 	t := &ToolNames{
 		toProvider: map[string]string{},
 		toClient:   map[string]string{},
 		caps:       map[string]string{},
-	}
-	vocab := vocabFor(provider)
-	if len(vocab) == 0 {
-		return t
 	}
 	// A capability with several declared tools is never translated: which one the model meant is not
 	// knowable, and picking one runs the wrong tool.
@@ -258,6 +259,10 @@ func NewToolNames(clientTools []string, provider string) *ToolNames {
 		t.declared++
 		t.caps[name] = cs[0]
 		byCap[cs[0]] = append(byCap[cs[0]], name)
+	}
+	vocab := vocabFor(provider)
+	if len(vocab) == 0 {
+		return t
 	}
 	for capName, names := range byCap {
 		if len(names) != 1 {

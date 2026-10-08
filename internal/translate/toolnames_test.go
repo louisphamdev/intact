@@ -67,14 +67,31 @@ func TestAGeminiAccountGetsTheGeminiNames(t *testing.T) {
 	}
 }
 
-// An account whose models take the names the caller sent has nothing to prefer, so nothing moves.
-func TestAProviderWithNoVocabularyOfItsOwnChangesNothing(t *testing.T) {
-	names := NewToolNames([]string{"Read", "Bash"}, "groq")
-	if got := names.ToProvider("Bash"); got != "Bash" {
-		t.Errorf("Bash went out as %q on a provider with no vocabulary", got)
+// An account whose models take the names the caller sent has nothing to prefer, so the name it is given
+// does not change. The answer still has to come back: a model reaches for its own vocabulary whichever
+// endpoint serves it, so an OpenAI-compatible account behind a Claude Code caller answers `shell`, and
+// a caller that declared Bash refuses a name it does not have.
+func TestAProviderWithNoVocabularyKeepsTheNameItIsGivenAndStillMatchesTheAnswer(t *testing.T) {
+	for _, provider := range []string{"groq", "bifrost", "openrouter", "claude"} {
+		names := NewToolNames([]string{"Read", "Bash"}, provider)
+		if got := names.ToProvider("Bash"); got != "Bash" {
+			t.Errorf("%s: Bash went out as %q, want Bash", provider, got)
+		}
+		if got := names.ToClient("shell"); got != "Bash" {
+			t.Errorf("%s: shell came back as %q, want Bash", provider, got)
+		}
+		if got := names.ToClient("read"); got != "Read" {
+			t.Errorf("%s: read came back as %q, want Read", provider, got)
+		}
 	}
+}
+
+// The same boundary holds where the caller declares one tool: a single name has no second answer to
+// pick between, so an invented one stays as the model wrote it.
+func TestASingleDeclaredToolIsNotRenamed(t *testing.T) {
+	names := NewToolNames([]string{"Bash"}, "bifrost")
 	if got := names.ToClient("shell"); got != "shell" {
-		t.Errorf("shell came back as %q on a provider with no vocabulary", got)
+		t.Errorf("shell came back as %q with one tool declared, want shell", got)
 	}
 }
 

@@ -323,49 +323,50 @@ func (a *api) requireSession(next http.HandlerFunc) http.HandlerFunc {
 // which Anthropic clients send. Otherwise it answers 401 for the machine caller.
 func (a *api) requireToken(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		p, ok := a.tokenPrincipal(w, r)
+		p, ok, written := a.tokenPrincipal(w, r)
 		if ok {
 			next(w, withPrincipal(r, p))
 			return
 		}
-		writeError(w, http.StatusUnauthorized, "missing or invalid bearer token")
+		if !written {
+			writeError(w, http.StatusUnauthorized, "missing or invalid bearer token")
+		}
 	}
 }
 
 // tokenPrincipal answers who a request is, when it carries a token intact knows: the
 // environment's master token, a dashboard key with its rate limit, or a signed-in session.
-// tokenPrincipal answers who a request is, when it carries a token intact knows: the
-// environment's master token, a dashboard key with its rate limit, or a signed-in session.
 // It writes the refusal itself, because a key over its rate limit has to be told to wait.
-func (a *api) tokenPrincipal(w http.ResponseWriter, r *http.Request) (principal, bool) {
+// Returns (principal, ok, written).
+func (a *api) tokenPrincipal(w http.ResponseWriter, r *http.Request) (principal, bool, bool) {
 	tok := bearerToken(r)
 	// Who the caller is travels with the request: the master token is admin, and a
 	// dashboard key owns only what its key id caused. The key name is a label for
 	// drift and the error log, never a right.
 	if tok != "" && a.auth != nil && a.auth.CheckAPIToken("Bearer "+tok) {
-		return principal{admin: true, name: "env"}, true
+		return principal{admin: true, name: "env"}, true, false
 	}
 	if k, ok := a.store.APIKeyByToken(tok); ok {
 		if k.Expired(time.Now()) {
 			writeError(w, http.StatusUnauthorized, "api key expired")
-			return principal{}, false
+			return principal{}, false, true
 		}
 		if k.RPM > 0 {
 			if ok, wait := a.keyLim.allow(k.ID, k.RPM, time.Now()); !ok {
 				w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
 				writeError(w, http.StatusTooManyRequests, "api key rate limit: "+strconv.Itoa(k.RPM)+" requests per minute")
-				return principal{}, false
+				return principal{}, false, true
 			}
 		}
-		return principal{keyID: k.ID, name: k.Name, models: k.Models}, true
+		return principal{keyID: k.ID, name: k.Name, models: k.Models}, true, false
 	}
 	if ck, err := r.Cookie(sessionCookie); err == nil && a.auth != nil && a.auth.ValidSession(ck.Value) {
-		return principal{admin: true, name: "session"}, true
+		return principal{admin: true, name: "session"}, true, false
 	}
 	if a.auth == nil {
-		return principal{admin: true}, true
+		return principal{admin: true}, true, false
 	}
-	return principal{}, false
+	return principal{}, false, false
 }
 
 // requireAdmin gates management that can redirect a stored credential or wipe a

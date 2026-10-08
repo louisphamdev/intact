@@ -57,7 +57,7 @@ const rateLimitCompactKey = "cache:rate-limit-compact"
 func (p compactPolicy) on() bool { return p.Enabled == nil || *p.Enabled }
 
 func (p compactPolicy) withDefaults() compactPolicy {
-	if p.KeepRecent <= 0 {
+	if p.KeepRecent <= 0 || p.KeepRecent > 100000 {
 		p.KeepRecent = 6
 	}
 	if p.HeadBytes <= 0 {
@@ -75,16 +75,18 @@ func (p compactPolicy) withDefaults() compactPolicy {
 	return p
 }
 
-// rateLimitCompact reads the policy. A setting that does not parse leaves the defaults
-// in place: compaction is a saving, and a broken setting must not become a request that
-// fails or a retry that is not shortened.
+// rateLimitCompact reads the policy. A setting that does not parse refuses lossy compaction
+// to preserve the original body safely. An absent setting leaves the defaults in place.
 func (a *api) rateLimitCompact() compactPolicy {
 	p := compactPolicy{}
-	if v, _ := a.store.GetSetting(rateLimitCompactKey); v != "" {
-		if err := json.Unmarshal([]byte(v), &p); err != nil {
-			log.Printf("cache: %s: %v", rateLimitCompactKey, err)
-			return compactPolicy{}.withDefaults()
-		}
+	v, err := a.store.GetSetting(rateLimitCompactKey)
+	if err != nil || v == "" {
+		return p.withDefaults()
+	}
+	if err := json.Unmarshal([]byte(v), &p); err != nil {
+		log.Printf("cache: %s: %v; refusing lossy compaction", rateLimitCompactKey, err)
+		disabled := false
+		return compactPolicy{Enabled: &disabled}
 	}
 	return p.withDefaults()
 }
@@ -116,6 +118,12 @@ type historyItem struct {
 // standby: a standby is the last resort for a provider with nothing else, and handing it
 // a shortened conversation is not worth the loss.
 func (a *api) compactForRateLimit(prov string, rest []store.Connection, body []byte) ([]byte, compactStat, bool) {
+	if len(rest) == 0 {
+		return nil, compactStat{}, false
+	}
+	if m, ok := bodyModel(body); !ok || m == "" {
+		return nil, compactStat{}, false
+	}
 	p := a.rateLimitCompact()
 	if !p.on() || len(body) < p.MinBytes {
 		return nil, compactStat{}, false
@@ -156,7 +164,7 @@ func compactConversation(body []byte, p compactPolicy, reason string) ([]byte, c
 	if json.Unmarshal(raw, &items) != nil {
 		return nil, compactStat{}, false
 	}
-	if len(items) <= p.KeepRecent+2 || len(body) < p.MinBytes {
+	if p.KeepRecent < 2 || p.KeepRecent >= len(items)-2 || len(body) < p.MinBytes {
 		return nil, compactStat{}, false
 	}
 
@@ -184,10 +192,13 @@ func compactConversation(body []byte, p compactPolicy, reason string) ([]byte, c
 	// message that carries no result: a result whose call was cut away is a request
 	// the provider refuses.
 	tail := len(parsed) - p.KeepRecent
+	if tail < 0 || tail >= len(parsed) {
+		return nil, compactStat{}, false
+	}
 	for tail < len(parsed) && parsed[tail].hasResult {
 		tail++
 	}
-	if tail <= head+1 {
+	if tail <= head+1 || tail > len(parsed) {
 		return nil, compactStat{}, false
 	}
 
@@ -198,11 +209,11 @@ func compactConversation(body []byte, p compactPolicy, reason string) ([]byte, c
 	for i := range parsed[:head] {
 		kept = append(kept, parsed[i].raw)
 	}
-	kept = append(kept, shrinkTo(&parsed[head], p.HeadBytes))
+	kept = append(kept, shrinkTo(&parsed[head], p.HeadBytes, field))
 	st.keptHead = 1
 
 	if p.MarkerOn == nil || *p.MarkerOn {
-		kept = append(kept, markerMessage(reason, &st, p.KeepRecent))
+		kept = append(kept, markerMessage(reason, &st, p.KeepRecent, field))
 	}
 	for i := head + 1; i < tail; i++ {
 		it := &parsed[i]
@@ -211,7 +222,7 @@ func compactConversation(body []byte, p compactPolicy, reason string) ([]byte, c
 			limit = p.UserBytes
 		}
 		if text := trimTo(it.text, limit); text != "" {
-			kept = append(kept, rebuild(it.role, text))
+			kept = append(kept, rebuildItem(field, it.role, text))
 			st.keptMiddle++
 			continue
 		}
@@ -405,22 +416,50 @@ func partsText(raw json.RawMessage) (string, bool) {
 // shrinkTo keeps a message whole when it is short enough, and rebuilds it as its words
 // when it is not. An opening request that was mostly pasted text loses the tail of the
 // paste rather than its meaning.
-func shrinkTo(it *historyItem, max int) json.RawMessage {
+func shrinkTo(it *historyItem, max int, field string) json.RawMessage {
 	if len(it.text) <= max {
 		return it.raw
 	}
-	return rebuild(it.role, trimTo(it.text, max))
+	return rebuildItem(field, it.role, trimTo(it.text, max))
 }
 
-// rebuild writes a message that is only its role and its text. It encodes without Go's
-// HTML escaping, because the text is the client's own: a message holding a < or an & is
-// compacted into the same JSON it would have been sent as.
-func rebuild(role, text string) json.RawMessage {
-	b, _ := marshalPlain(struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	}{role, text})
-	return b
+// rebuildItem writes a message according to the specific protocol of field.
+func rebuildItem(field, role, text string) json.RawMessage {
+	switch field {
+	case "input":
+		typeStr := "output_text"
+		if role == "user" {
+			typeStr = "input_text"
+		}
+		item := map[string]any{
+			"type": "message",
+			"role": role,
+			"content": []map[string]string{
+				{"type": typeStr, "text": text},
+			},
+		}
+		b, _ := marshalPlain(item)
+		return b
+	case "contents", "request.contents":
+		geminiRole := role
+		if role == "assistant" {
+			geminiRole = "model"
+		}
+		item := map[string]any{
+			"role": geminiRole,
+			"parts": []map[string]string{
+				{"text": text},
+			},
+		}
+		b, _ := marshalPlain(item)
+		return b
+	default:
+		b, _ := marshalPlain(struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		}{role, text})
+		return b
+	}
 }
 
 // trimTo shortens text to a byte budget on a rune boundary, and says what went, so the
@@ -439,15 +478,17 @@ func trimTo(text string, max int) string {
 // markerMessage is the one message compaction adds. It says what went and why, because
 // a model handed a conversation with a hole in it will otherwise read the hole as
 // something it forgot rather than something that was cut.
-func markerMessage(reason string, st *compactStat, keepRecent int) json.RawMessage {
+func markerMessage(reason string, st *compactStat, keepRecent int, field string) json.RawMessage {
 	what := fmt.Sprintf("%d earlier messages were kept as their text alone", st.keptMiddle)
 	if st.droppedMiddle > 0 {
 		what += fmt.Sprintf(", and %d were dropped whole because they held only tool calls and their results", st.droppedMiddle)
 	}
-	return rebuild("user", fmt.Sprintf(
+	userRole := "user"
+	msg := fmt.Sprintf(
 		"[intact] The history between the first request and the recent turns was shortened before this "+
 			"request was sent, because %s. The next account holds no cache for this conversation, so the "+
 			"extra length would have been paid for in full and returned nothing. %s. The opening request and "+
 			"the last %d messages are unchanged.",
-		reason, what, keepRecent))
+		reason, what, keepRecent)
+	return rebuildItem(field, userRole, msg)
 }

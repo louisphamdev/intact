@@ -278,8 +278,10 @@ func TestCompactForRateLimitKeepsDefaultsOnABrokenSetting(t *testing.T) {
 	if err := a.store.SetSetting(rateLimitCompactKey, `{not json`); err != nil {
 		t.Fatal(err)
 	}
-	if _, st, ok := a.compactForRateLimit("openai", conns("b"), bodyWith(t, longMessages(9, 4000))); !ok || st.saved() <= 0 {
-		t.Fatal("a broken setting stopped compaction instead of falling back to the defaults")
+	// A broken setting must refuse lossy compaction to preserve the original body safely,
+	// rather than falling back to guessing defaults when configuration is malformed.
+	if _, _, ok := a.compactForRateLimit("openai", conns("b"), bodyWith(t, longMessages(9, 4000))); ok {
+		t.Fatal("a broken setting proceeded with lossy compaction instead of refusing")
 	}
 }
 

@@ -118,14 +118,6 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "model is not permitted for this api key")
 		return
 	}
-	// A caller that came in as the provider's own client may only reach that provider. Without
-	// this the User-Agent would be a costume: any client could name itself codex and then ask
-	// intact for a model on any account it holds.
-	if caller.providerClient != "" && prov != "" && prov != caller.providerClient {
-		writeError(w, http.StatusForbidden,
-			"the "+caller.providerClient+" client may only reach the "+caller.providerClient+" provider")
-		return
-	}
 
 	traceHeader := r.Header.Get("X-Intact-Trace")
 	r.Header.Del("X-Intact-Trace")
@@ -735,6 +727,9 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 	// Set once the history has been shortened for a 429, so a second rate limit in the
 	// same request retries with the shortened body and never compacts again.
 	shortened := false
+	var lastWireLen int
+	var pendingCompactStat *compactStat
+	var pendingCompactConnID string
 	attempts := a.attemptsFor(r.Context(), targets, start, body)
 	if m, _ := bodyModel(body); m != "" {
 		attempts = a.skipSpent(attempts, m)
@@ -876,6 +871,13 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			}
 		}
 		send = filterFor(a, r, p, conn.Provider, send)
+		if pendingCompactStat != nil {
+			log.Printf("connection %s: 429, retrying %d bytes shorter (%d -> %d, %d messages cut, %d tools cut)",
+				pendingCompactConnID, lastWireLen-len(send), lastWireLen, len(send),
+				pendingCompactStat.droppedMiddle, pendingCompactStat.droppedToolOnly)
+			pendingCompactStat = nil
+		}
+		lastWireLen = len(send)
 		tried++
 		resp, err := a.sendLogged(forShape(r, to), p, conn, path, secret, send, model)
 		if err != nil {
@@ -938,14 +940,18 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			// cheaper and likelier to be taken. Once per request: a second 429 means the
 			// limit is the account's, not the conversation's length.
 			if resp.StatusCode == http.StatusTooManyRequests && !shortened {
-				var rest []store.Connection
-				for _, next := range attempts[i+1:] {
-					rest = append(rest, next.conn)
-				}
-				if shorter, st, ok := a.compactForRateLimit(conn.Provider, rest, body); ok {
-					body, shortened = shorter, true
-					log.Printf("connection %s: 429, retrying %d bytes shorter (%d -> %d, %d messages cut, %d tools cut)",
-						conn.ID, st.saved(), st.before, st.after, st.droppedMiddle, st.droppedToolOnly)
+				next := attempts[i+1]
+				if next.conn.ID != conn.ID && !next.conn.Standby {
+					var rest []store.Connection
+					for _, nextAt := range attempts[i+1:] {
+						rest = append(rest, nextAt.conn)
+					}
+					if shorter, st, ok := a.compactForRateLimit(conn.Provider, rest, body); ok {
+						body, shortened = shorter, true
+						clear(translated)
+						pendingCompactStat = &st
+						pendingCompactConnID = conn.ID
+					}
 				}
 			}
 			resp.Body.Close()

@@ -52,6 +52,8 @@ func (a *api) compaction(
 			if retry, again, rerr := a.askForSummary(r, body, targets, start, model); rerr == nil {
 				resp, conn = retry, again
 				err = nil
+			} else {
+				err = rerr
 			}
 		}
 	}

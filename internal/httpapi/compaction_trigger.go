@@ -6,6 +6,8 @@ import (
 	"log"
 
 	"strings"
+
+	"github.com/louisphamdev/intact/internal/translate"
 )
 
 // Codex remote compaction.
@@ -23,14 +25,9 @@ import (
 //
 //	{"type":"compaction","id":"<id>","encrypted_content":"<the summary>"}
 //
-// encrypted_content is opaque to Codex: it is stored in the history as the summary item and
-// never decoded, so the summary may be plain text. What is not negotiable is the item count --
-// one, and of that type -- because the check is on the count.
-//
-// So the trigger is answered here rather than forwarded as it stands. intact asks the provider
-// for the summary as an ordinary completion and then answers Codex in the shape it demanded.
-// That keeps the thread alive, and because the summary replaces the history, it keeps the next
-// turn inside its window.
+// Gateway summaries use a versioned capsule in encrypted_content. Codex stores it as opaque
+// state; intact expands its own capsule when the next request replays it. Native OpenAI
+// ciphertext is preserved only on native Responses routes, never treated as summary prose.
 
 // compactionTrigger reports whether a Responses body asks for compaction. The trigger is the
 // last input item, which is where Codex puts it.
@@ -80,6 +77,11 @@ const compactionInstruction = "Summarize this conversation so it can replace the
 // to keep. So store, stream, include and reasoning all pass through, and the answer is read as
 // whatever shape they asked for.
 func summaryRequest(body []byte) []byte {
+	expanded, err := translate.ExpandGatewayCompactions(body, true)
+	if err != nil {
+		return nil
+	}
+	body = expanded
 	var req map[string]json.RawMessage
 	if json.Unmarshal(body, &req) != nil {
 		return nil
@@ -104,6 +106,8 @@ func summaryRequest(body []byte) []byte {
 		return nil
 	}
 	req["input"] = input
+	req["tool_choice"] = json.RawMessage(`"none"`)
+	delete(req, "text")
 	// The model is not set here. The body already carries the one intact rewrote for this
 	// account, without the provider prefix the client sent; putting the caller's own name
 	// back would send a model the account does not serve.
@@ -116,7 +120,7 @@ func summaryRequest(body []byte) []byte {
 
 // compactionItem is the one output item a compaction answer carries.
 func compactionItem(id, summary string) map[string]any {
-	return map[string]any{"type": "compaction", "id": id, "encrypted_content": summary}
+	return map[string]any{"type": "compaction", "id": id, "encrypted_content": translate.EncodeCompaction(summary)}
 }
 
 // compactionBody is the whole-answer form of a compaction reply.
@@ -166,6 +170,10 @@ func compactionStream(id, respID, summary, model string) []byte {
 // with nothing, which is worse than the failure it replaces.
 func compactionSummary(body []byte) string {
 	var whole struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
 		Output []struct {
 			Type    string `json:"type"`
 			CallID  string `json:"call_id"`
@@ -187,6 +195,10 @@ func compactionSummary(body []byte) string {
 				} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
+	}
+	var anyWhole any
+	if json.Unmarshal(body, &anyWhole) != nil || summaryHasCall(anyWhole) {
+		return ""
 	}
 	if json.Unmarshal(body, &whole) != nil {
 		return ""
@@ -222,59 +234,81 @@ func compactionSummary(body []byte) string {
 			return t
 		}
 	}
+	var text strings.Builder
+	for _, part := range whole.Content {
+		if part.Type == "text" {
+			text.WriteString(part.Text)
+		}
+	}
+	if text.Len() > 0 {
+		return strings.TrimSpace(text.String())
+	}
 	return ""
 }
 
 // compactionSummaryFromStream reads the text out of a streamed answer, which is what a provider
 // sends when it streams whatever it was asked for.
 func compactionSummaryFromStream(body []byte) string {
-	var b strings.Builder
-	for _, line := range bytes.Split(body, []byte("\n")) {
-		line = bytes.TrimSpace(line)
-		if !bytes.HasPrefix(line, []byte("data:")) {
+	var text strings.Builder
+	var final string
+	for _, data := range summarySSEData(body) {
+		if bytes.Equal(data, []byte("[DONE]")) {
 			continue
 		}
-		data := bytes.TrimSpace(line[len("data:"):])
-		if bytes.Equal(data, []byte("[DONE]")) {
-			break
-		}
 		var ev struct {
-			Type    string `json:"type"`
-			Delta   string `json:"delta"`
-			Choices []struct {
+			Type     string          `json:"type"`
+			Delta    json.RawMessage `json:"delta"`
+			Response json.RawMessage `json:"response"`
+			Choices  []struct {
 				Delta struct {
 					Content string `json:"content"`
 				} `json:"delta"`
 			} `json:"choices"`
-			Response struct {
-				Output []struct {
-					Text    string `json:"text"`
-					Content []struct {
-						Text string `json:"text"`
-					} `json:"content"`
-				} `json:"output"`
-			} `json:"response"`
+			Candidates []struct {
+				Content struct {
+					Parts []struct {
+						Text    string `json:"text"`
+						Thought bool   `json:"thought"`
+					} `json:"parts"`
+				} `json:"content"`
+			} `json:"candidates"`
 		}
 		if json.Unmarshal(data, &ev) != nil {
 			continue
 		}
 		switch ev.Type {
 		case "response.output_text.delta":
-			b.WriteString(ev.Delta)
-		case "response.output_item.done", "response.completed":
-			for _, item := range ev.Response.Output {
-				b.WriteString(item.Text)
-				for _, c := range item.Content {
-					b.WriteString(c.Text)
-				}
+			var delta string
+			json.Unmarshal(ev.Delta, &delta)
+			text.WriteString(delta)
+		case "content_block_delta":
+			var delta struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
 			}
+			json.Unmarshal(ev.Delta, &delta)
+			if delta.Type == "text_delta" {
+				text.WriteString(delta.Text)
+			}
+		case "response.completed":
+			final = compactionSummary(ev.Response)
 		default:
 			for _, ch := range ev.Choices {
-				b.WriteString(ch.Delta.Content)
+				text.WriteString(ch.Delta.Content)
+			}
+			for _, c := range ev.Candidates {
+				for _, p := range c.Content.Parts {
+					if !p.Thought {
+						text.WriteString(p.Text)
+					}
+				}
 			}
 		}
 	}
-	return strings.TrimSpace(b.String())
+	if text.Len() > 0 {
+		return strings.TrimSpace(text.String())
+	}
+	return final
 }
 
 // compactionIDs are the ids of the two items in one compaction reply. They are separate because

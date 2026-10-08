@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/louisphamdev/intact/internal/translate"
 )
 
 // Codex accepts a compaction answer only when it carries exactly one output item of type
@@ -124,8 +126,12 @@ func TestCompactionAnswerCarriesExactlyOneCompactionItem(t *testing.T) {
 		if !strings.Contains(string(raw), "encrypted_content") {
 			t.Fatalf("stream=%v: the item has no encrypted_content:\n%s", stream, raw)
 		}
-		if !strings.Contains(string(raw), "the summary") {
-			t.Fatalf("stream=%v: the summary is not in the answer:\n%s", stream, raw)
+		capsule := translate.EncodeCompaction("the summary")
+		if !strings.Contains(string(raw), capsule) {
+			t.Fatalf("stream=%v: summary capsule missing: %s", stream, raw)
+		}
+		if decoded, err := translate.DecodeCompaction(capsule); err != nil || decoded != "the summary" {
+			t.Fatalf("summary cannot replay: %q %v", decoded, err)
 		}
 	}
 }

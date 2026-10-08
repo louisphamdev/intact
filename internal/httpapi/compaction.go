@@ -64,9 +64,9 @@ func (a *api) compaction(
 		return
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslatedBody))
-	if err != nil {
-		writeError(w, http.StatusBadGateway, "cannot read the summary")
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxTranslatedBody+1))
+	if err != nil || len(raw) > maxTranslatedBody {
+		writeError(w, http.StatusBadGateway, "cannot read the complete summary")
 		return
 	}
 	if resp.StatusCode >= 400 {
@@ -76,6 +76,10 @@ func (a *api) compaction(
 	}
 	// The client asked for a stream or did not, and the provider answered in that shape
 	// because the summary request carried the client's own stream setting through.
+	if !completeSummaryResponse(raw) {
+		writeError(w, http.StatusBadGateway, "the provider returned an incomplete or invalid summary; history was not replaced")
+		return
+	}
 	summary := compactionSummary(raw)
 	if summary == "" && bytes.Contains(raw, []byte("data:")) {
 		summary = compactionSummaryFromStream(raw)
@@ -86,7 +90,10 @@ func (a *api) compaction(
 			"the provider answered the summary request with no text to store as the summary")
 		return
 	}
-	summary = capSummary(summary)
+	if len(summary) > compactionSummaryCap {
+		writeError(w, http.StatusBadGateway, "the summary exceeds the 24 KiB limit; history was not replaced")
+		return
+	}
 
 	itemID, respID := compactionIDs()
 	w.Header().Set("Content-Type", contentTypeFor(stream))
@@ -213,63 +220,12 @@ func (e *providerStatus) Error() string {
 // responsesToChatInput turns a Responses input array into the chat messages a Chat Completions
 // provider understands, so the summary request reaches one in the shape it speaks.
 func responsesToChatInput(body []byte) ([]byte, bool) {
-	var req struct {
-		Model    string            `json:"model"`
-		Messages []json.RawMessage `json:"messages"`
-		Input    []json.RawMessage `json:"input"`
-	}
-	if json.Unmarshal(body, &req) != nil {
+	var req map[string]json.RawMessage
+	if json.Unmarshal(body, &req) != nil || req["messages"] != nil || req["input"] == nil {
 		return nil, false
 	}
-	if req.Messages != nil {
-		return nil, false
-	}
-	msgs := make([]json.RawMessage, 0, len(req.Input))
-	for _, item := range req.Input {
-		var it struct {
-			Type    string `json:"type"`
-			Role    string `json:"role"`
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-			CallID string `json:"call_id"`
-			Name   string `json:"name"`
-			Args   string `json:"arguments"`
-			Output string `json:"output"`
-		}
-		if json.Unmarshal(item, &it) != nil {
-			continue
-		}
-		switch {
-		case it.CallID != "":
-			msgs = append(msgs, rawMessage(map[string]any{
-				"role": "assistant", "content": nil,
-				"tool_calls": []any{map[string]any{"id": it.CallID, "type": "function",
-					"function": map[string]any{"name": it.Name, "arguments": it.Args}}},
-			}))
-		case it.Output != "":
-			msgs = append(msgs, rawMessage(map[string]any{
-				"role": "tool", "tool_call_id": it.CallID, "name": it.Name, "content": it.Output,
-			}))
-		case it.Role == "assistant":
-			msgs = append(msgs, rawMessage(map[string]any{"role": "assistant", "content": textOf(it.Content)}))
-		default:
-			msgs = append(msgs, rawMessage(map[string]any{"role": "user", "content": textOf(it.Content)}))
-		}
-	}
-	if len(msgs) == 0 {
-		return nil, false
-	}
-	out, err := marshalPlain(struct {
-		Model    string            `json:"model"`
-		Messages []json.RawMessage `json:"messages"`
-		Stream   bool              `json:"stream"`
-	}{req.Model, msgs, false})
-	if err != nil {
-		return nil, false
-	}
-	return out, true
+	out, err := translate.ResponsesToOpenAI(body, nil)
+	return out, err == nil
 }
 
 // textOf joins the text of an input item's content blocks.

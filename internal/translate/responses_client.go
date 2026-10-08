@@ -190,6 +190,11 @@ func ResponsesTools(body []byte, vocab *ToolNames) map[string]ToolMeta {
 // function tool names to the vocabulary the provider is going to read; custom tools and the harness's
 // own local_shell keep theirs, because a freeform tool's grammar is written for its name.
 func ResponsesToOpenAI(body []byte, vocab *ToolNames) ([]byte, error) {
+	var expandErr error
+	body, expandErr = ExpandGatewayCompactions(body, false)
+	if expandErr != nil {
+		return nil, expandErr
+	}
 	if vocab == nil {
 		vocab = &ToolNames{}
 	}
@@ -328,6 +333,9 @@ func ResponsesToOpenAI(body []byte, vocab *ToolNames) ([]byte, error) {
 			fn["description"], fn["parameters"] = "Run a shell command on the user's machine and return its output.", localShellParams
 		default:
 			fn["description"] = str(t["description"])
+			if strict, ok := t["strict"].(bool); ok {
+				fn["strict"] = strict
+			}
 			params := t["parameters"]
 			if params == nil {
 				params = obj{"type": "object", "properties": obj{}}

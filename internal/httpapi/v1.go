@@ -93,6 +93,13 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	original := body
+	if clientShape(r.PathValue("path")) == translate.Responses {
+		body, err = translate.ExpandGatewayCompactions(body, true)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	model, ok := bodyModel(body)
 	if !ok || model == "" {
 		switch {

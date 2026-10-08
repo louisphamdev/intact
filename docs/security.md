@@ -11,6 +11,11 @@
 A dashboard key calls models. It does not manage intact. The session and the
 master token are admin. A key is not, and no key name makes it one.
 
+All proxy routes (`/v1/*`) enforce credential verification: every unauthenticated
+request is rejected immediately with HTTP 401 Unauthorized, and zero requests are
+forwarded to upstreams. The `User-Agent` selects Bifrost protocol routing when a
+known coding tool calls its matching provider, but provides no authentication exemption.
+
 The API key is never forwarded to a provider. intact removes `Authorization`
 and `x-api-key` from the incoming request and sets the account's own credential.
 

@@ -33,20 +33,25 @@ To build from source, see [Getting started](docs/getting-started.md).
   changes only the token. The headers and the body of the tool stay as sent, and
   the blacklist does not run. This applies to Claude Code, the Codex CLI and the
   Antigravity CLI (`agy`). For `agy`, intact also writes the project of the
-  account. intact turns Bifrost on by itself from the `User-Agent`. llm-switcher
-  reads `bifrost_ua` from `/v1/models` and also sends the request unchanged.
+  account. intact turns Bifrost on by itself from the `User-Agent`. Every request
+  still requires an authorized intact credential (Bearer token or `x-api-key`);
+  `User-Agent` selects native passthrough behavior but never bypasses authentication.
+  llm-switcher reads `bifrost_ua` from `/v1/models` and also sends the request unchanged.
   [Claude Code](docs/class-a-claude.md#bifrost-claude-code-to-a-claude-code-account) ·
   [Antigravity CLI](docs/class-a-antigravity.md#bifrost-the-cli-to-an-antigravity-account)
 - **Rotation and failover.** Requests rotate across a model's accounts. A busy
   answer (429, 500, 503, 409, 404) moves to the next account. A 429 on a long
-  conversation retries with the history shortened, because the next account has
-  no cache for it either. An expired OAuth token is refreshed and the request
-  retried. A Claude Code session stays on one account, so its prompt cache hits.
-  An account with spent quota is skipped until its window resets.
+  conversation retries with the history shortened, clears cached tool translations
+  to re-map tool calls cleanly for the shortened body, and fails over to the next
+  account. An expired OAuth token is refreshed and the request retried. A Claude Code
+  session stays on one account, so its prompt cache hits. An account with spent quota
+  is skipped until its window resets.
   [Routing](docs/routing.md#rotation-and-failover)
 - **Codex compaction.** A compaction request from Codex is answered here, with
   the single output item Codex requires, instead of being passed to a provider
-  that does not know the item type and leaving the thread unresumable.
+  that does not know the item type and leaving the thread unresumable. Rebuilt
+  compaction items follow normalized protocol shapes (`output_text`/`input_text` message
+  structures for Responses, full `parts` arrays for Gemini).
   [Codex compaction](docs/routing.md#codex-compaction)
 - **Providers.** API-key providers (Groq, NVIDIA, OpenRouter, Cloudflare Workers
   AI, TypeSafe), the sign-ins of coding tools (Claude Code, Codex, Antigravity,

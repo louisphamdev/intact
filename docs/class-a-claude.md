@@ -138,4 +138,6 @@ intact turns Bifrost on by itself. The `claude` provider declares the User-Agent
 
 The model entry in `/v1/models` gives the prefix as `bifrost_ua`. A gateway in front of intact, for example llm-switcher, reads this field. With it, the gateway can send the request unchanged.
 
+Authentication remains credential-only: callers must provide a valid intact API key or bearer token. The `User-Agent` prefix only selects the Bifrost passthrough behavior (preserving headers, body, and bypassing the blacklist), never bypassing intact authentication.
+
 A caller with a different `User-Agent` gets the old behavior: the identity of intact and the blacklist.

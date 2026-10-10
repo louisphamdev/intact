@@ -72,7 +72,7 @@ func scenarioBody(t *testing.T, mcpURL, pageURL string) []byte {
 	})
 }
 
-func TestPlanRunsTheToolsOfCcw(t *testing.T) {
+func TestPlanRunsTheServerTools(t *testing.T) {
 	allowLocal(t)
 	mcp := mcpServer(t, false, "tok")
 	defer mcp.Close()

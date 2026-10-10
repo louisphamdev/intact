@@ -187,6 +187,11 @@ type Reply struct {
 	// Tools is the name translation built when the request went out. A tool call comes back under the
 	// name the provider knows, and the caller only runs the names it declared.
 	Tools *ToolNames
+	// Search is the web search intact ran because the caller declared Anthropic's
+	// hosted search tool and the provider has none. The answer carries what
+	// Anthropic's servers would have put in it, so the client reads the sources
+	// from where it expects them.
+	Search *WebSearch
 }
 
 // callerName is the tool name the caller declared, for a call the model made.
@@ -277,6 +282,10 @@ func OpenAIResponseToAnthropic(body []byte, r Reply) ([]byte, error) {
 		return json.Marshal(obj{"type": "error", "error": obj{"type": AnthropicErrorType(0, str(e["type"])), "message": str(e["message"])}})
 	}
 	content := []any{}
+	if r.Search != nil {
+		call, result := r.Search.blocks()
+		content = append(content, call, result)
+	}
 	stop := "end_turn"
 	if ch := asObj(firstOf(in["choices"])); ch != nil {
 		msg := asObj(ch["message"])
@@ -306,7 +315,7 @@ func OpenAIResponseToAnthropic(body []byte, r Reply) ([]byte, error) {
 	out := obj{
 		"id": messageID(str(in["id"])), "type": "message", "role": "assistant",
 		"model": r.model(in["model"]), "content": content, "stop_reason": stop, "stop_sequence": nil,
-		"usage": anthropicUsage(asObj(in["usage"])),
+		"usage": withSearchUsage(anthropicUsage(asObj(in["usage"])), r.Search),
 	}
 	return json.Marshal(out)
 }
@@ -513,6 +522,24 @@ func OpenAIStreamToAnthropic(dst Flusher, src io.Reader, r Reply) {
 		next++
 		send("content_block_start", obj{"type": "content_block_start", "index": block, "content_block": cb})
 	}
+	// searchBlocks writes the search intact ran as the first blocks of the
+	// answer, in the order Anthropic's servers would have sent them.
+	searchBlocks := func() {
+		if r.Search == nil {
+			return
+		}
+		call, result := r.Search.blocks()
+		// The hosted tool's call streams its input like any tool use; its
+		// result arrives whole.
+		input, _ := json.Marshal(asObj(call["input"]))
+		call["input"] = obj{}
+		open("search", call)
+		send("content_block_delta", obj{"type": "content_block_delta", "index": block,
+			"delta": obj{"type": "input_json_delta", "partial_json": string(input)}})
+		closeBlock()
+		open("search_result", result)
+		closeBlock()
+	}
 	delta := func(kind string, cb, d obj) {
 		if blockKind != kind {
 			open(kind, cb)
@@ -541,6 +568,7 @@ func OpenAIStreamToAnthropic(dst Flusher, src io.Reader, r Reply) {
 	finish := func() {
 		start("", "")
 		closeBlock()
+		searchBlocks()
 		for _, ti := range toolOrder {
 			ta := tools[ti]
 			open("tool", obj{"type": "tool_use", "id": toolID(ta.id), "name": r.callerName(ta.name), "input": obj{}})
@@ -561,7 +589,7 @@ func OpenAIStreamToAnthropic(dst Flusher, src io.Reader, r Reply) {
 		if usage != nil {
 			u = anthropicUsage(usage)
 		}
-		send("message_delta", obj{"type": "message_delta", "delta": obj{"stop_reason": stop, "stop_sequence": nil}, "usage": u})
+		send("message_delta", obj{"type": "message_delta", "delta": obj{"stop_reason": stop, "stop_sequence": nil}, "usage": withSearchUsage(u, r.Search)})
 		send("message_stop", obj{"type": "message_stop"})
 	}
 	done := false

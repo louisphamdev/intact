@@ -19,9 +19,11 @@ import (
 	"github.com/louisphamdev/intact/internal/drift"
 	"github.com/louisphamdev/intact/internal/filter"
 	"github.com/louisphamdev/intact/internal/provider"
+	"github.com/louisphamdev/intact/internal/servertools"
 	"github.com/louisphamdev/intact/internal/store"
 	"github.com/louisphamdev/intact/internal/translate"
 	"github.com/louisphamdev/intact/internal/upstream"
+	"github.com/louisphamdev/intact/internal/websearch"
 )
 
 // intact has one base URL, /v1. The caller names a model and intact finds the
@@ -728,6 +730,19 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 	if client == translate.Anthropic {
 		callerModel, _ := r.Context().Value(callerModelKey{}).(string)
 		reply = translate.ReplyFor(body, callerModel)
+	}
+	// A caller that declares Anthropic's hosted search or server tools gets
+	// them run here: the provider behind the chosen account has neither. The
+	// search runs once, before any account is tried, and its results go into
+	// the request that goes out.
+	if client == translate.Anthropic {
+		if websearch.Hosted(body) {
+			body, reply.Search = a.hostedSearch(r.Context(), body)
+		}
+		if servertools.Wants(body) {
+			a.serverTools(w, r, body, targets, start, reply.Search, cap)
+			return
+		}
 	}
 	translated := map[string][]byte{}
 	tried := 0

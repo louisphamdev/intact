@@ -41,6 +41,11 @@ gate, intact answers a loopback `Host` header only.
 | `INTACT_OWNER_LOOPBACK` | `1` gives a loopback sign-in with no forwarding header an unlimited budget. Off by default. Read `docs/security.md` before you set it. |
 | `INTACT_ARENA_URL` | A mirror of the Hugging Face datasets server `/rows` API for the LMArena rankings (default `https://datasets-server.huggingface.co`). |
 | `INTACT_ANTIGRAVITY_CLIENT_SECRET` | The Google OAuth client secret of the Antigravity app. Optional: intact finds the secret by itself on the first Antigravity sign-in. Set it only when that lookup fails. See [The Antigravity client secret](providers.md#the-antigravity-client-secret). |
+| `INTACT_SEARCH_PROVIDER` | Which web search intact calls when a client declares Anthropic's hosted search tool: `antigravity`, or one of `brave`, `tavily`, `serper`, `exa`. Optional. |
+| `INTACT_SEARCH_KEY` | The API key of that search service. Optional; the `antigravity` provider needs none, because it searches through an account intact already holds. |
+| `INTACT_SEARCH_MODEL` | The Gemini model that answers an Antigravity search. Optional (default `gemini-2.5-flash`). Not every model takes Google Search grounding. |
+| `INTACT_SEARCH_COUNT` | How many results one search asks for, 1 to 20. Optional (default 5). |
+| `INTACT_SEARCH_URL` | A base URL for that service, when it self-hosts. Optional. |
 
 ### Enroll the sign-in
 

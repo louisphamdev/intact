@@ -58,6 +58,14 @@ To build from source, see [Getting started](docs/getting-started.md).
   GitHub Copilot). Any other provider is declared from the dashboard without
   code: API key, browser OAuth or device-code OAuth, with the fields each kind
   needs, or pasted as JSON. [Providers](docs/providers.md)
+- **Web search and server tools.** A client that declares Anthropic's hosted
+  `web_search` tool gets the search run here: intact searches, gives the model
+  the results, and hands the client the blocks Anthropic's servers would have
+  sent. With an active Antigravity account it searches through Google Search
+  grounding and needs no key; otherwise name a search service
+  (`INTACT_SEARCH_PROVIDER` and `INTACT_SEARCH_KEY`). The same loop runs the
+  tools Anthropic runs on its own servers: the MCP connector, tool search and
+  web fetch.
 - **Model management.** A table per provider shows each model with an on/off
   switch, its thinking support and effort levels, and its last test.
   - Lists are fetched every hour.

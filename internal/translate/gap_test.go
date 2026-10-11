@@ -208,3 +208,37 @@ func TestGapGeminiOrphanArrayContent(t *testing.T) {
 		t.Errorf("the orphan result's array text was lost: %s", out)
 	}
 }
+
+// The reply map must name the same tool the declaration kept: the first tool to produce a Gemini name
+// owns it, even when that tool's name needed no change.
+func TestGeminiCutNamesFirstWins(t *testing.T) {
+	a := strings.Repeat("a", 64)
+	l1 := strings.Repeat("b", 64) + "_one"
+	l2 := strings.Repeat("b", 64) + "_two"
+	digit := "1" + strings.Repeat("c", 63)
+	cases := []struct {
+		name  string
+		tools []string
+		ask   string
+		want  string
+	}{
+		{"a valid name keeps its own", []string{a, a + "_v2"}, a, a},
+		{"two cuts alike go to the first", []string{l1, l2}, geminiName(l1), l1},
+		{"one long name", []string{l1}, geminiName(l1), l1},
+		{"a prefixed name cut back to 64", []string{digit}, geminiName(digit), digit},
+		{"a name Gemini takes as it is", []string{"get_weather"}, "get_weather", "get_weather"},
+		{"a sanitized twin of a declared name", []string{"a_b", "a b"}, "a_b", "a_b"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var tools []string
+			for _, n := range c.tools {
+				tools = append(tools, `{"type":"function","function":{"name":"`+n+`","parameters":{"type":"object"}}}`)
+			}
+			body := []byte(`{"model":"m","messages":[{"role":"user","content":"go"}],"tools":[` + strings.Join(tools, ",") + `]}`)
+			if got := GeminiCutNames(body).ToClient(c.ask); got != c.want {
+				t.Errorf("ToClient(%q) = %q, want %q", c.ask, got, c.want)
+			}
+		})
+	}
+}

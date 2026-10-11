@@ -439,6 +439,15 @@ func TestCodexResponsesRetryFailureRelaysFirst400(t *testing.T) {
 // upstream got come back.
 func codexSSE(t *testing.T, answer func(w http.ResponseWriter, n int, body string)) (*httptest.ResponseRecorder, []string) {
 	t.Helper()
+	return codexSSEFor(t, `{"model":"codex/gpt-5.5","stream":true,"store":false,"input":[
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]},
+		{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"gAAA-foreign"},
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"again"}]}]}`, answer)
+}
+
+// codexSSEFor is codexSSE with the caller's own request.
+func codexSSEFor(t *testing.T, request string, answer func(w http.ResponseWriter, n int, body string)) (*httptest.ResponseRecorder, []string) {
+	t.Helper()
 	var bodies []string
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
@@ -456,10 +465,7 @@ func codexSSE(t *testing.T, answer func(w http.ResponseWriter, n int, body strin
 	s.CreateConnection("codex", "cx", fakeJWT("acct-9"))
 	h := New(s, map[string]string{"codex": up.URL})
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/responses", strings.NewReader(`{"model":"codex/gpt-5.5","stream":true,"store":false,"input":[
-		{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]},
-		{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"gAAA-foreign"},
-		{"type":"message","role":"user","content":[{"type":"input_text","text":"again"}]}]}`)))
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/responses", strings.NewReader(request)))
 	return rec, bodies
 }
 
@@ -499,7 +505,7 @@ func TestCodexSSEOtherErrorRelayedOnce(t *testing.T) {
 	rec, bodies := codexSSE(t, func(w http.ResponseWriter, n int, body string) {
 		io.WriteString(w, stream)
 	})
-	if len(bodies) != 1 || rec.Body.String() != stream {
+	if rec.Code != http.StatusOK || len(bodies) != 1 || rec.Body.String() != stream {
 		t.Fatalf("code=%d upstream calls=%d body=%q, want the upstream stream unchanged after one call", rec.Code, len(bodies), rec.Body.String())
 	}
 }
@@ -516,5 +522,77 @@ func TestCodexSSEFirstEventRelayedByteIdentical(t *testing.T) {
 	})
 	if rec.Code != http.StatusOK || len(bodies) != 1 || rec.Body.String() != codexOKStream {
 		t.Fatalf("code=%d upstream calls=%d body=%q, want the stream unchanged after one call", rec.Code, len(bodies), rec.Body.String())
+	}
+}
+
+// Only an error event earns the retry. A first event that merely quotes the marker, here in the
+// model's own text, is the answer and reaches the caller unchanged after one call.
+func TestCodexSSEQuotedMarkerInDeltaIsNotRetried(t *testing.T) {
+	const stream = "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"The code invalid_encrypted_content means the reasoning came from another account.\"}\n\n" +
+		"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"output\":[]}}\n\n"
+	rec, bodies := codexSSE(t, func(w http.ResponseWriter, n int, body string) {
+		io.WriteString(w, stream)
+	})
+	if rec.Code != http.StatusOK || len(bodies) != 1 || rec.Body.String() != stream {
+		t.Fatalf("code=%d upstream calls=%d body=%q, want the upstream stream unchanged after one call", rec.Code, len(bodies), rec.Body.String())
+	}
+}
+
+// A retry that cannot reach the upstream leaves the first stream standing, every byte of it,
+// including the event that was read before the retry.
+func TestCodexSSERetryFailureRelaysFirstStream(t *testing.T) {
+	const first = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"invalid_encrypted_content\",\"message\":\"The encrypted content for item rs_1 could not be verified.\"}}\n\n"
+	rec, bodies := codexSSE(t, func(w http.ResponseWriter, n int, body string) {
+		if n >= 2 {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				conn.Close()
+			}
+			return
+		}
+		io.WriteString(w, first)
+	})
+	if len(bodies) != 2 || rec.Body.String() != first {
+		t.Fatalf("code=%d upstream calls=%d body=%q, want the first stream unchanged after a failed retry", rec.Code, len(bodies), rec.Body.String())
+	}
+}
+
+const codexRefusalEvent = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"invalid_encrypted_content\",\"message\":\"The encrypted content for item rs_1 could not be verified.\"}}\n\n"
+
+// The marker alone does not earn the retry: with no encrypted reasoning to drop the same body would
+// go out again, so the stream is relayed unchanged after one call.
+func TestCodexSSERefusalWithNothingToStripRelayedOnce(t *testing.T) {
+	rec, bodies := codexSSEFor(t, `{"model":"codex/gpt-5.5","stream":true,"store":false,"input":[
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]}`, func(w http.ResponseWriter, n int, body string) {
+		io.WriteString(w, codexRefusalEvent)
+	})
+	if rec.Code != http.StatusOK || len(bodies) != 1 || rec.Body.String() != codexRefusalEvent {
+		t.Fatalf("code=%d upstream calls=%d body=%q, want the upstream stream unchanged after one call", rec.Code, len(bodies), rec.Body.String())
+	}
+}
+
+// Only a streamed turn is read ahead. A caller that asked for no stream gets what the upstream sent,
+// after one call.
+func TestCodexSSENonStreamCallerNotProbed(t *testing.T) {
+	rec, bodies := codexSSEFor(t, `{"model":"codex/gpt-5.5","stream":false,"store":false,"input":[
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]},
+		{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"gAAA-foreign"}]}`, func(w http.ResponseWriter, n int, body string) {
+		io.WriteString(w, codexRefusalEvent)
+	})
+	if len(bodies) != 1 || rec.Body.String() != codexRefusalEvent {
+		t.Fatalf("code=%d upstream calls=%d body=%q, want the upstream answer unchanged after one call", rec.Code, len(bodies), rec.Body.String())
+	}
+}
+
+// The read ahead stops at 64 KiB. A first event longer than that, with the marker past the cap, is
+// not a refusal intact can see, and every byte, those read ahead included, reaches the caller.
+func TestCodexSSEFirstEventOverCapNotRetried(t *testing.T) {
+	stream := "event: error\ndata: {\"type\":\"error\",\"error\":{\"message\":\"" + strings.Repeat("x", 70<<10) +
+		"\",\"code\":\"invalid_encrypted_content\"}}\n\n"
+	rec, bodies := codexSSE(t, func(w http.ResponseWriter, n int, body string) {
+		io.WriteString(w, stream)
+	})
+	if rec.Code != http.StatusOK || len(bodies) != 1 || rec.Body.String() != stream {
+		t.Fatalf("code=%d upstream calls=%d body length=%d (want %d), want the upstream stream unchanged after one call", rec.Code, len(bodies), rec.Body.Len(), len(stream))
 	}
 }

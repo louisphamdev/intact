@@ -214,19 +214,25 @@ func geminiName(n string) string {
 	return n
 }
 
-// GeminiCutNames maps back, for a Chat Completions caller, each declared tool name geminiName cut to
-// 64 bytes. Only the cut names are listed: every other name the model answers with stays as it is.
+// GeminiCutNames maps back, for a Chat Completions caller, each declared tool name geminiName changed.
+// A Gemini name belongs to the first tool that produces it, as in the declaration, even when that
+// tool's name is unchanged: a later tool must not take it over.
 func GeminiCutNames(body []byte) *ToolNames {
 	in, err := decode(body)
 	if err != nil {
 		return nil
 	}
 	t := &ToolNames{toClient: map[string]string{}}
+	claimed := map[string]bool{}
 	for _, raw := range list(in["tools"]) {
 		name := str(asObj(asObj(raw)["function"])["name"])
-		// The first of two names with one cut keeps it, as the declaration does.
-		if cut := geminiName(name); len(name) > 64 && t.toClient[cut] == "" {
-			t.toClient[cut] = name
+		out := geminiName(name)
+		if out == "" || claimed[out] {
+			continue
+		}
+		claimed[out] = true
+		if out != name {
+			t.toClient[out] = name
 		}
 	}
 	return t

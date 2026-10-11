@@ -520,7 +520,7 @@ func AnthropicToOpenAI(body []byte, names *ToolNames) ([]byte, error) {
 		case "none":
 			out["tool_choice"] = "none"
 		case "tool":
-			out["tool_choice"] = obj{"type": "function", "function": obj{"name": tc["name"]}}
+			out["tool_choice"] = obj{"type": "function", "function": obj{"name": names.ToProvider(str(tc["name"]))}}
 		}
 		if d, _ := tc["disable_parallel_tool_use"].(bool); d && out["tools"] != nil {
 			out["parallel_tool_calls"] = false

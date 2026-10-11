@@ -181,6 +181,12 @@ func ResponsesStreamToOpenAI(dst Flusher, src io.Reader) {
 	toolIndex := map[string]int{} // output item id -> tool call index
 	sawArgs := map[string]bool{}
 	started, done := false, false
+	fail := func(msg string) {
+		b, _ := json.Marshal(obj{"error": obj{"message": msg, "type": "api_error"}})
+		io.WriteString(dst, "data: "+string(b)+"\n\n")
+		dst.Flush()
+		done = true
+	}
 	emit := func(delta obj, fin any, extra obj) {
 		ch := obj{"index": 0, "delta": delta, "finish_reason": fin}
 		c := obj{"id": id, "object": "chat.completion.chunk", "created": created, "model": model, "choices": []any{ch}}
@@ -281,21 +287,20 @@ func ResponsesStreamToOpenAI(dst Flusher, src io.Reader) {
 			if msg == "" {
 				msg = str(asObj(asObj(ev["response"])["error"])["message"])
 			}
-			b, _ := json.Marshal(obj{"error": obj{"message": msg, "type": "api_error"}})
-			io.WriteString(dst, "data: "+string(b)+"\n\n")
-			dst.Flush()
-			done = true
+			if msg == "" {
+				msg = str(ev["message"])
+			}
+			fail(msg)
 			return false
 		}
 		return true
 	})
 	if !done {
 		if streamErr != nil {
-			b, _ := json.Marshal(obj{"error": obj{"message": "upstream stream ended early: " + streamErr.Error(), "type": "api_error"}})
-			io.WriteString(dst, "data: "+string(b)+"\n\n")
-			dst.Flush()
+			fail("upstream stream ended early: " + streamErr.Error())
 			return
 		}
-		finish(obj{})
+		// A stream cut before its terminal event must not close as a clean answer.
+		fail("upstream stream ended without response.completed")
 	}
 }

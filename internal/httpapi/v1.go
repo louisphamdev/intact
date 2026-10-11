@@ -872,9 +872,11 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		// A same-shape Chat Completions stream is asked for its usage so intact
 		// can count it; the editor below takes it out again for the caller.
 		injected := false
+		var shortNames map[string]string
 		if to == "" && client == translate.OpenAI {
 			if want, _ := shapeFor(p, model); want == translate.OpenAI {
 				send, injected = withUsage(send)
+				send, shortNames = translate.ShortenChatToolNames(send)
 			}
 		}
 		send = filterFor(a, r, p, conn.Provider, send)
@@ -910,6 +912,20 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 				resp.Body = io.NopCloser(bytes.NewReader(b))
 			}
 		}
+		// Reasoning another ChatGPT account encrypted (the thread moved account) is refused on every
+		// turn, so the turn goes again to this account without it, once.
+		if client == translate.Responses && to == "" && resp.StatusCode == http.StatusBadRequest {
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+			resp.Body.Close()
+			resp.Body = io.NopCloser(bytes.NewReader(b))
+			if stripped, ok := withoutEncryptedReasoning(send); ok && bytes.Contains(b, []byte("invalid_encrypted_content")) {
+				if retry, err := a.sendLogged(forShape(r, to), p, conn, path, secret, stripped, model); err == nil {
+					resp, send = retry, stripped
+				} else {
+					log.Printf("connection %s: retry without encrypted reasoning: %v", conn.ID, err)
+				}
+			}
+		}
 		if resp.StatusCode == http.StatusUnauthorized && p.Exchange != "" {
 			a.dropExchanged(conn.ID)
 			if fresh, err := a.exchanged(r.Context(), p, conn.ID, secret0(a, r, conn.ID)); err == nil {
@@ -935,6 +951,13 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 					continue
 				}
 			}
+		}
+		// A 401 that survived the refresh, or a 403, is this account's own refusal (revoked, under
+		// verification): the next account may be healthy. The last account's answer is still relayed.
+		if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && i < len(attempts)-1 {
+			log.Printf("connection %s: %s answered %d%s", conn.ID, conn.Provider, resp.StatusCode, modelNote(at.model))
+			resp.Body.Close()
+			continue
 		}
 		// Fail over on a busy status only while another account remains.
 		if retryableStatus(resp.StatusCode) {
@@ -964,6 +987,20 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			resp.Body.Close()
 			continue
 		}
+		// A stream that closes before its first byte served nothing, so the account is committed to only
+		// once it sends one. The read is bounded by the upstream idle limit.
+		if resp.StatusCode < 300 && (stream || alwaysStreams(via)) && i < len(attempts)-1 {
+			first := make([]byte, 1)
+			if n, _ := io.ReadAtLeast(resp.Body, first, 1); n == 0 {
+				log.Printf("connection %s: %s answered %d with no body%s", conn.ID, conn.Provider, resp.StatusCode, modelNote(at.model))
+				resp.Body.Close()
+				continue
+			}
+			resp.Body = struct {
+				io.Reader
+				io.Closer
+			}{io.MultiReader(bytes.NewReader(first), resp.Body), resp.Body}
+		}
 		defer resp.Body.Close()
 		if key, _ := r.Context().Value(sessionKeyCtx{}).(string); key != "" && resp.StatusCode < 400 {
 			a.sessions.set(key, conn.ID)
@@ -977,9 +1014,9 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		out, finish := w, func() {}
 		switch {
 		case to == "" && client != "":
-			out, finish = newReplyEditor(w, callerModel, model, injected)
+			out, finish = newReplyEditor(w, callerModel, model, injected, shortNames)
 		case to == translate.OpenAI:
-			out, finish = newReplyEditor(w, callerModel, model, false)
+			out, finish = newReplyEditor(w, callerModel, model, false, nil)
 		}
 		// Usage counts the model the operator turned on, not the level variant
 		// intact sent nor the name the provider answered under.
@@ -1024,6 +1061,41 @@ func forShape(r *http.Request, to string) *http.Request {
 	out := r.Clone(r.Context())
 	out.URL.RawQuery = ""
 	return out
+}
+
+// withoutEncryptedReasoning drops from a Responses input the reasoning items that carry
+// encrypted_content; only the input array is rewritten. The whole item goes, not the field: under
+// store:false a reasoning item without its content is looked up by id, and that lookup fails.
+func withoutEncryptedReasoning(body []byte) ([]byte, bool) {
+	start, end, err := topLevelValue(body, "input")
+	if err != nil {
+		return body, false
+	}
+	var items []json.RawMessage
+	if json.Unmarshal(body[start:end], &items) != nil {
+		return body, false
+	}
+	kept := make([]json.RawMessage, 0, len(items))
+	for _, it := range items {
+		var head struct {
+			Type      string          `json:"type"`
+			Encrypted json.RawMessage `json:"encrypted_content"`
+		}
+		if json.Unmarshal(it, &head) == nil && head.Type == "reasoning" && len(head.Encrypted) > 0 && string(head.Encrypted) != "null" {
+			continue
+		}
+		kept = append(kept, it)
+	}
+	if len(kept) == len(items) {
+		return body, false
+	}
+	val, err := json.Marshal(kept)
+	if err != nil {
+		return body, false
+	}
+	out := append([]byte{}, body[:start]...)
+	out = append(out, val...)
+	return append(out, body[end:]...), true
 }
 
 // isResponsesOnly reports Copilot's refusal of a model on /chat/completions.

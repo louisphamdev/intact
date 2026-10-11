@@ -17,9 +17,11 @@ type replyEditor struct {
 	http.ResponseWriter
 	model     []byte // the caller's model id as a JSON string, nil for no change
 	dropUsage bool
-	stream    bool
-	off       bool // an encoded body passes through as it came
-	pending   []byte
+	// names maps a tool name intact shortened back to the caller's, as JSON strings.
+	names   [][2][]byte
+	stream  bool
+	off     bool // an encoded body passes through as it came
+	pending []byte
 }
 
 var (
@@ -29,12 +31,17 @@ var (
 )
 
 // newReplyEditor returns w itself when there is nothing to edit.
-func newReplyEditor(w http.ResponseWriter, callerModel, upstreamModel string, dropUsage bool) (http.ResponseWriter, func()) {
+func newReplyEditor(w http.ResponseWriter, callerModel, upstreamModel string, dropUsage bool, names map[string]string) (http.ResponseWriter, func()) {
 	e := &replyEditor{ResponseWriter: w, dropUsage: dropUsage}
 	if callerModel != "" && callerModel != upstreamModel {
 		e.model, _ = json.Marshal(callerModel)
 	}
-	if e.model == nil && !dropUsage {
+	for short, long := range names {
+		from, _ := json.Marshal(short)
+		to, _ := json.Marshal(long)
+		e.names = append(e.names, [2][]byte{from, to})
+	}
+	if e.model == nil && !dropUsage && len(e.names) == 0 {
 		return w, func() {}
 	}
 	return e, e.finish
@@ -110,6 +117,9 @@ func (e *replyEditor) frame(f []byte) []byte {
 // setModel replaces the first model value, the top-level one in every shape
 // intact relays. A "model" inside a string is escaped and never matches.
 func (e *replyEditor) setModel(b []byte) []byte {
+	for _, n := range e.names {
+		b = bytes.ReplaceAll(b, n[0], n[1])
+	}
 	if e.model == nil {
 		return b
 	}

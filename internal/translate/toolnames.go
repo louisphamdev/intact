@@ -1,6 +1,12 @@
 package translate
 
-import "strings"
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"strings"
+)
 
 // Tool names, and who runs the tool.
 //
@@ -260,6 +266,13 @@ func NewToolNames(clientTools []string, provider string) *ToolNames {
 		t.caps[name] = cs[0]
 		byCap[cs[0]] = append(byCap[cs[0]], name)
 	}
+	for _, name := range clientTools {
+		if len(name) > MaxToolName {
+			short := ShortToolName(name)
+			t.toProvider[name] = short
+			t.toClient[short] = name
+		}
+	}
 	vocab := vocabFor(provider)
 	if len(vocab) == 0 {
 		return t
@@ -278,15 +291,31 @@ func NewToolNames(clientTools []string, provider string) *ToolNames {
 	return t
 }
 
-// ToProvider is the name to declare upstream. A name the provider already uses is its own.
+// MaxToolName is the longest tool name a chat upstream takes ("function tool names must be 1-64
+// letters, digits, underscores or hyphens").
+const MaxToolName = 64
+
+// ShortToolName fits a longer name under MaxToolName. The hash keeps two names with one prefix apart,
+// and the same name always gets the same short name, so a transcript turn still matches its tool.
+func ShortToolName(name string) string {
+	if len(name) <= MaxToolName {
+		return name
+	}
+	sum := sha256.Sum256([]byte(name))
+	return name[:55] + "_" + hex.EncodeToString(sum[:4])
+}
+
+// ToProvider is the name to declare upstream. A name the provider already uses is its own. A nil or
+// zero ToolNames returns the name unchanged; only a vocabulary from NewToolNames shortens a long name.
 func (t *ToolNames) ToProvider(name string) string {
-	if t == nil {
+	if t == nil || t.toProvider == nil {
 		return name
 	}
 	if v, ok := t.toProvider[name]; ok {
 		return v
 	}
-	return name
+	// A long name no declared tool carries (a trimmed tool, still in the transcript) is refused all the same.
+	return ShortToolName(name)
 }
 
 // ToClient is the caller's own name for a call the model made.
@@ -339,4 +368,52 @@ func (t *ToolNames) declaredNames(capName string) []string {
 		}
 	}
 	return out
+}
+
+// ShortenChatToolNames shortens, in a Chat Completions request that passes through, every tool name
+// a chat upstream would refuse for its length. It returns the short name -> caller name map the
+// answer is mapped back with, nil when nothing changed. Only those name strings change; every other
+// byte stays as the caller sent it.
+func ShortenChatToolNames(body []byte) ([]byte, map[string]string) {
+	var in struct {
+		Tools []struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		} `json:"tools"`
+		Messages []struct {
+			ToolCalls []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+		} `json:"messages"`
+	}
+	if json.Unmarshal(body, &in) != nil {
+		return body, nil
+	}
+	var back map[string]string
+	add := func(name string) {
+		if len(name) <= MaxToolName {
+			return
+		}
+		if back == nil {
+			back = map[string]string{}
+		}
+		back[ShortToolName(name)] = name
+	}
+	for _, t := range in.Tools {
+		add(t.Function.Name)
+	}
+	for _, m := range in.Messages {
+		for _, c := range m.ToolCalls {
+			add(c.Function.Name)
+		}
+	}
+	for short, long := range back {
+		from, _ := json.Marshal(long)
+		to, _ := json.Marshal(short)
+		body = bytes.ReplaceAll(body, from, to)
+	}
+	return body, back
 }

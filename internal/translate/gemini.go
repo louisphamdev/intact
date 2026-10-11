@@ -57,8 +57,14 @@ func OpenAIToGemini(body []byte, sigs Signatures, vocab *ToolNames) ([]byte, err
 		}
 		contents = append(contents, obj{"role": role, "parts": parts})
 	}
+	var msgs []obj
 	for _, raw := range list(in["messages"]) {
-		m := asObj(raw)
+		if m := asObj(raw); m != nil {
+			msgs = append(msgs, m)
+		}
+	}
+	// Gemini refuses a call with no response after it, and a response that names no call.
+	for _, m := range healToolPairs(msgs) {
 		switch str(m["role"]) {
 		case "system", "developer":
 			if t := contentText(m["content"]); t != "" {

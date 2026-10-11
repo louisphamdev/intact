@@ -180,8 +180,8 @@ func TestProxyAppliesClassAIdentityAndDefaults(t *testing.T) {
 	if gotVersion != "2023-06-01" {
 		t.Errorf("Anthropic-Version = %q: a missing default must be filled", gotVersion)
 	}
-	if gotBeta != "caller-chose-this" {
-		t.Errorf("Anthropic-Beta = %q: a default must not overwrite the caller's choice", gotBeta)
+	if gotBeta != "caller-chose-this,claude-code-20250219,oauth-2025-04-20" {
+		t.Errorf("Anthropic-Beta = %q: a default must not overwrite the caller's choice, and the credential's betas are added", gotBeta)
 	}
 }
 

@@ -461,7 +461,7 @@ func healToolPairs(msgs []obj) []obj {
 		if id := str(m["tool_call_id"]); id != "" {
 			label = "[Tool Result (" + id + ")]"
 		}
-		return obj{"role": "user", "content": label + ": " + str(m["content"])}
+		return obj{"role": "user", "content": label + ": " + contentText(m["content"])}
 	}
 	flush := func() {
 		for _, id := range pending {

@@ -310,6 +310,10 @@ func OpenAIResponseToAnthropic(body []byte, r Reply) ([]byte, error) {
 		if stop == "tool_use" && len(calls) == 0 {
 			stop = "end_turn"
 		}
+		// Some chat upstreams close a tool call turn with "stop"; end_turn would leave the calls unrun.
+		if stop == "end_turn" && len(calls) > 0 {
+			stop = "tool_use"
+		}
 	}
 	out := obj{
 		"id": messageID(str(in["id"])), "type": "message", "role": "assistant",
@@ -564,6 +568,10 @@ func OpenAIStreamToAnthropic(dst Flusher, src io.Reader, r Reply) {
 		}
 		if stop == "tool_use" && len(toolOrder) == 0 {
 			stop = "end_turn"
+		}
+		// Some chat upstreams close a tool call turn with "stop"; end_turn would leave the calls unrun.
+		if stop == "end_turn" && len(toolOrder) > 0 {
+			stop = "tool_use"
 		}
 		u := obj{"output_tokens": 0}
 		if usage != nil {

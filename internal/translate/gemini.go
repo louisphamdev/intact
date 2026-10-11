@@ -214,6 +214,24 @@ func geminiName(n string) string {
 	return n
 }
 
+// GeminiCutNames maps back, for a Chat Completions caller, each declared tool name geminiName cut to
+// 64 bytes. Only the cut names are listed: every other name the model answers with stays as it is.
+func GeminiCutNames(body []byte) *ToolNames {
+	in, err := decode(body)
+	if err != nil {
+		return nil
+	}
+	t := &ToolNames{toClient: map[string]string{}}
+	for _, raw := range list(in["tools"]) {
+		name := str(asObj(asObj(raw)["function"])["name"])
+		// The first of two names with one cut keeps it, as the declaration does.
+		if cut := geminiName(name); len(name) > 64 && t.toClient[cut] == "" {
+			t.toClient[cut] = name
+		}
+	}
+	return t
+}
+
 // geminiParts converts OpenAI user content to Gemini parts.
 func geminiParts(c any) []any {
 	switch v := c.(type) {

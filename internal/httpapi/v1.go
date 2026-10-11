@@ -821,6 +821,9 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 				if client == translate.Anthropic {
 					reply.Tools = geminiNames
 				}
+				if client == translate.OpenAI {
+					reply.Tools = translate.GeminiCutNames(body)
+				}
 				if client == translate.Responses {
 					tools = translate.ResponsesTools(body, geminiNames)
 				}
@@ -923,6 +926,28 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 					resp, send = retry, stripped
 				} else {
 					log.Printf("connection %s: retry without encrypted reasoning: %v", conn.ID, err)
+				}
+			}
+		}
+		// The same refusal can come as the first event of a 200 stream. That event is read before the
+		// caller gets a header; unless it earns the retry, every byte read is relayed as it came.
+		if client == translate.Responses && to == "" && stream && resp.StatusCode < 300 {
+			if stripped, ok := withoutEncryptedReasoning(send); ok {
+				head := firstSSEEvent(resp.Body, 64<<10)
+				retried := false
+				if isEncryptedContentRefusal(head) {
+					if retry, err := a.sendLogged(forShape(r, to), p, conn, path, secret, stripped, model); err == nil {
+						resp.Body.Close()
+						resp, send, retried = retry, stripped, true
+					} else {
+						log.Printf("connection %s: retry without encrypted reasoning: %v", conn.ID, err)
+					}
+				}
+				if !retried {
+					resp.Body = struct {
+						io.Reader
+						io.Closer
+					}{io.MultiReader(bytes.NewReader(head), resp.Body), resp.Body}
 				}
 			}
 		}
@@ -1096,6 +1121,45 @@ func withoutEncryptedReasoning(body []byte) ([]byte, bool) {
 	out := append([]byte{}, body[:start]...)
 	out = append(out, val...)
 	return append(out, body[end:]...), true
+}
+
+// firstSSEEvent reads from a stream up to the end of its first event, max bytes at most. What it
+// returns may run past that event; it is every byte read, for the caller to relay.
+func firstSSEEvent(r io.Reader, max int) []byte {
+	head := make([]byte, 0, 4096)
+	buf := make([]byte, 4096)
+	for len(head) < max && frameEnd.FindIndex(head) == nil {
+		n, err := r.Read(buf[:min(len(buf), max-len(head))])
+		head = append(head, buf[:n]...)
+		if err != nil {
+			break
+		}
+	}
+	return head
+}
+
+// isEncryptedContentRefusal reports whether the first event of a Responses stream is an error, or a
+// failed response, for invalid_encrypted_content.
+func isEncryptedContentRefusal(head []byte) bool {
+	if loc := frameEnd.FindIndex(head); loc != nil {
+		head = head[:loc[0]]
+	}
+	if !bytes.Contains(head, []byte("invalid_encrypted_content")) {
+		return false
+	}
+	for _, line := range bytes.Split(head, []byte("\n")) {
+		data, ok := bytes.CutPrefix(bytes.TrimRight(line, "\r"), []byte("data:"))
+		if !ok {
+			continue
+		}
+		var ev struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(bytes.TrimSpace(data), &ev) == nil && (ev.Type == "error" || ev.Type == "response.failed") {
+			return true
+		}
+	}
+	return false
 }
 
 // isResponsesOnly reports Copilot's refusal of a model on /chat/completions.

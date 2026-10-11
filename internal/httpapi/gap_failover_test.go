@@ -860,6 +860,7 @@ func TestReasoningReplayLookupMissIsLogged(t *testing.T) {
 	var logs strings.Builder
 	log.SetOutput(&logs)
 	defer log.SetOutput(os.Stderr)
+	replayMissLogged.Delete("gone-provider") // a rerun (-count=2) starts unlogged
 	body := []byte(`{"model":"m","max_tokens":100,"messages":[{"role":"user","content":"go"}]}`)
 	for range 2 {
 		if _, _, err := toProvider(body, translate.Anthropic, translate.OpenAI, "gone-provider"); err != nil {

@@ -341,12 +341,25 @@ func TestGeminiForcedToolUsesDeclaredName(t *testing.T) {
 		var logs strings.Builder
 		log.SetOutput(&logs)
 		defer log.SetOutput(os.Stderr)
-		if _, allowed := forced(t, []string{a, a + "_v2"}, a+"_v2", nil); len(allowed) != 0 {
-			t.Errorf("forcing %q forces %v, another tool's declaration", a+"_v2", allowed)
+		forcedMissLogged.Delete(a + "_v2") // a rerun (-count=2) starts unlogged
+		for range 2 {
+			if _, allowed := forced(t, []string{a, a + "_v2"}, a+"_v2", nil); len(allowed) != 0 {
+				t.Errorf("forcing %q forces %v, another tool's declaration", a+"_v2", allowed)
+			}
 		}
-		// The caller asked for a tool and gets none forced; that is logged, naming the tool.
+		// The caller asked for a tool and gets none forced; that is logged once per tool, naming it.
 		if n := strings.Count(logs.String(), a+"_v2"); n != 1 {
 			t.Errorf("want one log line naming %q, got %d:\n%s", a+"_v2", n, logs.String())
+		}
+	})
+	t.Run("the logged name is escaped", func(t *testing.T) {
+		var logs strings.Builder
+		log.SetOutput(&logs)
+		defer log.SetOutput(os.Stderr)
+		forcedMissLogged.Delete("x\ny")
+		forced(t, []string{a}, `x\ny`, nil)
+		if !strings.Contains(logs.String(), `"x\ny"`) || strings.Count(logs.String(), "\n") != 1 {
+			t.Errorf("want the name quoted on one line, got %q", logs.String())
 		}
 	})
 }
@@ -360,9 +373,14 @@ func TestContextOverflowErrorPerClient(t *testing.T) {
 	}{
 		{"openai wording", `{"error":{"message":"This model's maximum context length is 131072 tokens. However, you requested 140000 tokens (132000 in the messages, 8000 in the completion).","type":"invalid_request_error","code":"invalid_request_error"}}`,
 			"prompt is too long: 132000 tokens > 131072 maximum"},
-		// The completion budget is the excess here; the prompt size leads, not the total requested.
+		// The prompt size leads only when it is over the maximum; here the completion budget is the excess.
 		{"deepseek wording", `{"error":{"message":"This model's maximum context length is 65536 tokens. However, you requested 70543 tokens (62351 in the messages, 8192 in the completion). Please reduce the length of the messages or completion.","type":"invalid_request_error","param":null,"code":"invalid_request_error"}}`,
-			"prompt is too long: 62351 tokens > 65536 maximum"},
+			"prompt is too long: 70543 tokens > 65536 maximum"},
+		// A proxy (LiteLLM) serializes the upstream's error inside its own message.
+		{"litellm nested error", `{"error":{"message":"litellm.BadRequestError: OpenAIException - {'error': {'message': \"This model's maximum context length is 8192 tokens. However, you requested 9000 tokens (8000 in the messages, 1000 in the completion).\", 'type': 'invalid_request_error'}}","type":"invalid_request_error"}}`,
+			"prompt is too long: 9000 tokens > 8192 maximum"},
+		{"nested error single-quoted", `{"error":{"message":"OpenAIException - {'error': {'message': 'Your input exceeds the context window of this model.', 'type': 'invalid_request_error'}}","type":"invalid_request_error"}}`,
+			"prompt is too long: OpenAIException"},
 		{"messages resulted in", `{"error":{"message":"This model's maximum context length is 128000 tokens. However, your messages resulted in 130512 tokens (including 1024 in the functions). Please reduce the length of the messages or functions.","type":"invalid_request_error","param":"messages","code":"context_length_exceeded"}}`,
 			"prompt is too long: 130512 tokens > 128000 maximum"},
 		{"thousands separators", `{"error":{"message":"This model's maximum context length is 131,072 tokens. However, you requested 140,000 tokens.","type":"invalid_request_error"}}`,
@@ -405,6 +423,10 @@ func TestContextOverflowErrorPerClient(t *testing.T) {
 		// The caller's own words, echoed back inside quotes.
 		{400, `{"error":{"message":"Invalid value for 'tool_choice': 'what is the maximum context length of this model?' is not a tool.","type":"invalid_request_error","code":"invalid_value"}}`},
 		{400, `{"error":{"message":"Unknown tool \"prompt is too long\" in tool_choice.","type":"invalid_request_error"}}`},
+		{400, `{"error":{"message":"Invalid value for 'messages[2].tool_calls[0].function.arguments': '{\"message\": \"# check maximum context length\"}'","type":"invalid_request_error"}}`},
+		{400, `{"error":{"message":"Invalid value for 'messages[2].tool_calls[0].function.arguments': '{\"code\": \"# check maximum context length\"}'","type":"invalid_request_error"}}`},
+		{400, `{"error":{"message":"Invalid value for 'messages[2].tool_calls[0].function.arguments': '{\"q\": \"it's\", \"message\": \"# check maximum context length\"}'","type":"invalid_request_error"}}`},
+		{400, `{"error":{"message":"OpenAIException - {'error': {'message': \"Invalid value: 'what is the maximum context length?' is not a tool.\"}}","type":"invalid_request_error"}}`},
 	}
 	for _, o := range others {
 		if e := asObj(mustJSON(t, Error(o.status, []byte(o.body), Anthropic))["error"]); strings.HasPrefix(str(e["message"]), "prompt is too long") {

@@ -1128,9 +1128,9 @@ func withoutEncryptedReasoning(body []byte) ([]byte, bool) {
 	return append(out, body[end:]...), true
 }
 
-// firstSSEEvent reads from a stream up to the end of its first event, max bytes at most; comment
-// frames before it (": ping") do not count, for sseCommentWait at most. What it returns may run past
-// that event; it is every byte read, for the caller to relay.
+// firstSSEEvent reads up to the end of a stream's first event, max bytes at most, past comment frames
+// (": ping"); past sseCommentWait it stops skipping them, checked between reads, so one blocked read is
+// not cut. What it returns is every byte read, which may run past that event, for the caller to relay.
 func firstSSEEvent(r io.Reader, max int) []byte {
 	head := make([]byte, 0, 4096)
 	buf := make([]byte, 4096)

@@ -7,8 +7,13 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+// forcedMissLogged holds the forced tool names whose missing declaration is already logged, so a
+// caller that forces the same tool every turn logs once.
+var forcedMissLogged sync.Map
 
 // Gemini is Google's generateContent shape, which Antigravity (Cloud Code
 // Assist, v1internal) carries inside its own envelope.
@@ -194,7 +199,9 @@ func OpenAIToGemini(body []byte, sigs Signatures, vocab *ToolNames) ([]byte, err
 					fc["mode"] = "ANY"
 					fc["allowedFunctionNames"] = []any{name}
 				} else if want != "" {
-					log.Printf("gemini: forced tool %q has no declaration, so the request goes out unforced", want)
+					if _, seen := forcedMissLogged.LoadOrStore(want, true); !seen {
+						log.Printf("gemini: forced tool %q has no declaration, so the request goes out unforced", want)
+					}
 				}
 			}
 			if len(fc) > 0 {

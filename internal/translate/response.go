@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -125,8 +126,19 @@ var contextOverflowRE = regexp.MustCompile(`(?i)maximum context length|context[_
 // words; the apostrophe in "model's" opens none.
 var quotedRE = regexp.MustCompile(`(?:^|[\s:=(\[{,])(?:'[^']*'|"[^"]*")`)
 
+// nestedErrorRE is an upstream error a proxy (LiteLLM) serialized inside its own message; its message is
+// the upstream's wording, so it is read again, still without the quoted spans inside it.
+var nestedErrorRE = regexp.MustCompile(`\{\s*['"]error['"]\s*:\s*\{\s*['"]message['"]\s*:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')`)
+
 func isContextOverflow(status int, text string) bool {
-	return status == 400 && contextOverflowRE.MatchString(quotedRE.ReplaceAllString(text, " "))
+	if status != 400 {
+		return false
+	}
+	scan := quotedRE.ReplaceAllString(text, " ")
+	for _, m := range nestedErrorRE.FindAllStringSubmatch(text, -1) {
+		scan += " " + quotedRE.ReplaceAllString(m[1]+m[2], " ")
+	}
+	return contextOverflowRE.MatchString(scan)
 }
 
 var (
@@ -143,13 +155,24 @@ func promptTooLong(msg string) string {
 		return msg
 	}
 	max, asked := overflowMaxRE.FindStringSubmatch(msg), overflowAskedRE.FindStringSubmatch(msg)
-	if p := overflowPromptRE.FindStringSubmatch(msg); p != nil {
+	// The prompt size replaces the total only when it alone is over the maximum.
+	if p := overflowPromptRE.FindStringSubmatch(msg); p != nil && max != nil && tokenCount(p[1]+p[2]) > tokenCount(max[1]) {
 		asked = []string{p[0], p[1] + p[2]}
 	}
 	if max != nil && asked != nil {
 		return "prompt is too long: " + strings.ReplaceAll(asked[1], ",", "") + " tokens > " + strings.ReplaceAll(max[1], ",", "") + " maximum (" + msg + ")"
 	}
 	return "prompt is too long: " + msg
+}
+
+// tokenCount reads a number as the overflow wordings write it, with thousands separators; -1 when it is
+// not a number.
+func tokenCount(s string) int {
+	n, err := strconv.Atoi(strings.ReplaceAll(s, ",", ""))
+	if err != nil {
+		return -1
+	}
+	return n
 }
 
 // ---- whole responses

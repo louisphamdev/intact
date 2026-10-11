@@ -107,9 +107,22 @@ func summaryRequest(body []byte) []byte {
 	}
 	req["input"] = input
 	// The tools stay, because strict upstreams refuse tool history without them; a call is no summary.
+	// Codex also declares tools in additional_tools input items, so the top-level list is not enough.
 	var tools []json.RawMessage
-	if json.Unmarshal(req["tools"], &tools) == nil && len(tools) > 0 {
+	declares := json.Unmarshal(req["tools"], &tools) == nil && len(tools) > 0
+	for _, item := range kept {
+		var it struct {
+			Type  string            `json:"type"`
+			Tools []json.RawMessage `json:"tools"`
+		}
+		if json.Unmarshal(item, &it) == nil && it.Type == "additional_tools" && len(it.Tools) > 0 {
+			declares = true
+		}
+	}
+	if declares {
 		req["tool_choice"] = json.RawMessage(`"none"`)
+	} else {
+		delete(req, "tool_choice")
 	}
 	delete(req, "text")
 	// The model is not set here. The body already carries the one intact rewrote for this

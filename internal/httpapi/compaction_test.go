@@ -382,3 +382,30 @@ func TestSummaryRequestKeepsToolsWithToolChoiceNone(t *testing.T) {
 		t.Errorf("tool_choice set on a request without tools: %v", plain)
 	}
 }
+
+func TestSummaryRequestNoneForAdditionalTools(t *testing.T) {
+	body := []byte(`{"model":"m","tool_choice":"auto","input":[
+	 {"type":"message","role":"user","content":[{"type":"input_text","text":"start"}]},
+	 {"type":"additional_tools","tools":[{"type":"function","name":"exec","parameters":{"type":"object","properties":{}}}]},
+	 {"type":"compaction_trigger"}]}`)
+	var got map[string]any
+	if err := json.Unmarshal(summaryRequest(body), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["tool_choice"] != "none" {
+		t.Errorf("tool_choice = %v, want none for tools declared in additional_tools", got["tool_choice"])
+	}
+}
+
+func TestSummaryRequestDropsToolChoiceWithoutTools(t *testing.T) {
+	body := []byte(`{"model":"m","tool_choice":"required","input":[
+	 {"type":"message","role":"user","content":[{"type":"input_text","text":"start"}]},
+	 {"type":"compaction_trigger"}]}`)
+	var got map[string]any
+	if err := json.Unmarshal(summaryRequest(body), &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["tool_choice"]; ok {
+		t.Errorf("tool_choice kept on a request that declares no tools: %v", got["tool_choice"])
+	}
+}

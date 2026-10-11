@@ -451,6 +451,11 @@ func TestContextOverflowErrorPerClient(t *testing.T) {
 		// A proxy (LiteLLM) serializes the upstream's error inside its own message.
 		{"litellm nested error", `{"error":{"message":"litellm.BadRequestError: OpenAIException - {'error': {'message': \"This model's maximum context length is 8192 tokens. However, you requested 9000 tokens (8000 in the messages, 1000 in the completion).\", 'type': 'invalid_request_error'}}","type":"invalid_request_error"}}`,
 			"prompt is too long: 9000 tokens > 8192 maximum"},
+		// The nested message need not be the error object's first key (an Anthropic envelope, Azure).
+		{"anthropic envelope nested", `{"error":{"message":"litellm.BadRequestError: AnthropicException - {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"prompt is too long: 210000 tokens > 200000 maximum\"}}","type":"invalid_request_error"}}`,
+			"prompt is too long"},
+		{"azure nested, message not first", `{"error":{"message":"litellm.BadRequestError: AzureException - {'error': {'code': 'context_length_exceeded', 'message': \"This model's maximum context length is 8192 tokens. However, you requested 9000 tokens (8000 in the messages, 1000 in the completion).\"}}","type":"invalid_request_error"}}`,
+			"prompt is too long: 9000 tokens > 8192 maximum"},
 		{"nested error single-quoted", `{"error":{"message":"OpenAIException - {'error': {'message': 'Your input exceeds the context window of this model.', 'type': 'invalid_request_error'}}","type":"invalid_request_error"}}`,
 			"prompt is too long: OpenAIException"},
 		{"messages resulted in", `{"error":{"message":"This model's maximum context length is 128000 tokens. However, your messages resulted in 130512 tokens (including 1024 in the functions). Please reduce the length of the messages or functions.","type":"invalid_request_error","param":"messages","code":"context_length_exceeded"}}`,

@@ -131,9 +131,9 @@ var contextOverflowRE = regexp.MustCompile(`(?i)maximum context length|context[_
 // words; the apostrophe in "model's" opens none.
 var quotedRE = regexp.MustCompile(`(?:^|[\s:=(\[{,])(?:'[^']*'|"[^"]*")`)
 
-// nestedErrorRE is an upstream error a proxy (LiteLLM) serialized inside its own message; its message is
-// the upstream's wording, so it is read again, still without the quoted spans inside it.
-var nestedErrorRE = regexp.MustCompile(`\{\s*['"]error['"]\s*:\s*\{\s*['"]message['"]\s*:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')`)
+// nestedErrorRE is an upstream error a proxy (LiteLLM) serialized inside its own message; its message, at
+// any key position in that error object, is the upstream's wording, read again without its quoted spans.
+var nestedErrorRE = regexp.MustCompile(`['"]error['"]\s*:\s*\{[^{}]*?['"]message['"]\s*:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')`)
 
 func isContextOverflow(status int, text string) bool {
 	if status != 400 {

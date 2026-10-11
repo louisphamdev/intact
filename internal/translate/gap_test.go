@@ -1,6 +1,7 @@
 package translate
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -127,6 +128,51 @@ func TestResponsesIncompleteMaxTokensIsLength(t *testing.T) {
 	}
 }
 
+// A refusal arrives as response.incomplete with no output and no output tokens; reporting it as
+// length or stop would hide it. Content already streamed keeps the max_output_tokens length finish.
+func TestResponsesIncompleteZeroUsageIsError(t *testing.T) {
+	ev := func(typ, data string) string { return "event: " + typ + "\ndata: " + data + "\n\n" }
+	created := ev("response.created", `{"type":"response.created","response":{"id":"resp_1","model":"m"}}`)
+	incomplete := func(output, reason, usage string) string {
+		return ev("response.incomplete", `{"type":"response.incomplete","response":{"id":"resp_1","output":`+output+
+			`,"incomplete_details":{"reason":"`+reason+`"}`+usage+`}}`)
+	}
+	zero := `,"usage":{"input_tokens":10,"output_tokens":0}`
+	text := ev("response.output_text.delta", `{"type":"response.output_text.delta","delta":"abc"}`)
+	cases := []struct {
+		name, src string
+		wantErr   bool
+	}{
+		{"refusal after response.created", created + incomplete(`[]`, "max_output_tokens", zero), true},
+		{"refusal with no created event", incomplete(`[]`, "max_output_tokens", zero), true},
+		{"empty delta is no content", created + ev("response.output_text.delta", `{"type":"response.output_text.delta","delta":""}`) +
+			incomplete(`[]`, "max_output_tokens", zero), true},
+		{"text then max_output_tokens without usage", text + incomplete(`[]`, "max_output_tokens", ""), false},
+		{"text then content_filter", text + incomplete(`[]`, "content_filter", ""), true},
+		{"reasoning then max_output_tokens", ev("response.reasoning_summary_text.delta",
+			`{"type":"response.reasoning_summary_text.delta","delta":"think"}`) + incomplete(`[]`, "max_output_tokens", ""), false},
+		{"tool call then max_output_tokens", ev("response.output_item.added",
+			`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"c1","name":"Read"}}`) +
+			incomplete(`[]`, "max_output_tokens", ""), false},
+		{"output tokens counted", incomplete(`[]`, "max_output_tokens", `,"usage":{"output_tokens":5}`), false},
+		{"output item present", incomplete(`[{"type":"message"}]`, "max_output_tokens", zero), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := responsesToChat(c.src)
+			isErr := strings.Contains(got, `"error"`)
+			fin := strings.Contains(got, `"finish_reason":"length"`) || strings.Contains(got, `"finish_reason":"stop"`) ||
+				strings.Contains(got, `"finish_reason":"tool_calls"`)
+			if c.wantErr && (!isErr || fin) {
+				t.Errorf("want an error and no finish:\n%s", got)
+			}
+			if !c.wantErr && (isErr || !strings.Contains(got, `"finish_reason":"length"`)) {
+				t.Errorf("want a length finish and no error:\n%s", got)
+			}
+		})
+	}
+}
+
 // Some chat upstreams close a tool call turn with finish_reason "stop". A Messages caller reads
 // end_turn as "the model is done" and never runs the tool_use blocks beside it.
 func TestGapChatStopWithToolCallsStopReason(t *testing.T) {
@@ -238,6 +284,177 @@ func TestGeminiCutNamesFirstWins(t *testing.T) {
 			body := []byte(`{"model":"m","messages":[{"role":"user","content":"go"}],"tools":[` + strings.Join(tools, ",") + `]}`)
 			if got := GeminiCutNames(body).ToClient(c.ask); got != c.want {
 				t.Errorf("ToClient(%q) = %q, want %q", c.ask, got, c.want)
+			}
+		})
+	}
+}
+
+// The object form of tool_choice must name the function the declaration carries for that tool. A tool
+// whose Gemini name another tool already owns has no declaration, so forcing it must not force that
+// other tool.
+func TestGeminiForcedToolUsesDeclaredName(t *testing.T) {
+	long := "mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_console_messages"
+	a := strings.Repeat("a", 64)
+	forced := func(t *testing.T, tools []string, choice string, vocab *ToolNames) (decls []string, allowed []any) {
+		t.Helper()
+		var ts []string
+		for _, n := range tools {
+			ts = append(ts, `{"type":"function","function":{"name":"`+n+`","parameters":{"type":"object"}}}`)
+		}
+		body := []byte(`{"model":"m","messages":[{"role":"user","content":"go"}],"tools":[` + strings.Join(ts, ",") +
+			`],"tool_choice":{"type":"function","function":{"name":"` + choice + `"}}}`)
+		out, err := OpenAIToGemini(body, memSigs{}, vocab)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := mustJSON(t, out)
+		for _, d := range list(asObj(list(m["tools"])[0])["functionDeclarations"]) {
+			decls = append(decls, str(asObj(d)["name"]))
+		}
+		return decls, list(asObj(asObj(m["toolConfig"])["functionCallingConfig"])["allowedFunctionNames"])
+	}
+	t.Run("long name through a vocabulary", func(t *testing.T) {
+		decls, allowed := forced(t, []string{long}, long, NewToolNames([]string{long}, "antigravity"))
+		if len(allowed) != 1 || str(allowed[0]) != decls[0] {
+			t.Errorf("allowedFunctionNames %v, the declaration %q", allowed, decls[0])
+		}
+	})
+	t.Run("the owner is forced by its own name", func(t *testing.T) {
+		decls, allowed := forced(t, []string{a, a + "_v2"}, a, nil)
+		if len(decls) != 1 || len(allowed) != 1 || str(allowed[0]) != decls[0] {
+			t.Errorf("declarations %v, allowedFunctionNames %v", decls, allowed)
+		}
+	})
+	t.Run("a tool with no declaration forces nothing else", func(t *testing.T) {
+		if _, allowed := forced(t, []string{a, a + "_v2"}, a+"_v2", nil); len(allowed) != 0 {
+			t.Errorf("forcing %q forces %v, another tool's declaration", a+"_v2", allowed)
+		}
+	})
+}
+
+// Claude Code compacts only on an invalid_request_error that reads "prompt is too long", and Codex
+// only on code context_length_exceeded. A chat upstream names the overflow its own way, so its 400
+// is mapped per client; a chat caller reads the upstream's own body.
+func TestContextOverflowErrorPerClient(t *testing.T) {
+	cases := []struct {
+		name, body, wantAnthropic string
+	}{
+		{"openai wording", `{"error":{"message":"This model's maximum context length is 131072 tokens. However, you requested 140000 tokens (132000 in the messages, 8000 in the completion).","type":"invalid_request_error","code":"invalid_request_error"}}`,
+			"prompt is too long: 140000 tokens > 131072 maximum"},
+		{"thousands separators", `{"error":{"message":"This model's maximum context length is 131,072 tokens. However, you requested 140,000 tokens.","type":"invalid_request_error"}}`,
+			"prompt is too long: 140000 tokens > 131072 maximum"},
+		{"code only", `{"error":{"message":"Input is too large.","type":"invalid_request_error","code":"context_length_exceeded"}}`,
+			"prompt is too long: Input is too large."},
+		{"responses wording", `{"error":{"message":"Your input exceeds the context window of this model. Please adjust your input and try again.","type":"invalid_request_error"}}`,
+			"prompt is too long: Your input exceeds the context window of this model."},
+		{"moonshot wording", `{"error":{"message":"Invalid request: Your request exceeded model token limit: 262144 (requested: 300000)","type":"invalid_request_error"}}`,
+			"prompt is too long: 300000 tokens > 262144 maximum"},
+		{"gemini wording", `{"error":{"code":400,"message":"The input token count (1200000) exceeds the maximum number of tokens allowed (1048576).","status":"INVALID_ARGUMENT"}}`,
+			"prompt is too long: 1200000 tokens > 1048576 maximum"},
+		{"already anthropic wording", `{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 205000 tokens > 200000 maximum"}}`,
+			"prompt is too long: 205000 tokens > 200000 maximum"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := asObj(mustJSON(t, Error(400, []byte(c.body), Anthropic))["error"])
+			if str(e["type"]) != "invalid_request_error" || !strings.HasPrefix(str(e["message"]), c.wantAnthropic) {
+				t.Errorf("anthropic client got %v, want invalid_request_error starting %q", e, c.wantAnthropic)
+			}
+			if e := asObj(mustJSON(t, Error(400, []byte(c.body), Responses))["error"]); str(e["code"]) != "context_length_exceeded" {
+				t.Errorf("responses client got %v, want code context_length_exceeded", e)
+			}
+			if got, want := string(Error(400, []byte(c.body), OpenAI)), string(errorBefore(t, c.body)); got != want {
+				t.Errorf("chat client got %s, want %s", got, want)
+			}
+		})
+	}
+	// Not an overflow: a rate limit on tokens per minute, a server error, another 400.
+	others := []struct {
+		status int
+		body   string
+	}{
+		{429, `{"error":{"message":"Rate limit reached: tokens per min (TPM): limit 30000, requested 140000. This model's maximum context length is 131072 tokens.","type":"tokens"}}`},
+		{500, `{"error":{"message":"maximum context length exceeded while batching","type":"server_error"}}`},
+		{400, `{"error":{"message":"max_tokens is too large: 9000000. This model supports at most 64000 completion tokens.","type":"invalid_request_error"}}`},
+	}
+	for _, o := range others {
+		if e := asObj(mustJSON(t, Error(o.status, []byte(o.body), Anthropic))["error"]); strings.HasPrefix(str(e["message"]), "prompt is too long") {
+			t.Errorf("%d %s became an overflow for an anthropic client: %v", o.status, o.body, e)
+		}
+		if e := asObj(mustJSON(t, Error(o.status, []byte(o.body), Responses))["error"]); str(e["code"]) == "context_length_exceeded" {
+			t.Errorf("%d %s became an overflow for a responses client: %v", o.status, o.body, e)
+		}
+	}
+}
+
+// errorBefore is the chat-client error envelope as intact wrote it before overflow mapping existed.
+func errorBefore(t *testing.T, body string) []byte {
+	t.Helper()
+	m := mustJSON(t, []byte(body))
+	e := asObj(m["error"])
+	typ := str(e["type"])
+	if typ == "" {
+		typ = "invalid_request_error"
+	}
+	var code any
+	if s := str(e["code"]); s != "" {
+		code = s
+	}
+	b, _ := json.Marshal(obj{"error": obj{"message": str(e["message"]), "type": typ, "param": nil, "code": code}})
+	return b
+}
+
+// A thinking-mode chat model (DeepSeek, Kimi) refuses the second tool step unless the assistant turn
+// that called the tool carries its reasoning back as reasoning_content. Only a provider that opts in
+// gets the field: a strict OpenAI server can refuse it.
+func TestReasoningReplayedOnToolCallTurn(t *testing.T) {
+	anthropic := []byte(`{"model":"m","max_tokens":100,"messages":[
+		{"role":"user","content":"go"},
+		{"role":"assistant","content":[{"type":"thinking","thinking":"I should read it.","signature":"s"},{"type":"tool_use","id":"t1","name":"Read","input":{}}]},
+		{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"a"}]}],
+		"tools":[{"name":"Read","input_schema":{"type":"object"}}]}`)
+	responses := []byte(`{"model":"m","input":[
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"go"}]},
+		{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"I should read it."}]},
+		{"type":"function_call","call_id":"c1","name":"Read","arguments":"{}"},
+		{"type":"function_call_output","call_id":"c1","output":"a"},
+		{"type":"reasoning","id":"rs_2","summary":[{"type":"summary_text","text":"Answer now."}]},
+		{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}],
+		"tools":[{"type":"function","name":"Read","parameters":{"type":"object"}}]}`)
+	convert := map[string]func(HubOptions) ([]byte, error){
+		"anthropic": func(o HubOptions) ([]byte, error) { return AnthropicToOpenAIFor(anthropic, nil, o) },
+		"responses": func(o HubOptions) ([]byte, error) { return ResponsesToOpenAIFor(responses, nil, o) },
+	}
+	for name, conv := range convert {
+		t.Run(name, func(t *testing.T) {
+			out, err := conv(HubOptions{ReplayReasoning: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var withCalls, others []any
+			for _, raw := range list(mustJSON(t, out)["messages"]) {
+				if m := asObj(raw); str(m["role"]) == "assistant" {
+					if m["tool_calls"] != nil {
+						withCalls = append(withCalls, m["reasoning_content"])
+					} else {
+						others = append(others, m["reasoning_content"])
+					}
+				}
+			}
+			if len(withCalls) != 1 || withCalls[0] != "I should read it." {
+				t.Errorf("tool-call turn reasoning_content = %v, want the thinking text: %s", withCalls, out)
+			}
+			for _, r := range others {
+				if r != nil {
+					t.Errorf("a turn without tool calls carries reasoning_content %v: %s", r, out)
+				}
+			}
+			out, err = conv(HubOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(out), "reasoning_content") {
+				t.Errorf("a provider that did not opt in got reasoning_content: %s", out)
 			}
 		})
 	}

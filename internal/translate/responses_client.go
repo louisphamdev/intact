@@ -190,6 +190,11 @@ func ResponsesTools(body []byte, vocab *ToolNames) map[string]ToolMeta {
 // function tool names to the vocabulary the provider is going to read; custom tools and the harness's
 // own local_shell keep theirs, because a freeform tool's grammar is written for its name.
 func ResponsesToOpenAI(body []byte, vocab *ToolNames) ([]byte, error) {
+	return ResponsesToOpenAIFor(body, vocab, HubOptions{})
+}
+
+// ResponsesToOpenAIFor is ResponsesToOpenAI for a provider with its own options.
+func ResponsesToOpenAIFor(body []byte, vocab *ToolNames, opt HubOptions) ([]byte, error) {
 	var expandErr error
 	body, expandErr = ExpandGatewayCompactions(body, false)
 	if expandErr != nil {
@@ -225,15 +230,27 @@ func ResponsesToOpenAI(body []byte, vocab *ToolNames) ([]byte, error) {
 		}
 		msgs = append(msgs, obj{"role": role, "content": text})
 	}
+	// reasoning is the summary text of the reasoning items since the last call or turn.
+	var reasoning strings.Builder
 	// Parallel calls arrive as separate items; a chat provider wants them in one
 	// assistant turn, answered right after it.
 	pushCall := func(id, name, args string) {
 		call := obj{"id": id, "type": "function", "function": obj{"name": name, "arguments": args}}
-		if l := last(); l != nil && str(l["role"]) == "assistant" {
+		l := last()
+		if l != nil && str(l["role"]) == "assistant" {
 			l["tool_calls"] = append(list(l["tool_calls"]), call)
-			return
+		} else {
+			l = obj{"role": "assistant", "content": nil, "tool_calls": []any{call}}
+			msgs = append(msgs, l)
 		}
-		msgs = append(msgs, obj{"role": "assistant", "content": nil, "tool_calls": []any{call}})
+		if opt.ReplayReasoning && reasoning.Len() > 0 {
+			if prev := str(l["reasoning_content"]); prev != "" {
+				l["reasoning_content"] = prev + "\n\n" + reasoning.String()
+			} else {
+				l["reasoning_content"] = reasoning.String()
+			}
+			reasoning.Reset()
+		}
 	}
 	callID := func(it obj) string {
 		if s := str(it["call_id"]); s != "" {
@@ -248,6 +265,7 @@ func ResponsesToOpenAI(body []byte, vocab *ToolNames) ([]byte, error) {
 	case []any:
 		for _, raw := range input {
 			if s, ok := raw.(string); ok {
+				reasoning.Reset()
 				pushText("user", s)
 				continue
 			}
@@ -264,6 +282,7 @@ func ResponsesToOpenAI(body []byte, vocab *ToolNames) ([]byte, error) {
 				}
 				if role != "assistant" {
 					role = "user"
+					reasoning.Reset()
 				}
 				if allText {
 					pushText(role, joinText(parts))
@@ -296,10 +315,20 @@ func ResponsesToOpenAI(body []byte, vocab *ToolNames) ([]byte, error) {
 				}
 				pushCall(callID(it), "local_shell", marshalString(args))
 			case typ == "function_call_output" || typ == "custom_tool_call_output" || typ == "local_shell_call_output":
+				reasoning.Reset()
 				msgs = append(msgs, obj{"role": "tool", "tool_call_id": callID(it), "content": responsesOutputText(it["output"])})
+			case typ == "reasoning":
+				for _, p := range list(it["summary"]) {
+					if t := str(asObj(p)["text"]); t != "" {
+						if reasoning.Len() > 0 {
+							reasoning.WriteString("\n\n")
+						}
+						reasoning.WriteString(t)
+					}
+				}
 			}
-			// reasoning items carry OpenAI's encrypted state, which no other
-			// provider reads; hosted-tool items ran at OpenAI. Both are dropped.
+			// A reasoning item's encrypted state is OpenAI's own and no other provider reads it; only
+			// its summary text goes on, as reasoning_content. Hosted-tool items ran at OpenAI.
 		}
 	}
 

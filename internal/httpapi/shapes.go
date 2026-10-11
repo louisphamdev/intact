@@ -87,20 +87,24 @@ func translatable(shape string) bool {
 	return false
 }
 
-// toProvider converts a caller's request to the provider's shape. provider names the account the
+// toProvider converts a caller's request to the provider's shape. providerID names the account the
 // request is going to, which decides whether the tool names are translated into that agent's
 // vocabulary; the translation is returned so the answer comes back in the caller's own names.
-func toProvider(body []byte, client, want, provider string) ([]byte, *translate.ToolNames, error) {
+func toProvider(body []byte, client, want, providerID string) ([]byte, *translate.ToolNames, error) {
 	hub := body
 	var names *translate.ToolNames
 	var err error
+	var opt translate.HubOptions
+	if p, ok := provider.Lookup(providerID); ok && want == translate.OpenAI {
+		opt.ReplayReasoning = p.ReplayReasoning
+	}
 	switch client {
 	case translate.Anthropic:
-		names = translate.NewToolNames(translate.AnthropicToolNames(body), provider)
-		hub, err = translate.AnthropicToOpenAI(body, names)
+		names = translate.NewToolNames(translate.AnthropicToolNames(body), providerID)
+		hub, err = translate.AnthropicToOpenAIFor(body, names, opt)
 	case translate.Responses:
-		names = translate.NewToolNames(translate.ResponsesToolNames(body), provider)
-		hub, err = translate.ResponsesToOpenAI(body, names)
+		names = translate.NewToolNames(translate.ResponsesToolNames(body), providerID)
+		hub, err = translate.ResponsesToOpenAIFor(body, names, opt)
 	}
 	if err != nil {
 		return nil, nil, err

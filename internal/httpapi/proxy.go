@@ -127,7 +127,6 @@ func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, path
 	return out, nil
 }
 
-// withBetas adds the values a list lacks, keeping the caller's order.
 // fitLongContextBeta drops the 1M-context beta for a model whose window, from
 // the provider's model list, is smaller: Anthropic refuses the whole request
 // for it. An unknown window keeps the flag.
@@ -152,20 +151,23 @@ func (a *api) fitLongContextBeta(out *http.Request, providerID string, body []by
 	out.Header.Set("Anthropic-Beta", strings.Join(keep, ","))
 }
 
+// withBetas adds the values a list lacks, keeping the caller's order and dropping empty entries.
 func withBetas(list string, need []string) string {
 	have := map[string]bool{}
+	var out []string
 	for _, b := range strings.Split(list, ",") {
-		have[strings.TrimSpace(b)] = true
+		if b = strings.TrimSpace(b); b != "" {
+			have[b] = true
+			out = append(out, b)
+		}
 	}
 	for _, b := range need {
 		if !have[b] {
-			if strings.TrimSpace(list) != "" {
-				list += ","
-			}
-			list += b
+			have[b] = true
+			out = append(out, b)
 		}
 	}
-	return list
+	return strings.Join(out, ",")
 }
 
 // relayObserved relays a passthrough answer and shows it to the drift observer.

@@ -158,12 +158,13 @@ func OpenAIToGemini(body []byte, sigs Signatures, vocab *ToolNames) ([]byte, err
 	if tools := list(in["tools"]); len(tools) > 0 {
 		var decls []any
 		seen := map[string]bool{}
+		declared := geminiDeclared(tools, vocab)
 		for _, t := range tools {
 			fn := asObj(asObj(t)["function"])
 			// The declaration goes out under the name Gemini is trained on, so a model answers with a
 			// name intact can map back. The caller's schema travels with it, so no argument key moves.
-			name := geminiName(vocab.ToProvider(str(fn["name"])))
-			if fn == nil || name == "" || seen[name] {
+			name, ok := declared[str(fn["name"])]
+			if !ok || seen[name] {
 				continue
 			}
 			seen[name] = true
@@ -187,7 +188,7 @@ func OpenAIToGemini(body []byte, sigs Signatures, vocab *ToolNames) ([]byte, err
 			case obj:
 				// The object form names one tool. Without allowedFunctionNames the
 				// model stays free to answer in text.
-				if name := geminiName(str(asObj(tc["function"])["name"])); name != "" {
+				if name, ok := declared[str(asObj(tc["function"])["name"])]; ok {
 					fc["mode"] = "ANY"
 					fc["allowedFunctionNames"] = []any{name}
 				}
@@ -215,27 +216,36 @@ func geminiName(n string) string {
 }
 
 // GeminiCutNames maps back, for a Chat Completions caller, each declared tool name geminiName changed.
-// A Gemini name belongs to the first tool that produces it, as in the declaration, even when that
-// tool's name is unchanged: a later tool must not take it over.
 func GeminiCutNames(body []byte) *ToolNames {
 	in, err := decode(body)
 	if err != nil {
 		return nil
 	}
 	t := &ToolNames{toClient: map[string]string{}}
-	claimed := map[string]bool{}
-	for _, raw := range list(in["tools"]) {
-		name := str(asObj(asObj(raw)["function"])["name"])
-		out := geminiName(name)
-		if out == "" || claimed[out] {
-			continue
-		}
-		claimed[out] = true
+	for name, out := range geminiDeclared(list(in["tools"]), nil) {
 		if out != name {
 			t.toClient[out] = name
 		}
 	}
 	return t
+}
+
+// geminiDeclared maps each caller tool name to the name its Gemini declaration carries. A Gemini name
+// belongs to the first tool that produces it, even when that tool's name is unchanged: a later tool
+// whose name cuts to it gets no entry, so it is neither declared, forced nor mapped back.
+func geminiDeclared(tools []any, vocab *ToolNames) map[string]string {
+	out := map[string]string{}
+	claimed := map[string]bool{}
+	for _, raw := range tools {
+		name := str(asObj(asObj(raw)["function"])["name"])
+		g := geminiName(vocab.ToProvider(name))
+		if g == "" || claimed[g] {
+			continue
+		}
+		claimed[g] = true
+		out[name] = g
+	}
+	return out
 }
 
 // geminiParts converts OpenAI user content to Gemini parts.

@@ -181,6 +181,7 @@ func ResponsesStreamToOpenAI(dst Flusher, src io.Reader) {
 	toolIndex := map[string]int{} // output item id -> tool call index
 	sawArgs := map[string]bool{}
 	started, done := false, false
+	emitted := false // text or reasoning reached the caller; response.created does not count
 	fail := func(msg string) {
 		b, _ := json.Marshal(obj{"error": obj{"message": msg, "type": "api_error"}})
 		io.WriteString(dst, "data: "+string(b)+"\n\n")
@@ -250,9 +251,11 @@ func ResponsesStreamToOpenAI(dst Flusher, src io.Reader) {
 			start()
 		case "response.output_text.delta":
 			start()
+			emitted = emitted || str(ev["delta"]) != ""
 			emit(obj{"content": ev["delta"]}, nil, nil)
 		case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 			start()
+			emitted = emitted || str(ev["delta"]) != ""
 			emit(obj{"reasoning_content": ev["delta"]}, nil, nil)
 		case "response.output_item.added":
 			item := asObj(ev["item"])
@@ -280,7 +283,14 @@ func ResponsesStreamToOpenAI(dst Flusher, src io.Reader) {
 				emit(obj{"tool_calls": []any{obj{"index": i, "function": obj{"arguments": args}}}}, nil, nil)
 			}
 		case "response.completed", "response.done", "response.incomplete":
-			finish(asObj(ev["response"]))
+			r := asObj(ev["response"])
+			// An incomplete answer with nothing in it is a refusal; only streamed content keeps length.
+			if reason := str(asObj(r["incomplete_details"])["reason"]); typ == "response.incomplete" && len(list(r["output"])) == 0 &&
+				num(asObj(r["usage"])["output_tokens"]) == 0 && (reason != "max_output_tokens" || (!emitted && len(toolIndex) == 0)) {
+				fail("upstream response incomplete with no output: " + reason)
+				return false
+			}
+			finish(r)
 			return false
 		case "response.failed", "error":
 			msg := str(asObj(ev["error"])["message"])

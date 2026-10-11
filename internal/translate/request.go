@@ -372,7 +372,20 @@ func AnthropicToolNames(body []byte) []string {
 	return out
 }
 
+// HubOptions tunes the Chat Completions request built for one provider.
+type HubOptions struct {
+	// ReplayReasoning sends the caller's thinking back as reasoning_content on an assistant turn
+	// with tool calls. A thinking-mode chat model (DeepSeek, Kimi) refuses the next tool step
+	// without it, and a strict OpenAI server can refuse the field, so a provider opts in.
+	ReplayReasoning bool
+}
+
 func AnthropicToOpenAI(body []byte, names *ToolNames) ([]byte, error) {
+	return AnthropicToOpenAIFor(body, names, HubOptions{})
+}
+
+// AnthropicToOpenAIFor is AnthropicToOpenAI for a provider with its own options.
+func AnthropicToOpenAIFor(body []byte, names *ToolNames, opt HubOptions) ([]byte, error) {
 	in, err := decode(body)
 	if err != nil {
 		return nil, err
@@ -403,9 +416,17 @@ func AnthropicToOpenAI(body []byte, names *ToolNames) ([]byte, error) {
 		}
 		var parts []any
 		var calls []any
+		var thinking strings.Builder
 		for _, b := range blocks {
 			blk := asObj(b)
 			switch str(blk["type"]) {
+			case "thinking":
+				if t := str(blk["thinking"]); t != "" {
+					if thinking.Len() > 0 {
+						thinking.WriteString("\n\n")
+					}
+					thinking.WriteString(t)
+				}
 			case "text":
 				parts = append(parts, obj{"type": "text", "text": blk["text"]})
 			case "image":
@@ -449,6 +470,9 @@ func AnthropicToOpenAI(body []byte, names *ToolNames) ([]byte, error) {
 			msg := obj{"role": "assistant", "content": joinParts(parts)}
 			if len(calls) > 0 {
 				msg["tool_calls"] = calls
+				if opt.ReplayReasoning && thinking.Len() > 0 {
+					msg["reasoning_content"] = thinking.String()
+				}
 			}
 			if msg["content"] != nil || len(calls) > 0 {
 				msgs = append(msgs, msg)

@@ -61,6 +61,9 @@ type Provider struct {
 	// CredentialBeta lists the Anthropic-Beta values the credential cannot work
 	// without; they are added to a native client's own list when it lacks them.
 	CredentialBeta []string
+	// ReplayReasoning: a translated chat request carries the caller's thinking as reasoning_content
+	// on its tool-call turns. Only a declared provider opts in (see Def); no built-in one does.
+	ReplayReasoning bool
 	// Watch turns on structure drift monitoring. It is set on the providers
 	// reached as a real tool (OAuth, impersonated clients), whose formats move
 	// with each tool release; a documented API does not need it.

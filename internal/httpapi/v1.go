@@ -1111,7 +1111,8 @@ func withoutEncryptedReasoning(body []byte) ([]byte, bool) {
 		}
 		kept = append(kept, it)
 	}
-	if len(kept) == len(items) {
+	// An empty input is another turn, not this one without the foreign reasoning.
+	if len(kept) == len(items) || len(kept) == 0 {
 		return body, false
 	}
 	val, err := json.Marshal(kept)
@@ -1123,12 +1124,25 @@ func withoutEncryptedReasoning(body []byte) ([]byte, bool) {
 	return append(out, body[end:]...), true
 }
 
-// firstSSEEvent reads from a stream up to the end of its first event, max bytes at most. What it
-// returns may run past that event; it is every byte read, for the caller to relay.
+// firstSSEEvent reads from a stream up to the end of its first event, max bytes at most; comment
+// frames before it (": ping") do not count. What it returns may run past that event; it is every
+// byte read, for the caller to relay.
 func firstSSEEvent(r io.Reader, max int) []byte {
 	head := make([]byte, 0, 4096)
 	buf := make([]byte, 4096)
-	for len(head) < max && frameEnd.FindIndex(head) == nil {
+	from, scan := 0, 0 // start of the frame looked at; bytes before scan hold no delimiter
+	for len(head) < max {
+		if loc := frameEnd.FindIndex(head[scan:]); loc != nil {
+			if !isCommentFrame(head[from : scan+loc[0]]) {
+				break
+			}
+			from, scan = scan+loc[1], scan+loc[1]
+			continue
+		}
+		// A delimiter split across reads starts at most its own length before the end.
+		if scan = len(head) - len("\r\n\r\n"); scan < from {
+			scan = from
+		}
 		n, err := r.Read(buf[:min(len(buf), max-len(head))])
 		head = append(head, buf[:n]...)
 		if err != nil {
@@ -1138,12 +1152,34 @@ func firstSSEEvent(r io.Reader, max int) []byte {
 	return head
 }
 
+// firstEventFrame returns the first frame of head that is not a comment frame, without its delimiter.
+func firstEventFrame(head []byte) []byte {
+	for {
+		loc := frameEnd.FindIndex(head)
+		if loc == nil {
+			return head
+		}
+		if !isCommentFrame(head[:loc[0]]) {
+			return head[:loc[0]]
+		}
+		head = head[loc[1]:]
+	}
+}
+
+// isCommentFrame reports whether every line of an SSE frame is a comment.
+func isCommentFrame(frame []byte) bool {
+	for _, line := range bytes.Split(frame, []byte("\n")) {
+		if line = bytes.TrimRight(line, "\r"); len(line) > 0 && line[0] != ':' {
+			return false
+		}
+	}
+	return true
+}
+
 // isEncryptedContentRefusal reports whether the first event of a Responses stream is an error, or a
 // failed response, for invalid_encrypted_content.
 func isEncryptedContentRefusal(head []byte) bool {
-	if loc := frameEnd.FindIndex(head); loc != nil {
-		head = head[:loc[0]]
-	}
+	head = firstEventFrame(head)
 	if !bytes.Contains(head, []byte("invalid_encrypted_content")) {
 		return false
 	}

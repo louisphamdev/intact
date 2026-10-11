@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -93,9 +94,17 @@ func Error(status int, body []byte, to string) []byte {
 			msg = e
 		}
 	}
+	overflow := isContextOverflow(status, msg+" "+str(code))
 	if to == Anthropic {
+		if overflow {
+			b, _ := json.Marshal(obj{"type": "error", "error": obj{"type": "invalid_request_error", "message": promptTooLong(msg)}})
+			return b
+		}
 		b, _ := json.Marshal(obj{"type": "error", "error": obj{"type": AnthropicErrorType(status, typ), "message": msg}})
 		return b
+	}
+	if overflow && to == Responses {
+		code = "context_length_exceeded"
 	}
 	if typ == "" {
 		typ = "invalid_request_error"
@@ -105,6 +114,32 @@ func Error(status int, body []byte, to string) []byte {
 	}
 	b, _ := json.Marshal(obj{"error": obj{"message": msg, "type": typ, "param": nil, "code": code}})
 	return b
+}
+
+// contextOverflowRE is the set of overflow wordings TestContextOverflowErrorPerClient covers; a 429
+// about tokens per minute is a rate limit and never reaches it.
+var contextOverflowRE = regexp.MustCompile(`(?i)maximum context length|context[_ ]length[_ ]exceeded|prompt is too long|exceeds? the (?:model'?s? )?context window|exceeded model token limit|exceeds the maximum number of tokens allowed`)
+
+func isContextOverflow(status int, text string) bool {
+	return status == 400 && contextOverflowRE.MatchString(text)
+}
+
+var (
+	overflowMaxRE   = regexp.MustCompile(`(?i)(?:maximum context length|context window|token limit|maximum number of tokens allowed)\D{0,20}?(\d[\d,]*)`)
+	overflowAskedRE = regexp.MustCompile(`(?i)(?:requested|resulted in|input token count|prompt (?:is|has|contains)|input (?:is|has))\D{0,12}?(\d[\d,]*)`)
+)
+
+// promptTooLong words an overflow as Anthropic does; Claude Code compacts on "prompt is too long: N
+// tokens > M maximum", so the numbers lead when the upstream names them.
+func promptTooLong(msg string) string {
+	if strings.HasPrefix(strings.ToLower(msg), "prompt is too long") {
+		return msg
+	}
+	max, asked := overflowMaxRE.FindStringSubmatch(msg), overflowAskedRE.FindStringSubmatch(msg)
+	if max != nil && asked != nil {
+		return "prompt is too long: " + strings.ReplaceAll(asked[1], ",", "") + " tokens > " + strings.ReplaceAll(max[1], ",", "") + " maximum (" + msg + ")"
+	}
+	return "prompt is too long: " + msg
 }
 
 // ---- whole responses

@@ -100,3 +100,20 @@ func TestBifrostMatchesEveryDeclaredClientBinary(t *testing.T) {
 		}
 	}
 }
+
+// reasoning_content is opt-in from a provider's data: a strict OpenAI server (OpenAI, Copilot) can
+// refuse the field, so no built-in provider sends it.
+func TestNoBuiltinReplaysReasoning(t *testing.T) {
+	for id, p := range registry {
+		if p.ReplayReasoning {
+			t.Errorf("built-in provider %s replays reasoning", id)
+		}
+	}
+	d := Def{ID: "zencore", Kind: KindAPIKey, API: "openai", BaseURL: "http://127.0.0.1:8793/v1", ReplayReasoning: true}
+	if !d.Provider().ReplayReasoning {
+		t.Errorf("a def that opts in lost ReplayReasoning")
+	}
+	if (Def{ID: "x", Kind: KindAPIKey, API: "openai", BaseURL: "http://x/v1"}).Provider().ReplayReasoning {
+		t.Errorf("a def that does not opt in replays reasoning")
+	}
+}

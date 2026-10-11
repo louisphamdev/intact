@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -8,8 +10,10 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
+	"github.com/louisphamdev/intact/internal/provider"
 	"github.com/louisphamdev/intact/internal/store"
 )
 
@@ -397,6 +401,31 @@ func TestCodexResponses400MarkerWithNothingToStripIsRelayedOnce(t *testing.T) {
 	}
 }
 
+// An input made only of foreign encrypted reasoning would go again as input:[], a different turn the
+// caller never asked for. The refusal is relayed after one call, on the 400 and on the stream.
+func TestCodexOnlyForeignReasoningIsNotRetriedEmpty(t *testing.T) {
+	const refusal = `{"error":{"message":"The encrypted content for item rs_1 could not be verified.","type":"invalid_request_error","param":null,"code":"invalid_encrypted_content"}}`
+	const request = `{"model":"codex/gpt-5.5","stream":true,"store":false,"input":[
+		{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"gAAA-foreign"}]}`
+	if _, ok := withoutEncryptedReasoning([]byte(request)); ok {
+		t.Errorf("withoutEncryptedReasoning offered an empty input as a retry")
+	}
+	rec, bodies := codexSSEFor(t, request, func(w http.ResponseWriter, n int, body string) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, refusal)
+	})
+	if rec.Code != http.StatusBadRequest || rec.Body.String() != refusal || len(bodies) != 1 {
+		t.Errorf("400: code=%d upstream calls=%d body=%s, want the upstream 400 unchanged after one call", rec.Code, len(bodies), rec.Body.String())
+	}
+	rec, bodies = codexSSEFor(t, request, func(w http.ResponseWriter, n int, body string) {
+		io.WriteString(w, codexRefusalEvent)
+	})
+	if rec.Code != http.StatusOK || rec.Body.String() != codexRefusalEvent || len(bodies) != 1 {
+		t.Errorf("stream: code=%d upstream calls=%d body=%q, want the upstream stream unchanged after one call", rec.Code, len(bodies), rec.Body.String())
+	}
+}
+
 // A retry that cannot reach the upstream leaves the first answer standing: the caller reads the
 // upstream's own 400, not an error intact made up.
 func TestCodexResponsesRetryFailureRelaysFirst400(t *testing.T) {
@@ -557,6 +586,56 @@ func TestCodexSSERetryFailureRelaysFirstStream(t *testing.T) {
 	}
 }
 
+// An upstream may open a stream with a keep-alive comment frame. The refusal behind it is still the
+// first event, so the turn goes again without the foreign reasoning, once.
+func TestCodexSSERefusalAfterCommentFrameRetries(t *testing.T) {
+	const refusal = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"invalid_encrypted_content\",\"message\":\"The encrypted content for item rs_1 could not be verified.\"}}\n\n"
+	for _, ping := range []string{": ping\n\n", ": keep-alive\r\n\r\n", ": ping\n\n: ping\n\n"} {
+		t.Run(strings.TrimSpace(ping), func(t *testing.T) {
+			rec, bodies := codexSSE(t, func(w http.ResponseWriter, n int, body string) {
+				if strings.Contains(body, "encrypted_content") {
+					io.WriteString(w, ping)
+					w.(http.Flusher).Flush()
+					io.WriteString(w, refusal)
+					return
+				}
+				io.WriteString(w, codexOKStream)
+			})
+			if rec.Code != http.StatusOK || len(bodies) != 2 || rec.Body.String() != codexOKStream {
+				t.Fatalf("code=%d upstream calls=%d body=%q, want the retry's stream after one retry", rec.Code, len(bodies), rec.Body.String())
+			}
+		})
+	}
+}
+
+// Comment frames read ahead are relayed with the rest, byte for byte, also when a frame delimiter
+// arrives split across reads.
+func TestCodexSSECommentFrameRelayedByteIdentical(t *testing.T) {
+	pieces := []string{": ping\n", "\n: keep-alive\r\n\r", "\n" + codexOKStream[:20], codexOKStream[20:]}
+	rec, bodies := codexSSE(t, func(w http.ResponseWriter, n int, body string) {
+		for _, p := range pieces {
+			io.WriteString(w, p)
+			w.(http.Flusher).Flush()
+		}
+	})
+	if want := strings.Join(pieces, ""); rec.Code != http.StatusOK || len(bodies) != 1 || rec.Body.String() != want {
+		t.Fatalf("code=%d upstream calls=%d body=%q, want %q after one call", rec.Code, len(bodies), rec.Body.String(), want)
+	}
+}
+
+// firstSSEEvent stops at the end of the first real event, past any comment frames before it.
+func TestFirstSSEEventSkipsCommentFrames(t *testing.T) {
+	ev := "event: error\ndata: {}\n\n"
+	src := ": ping\n\n: keep-alive\r\n\r\n" + ev
+	got := firstSSEEvent(iotest.OneByteReader(strings.NewReader(src+"tail")), 64<<10)
+	if string(got) != src {
+		t.Errorf("firstSSEEvent read %q, want %q", got, src)
+	}
+	if got := firstSSEEvent(strings.NewReader(": ping\n\n"), 64<<10); string(got) != ": ping\n\n" {
+		t.Errorf("a stream of comments only read %q", got)
+	}
+}
+
 const codexRefusalEvent = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"invalid_encrypted_content\",\"message\":\"The encrypted content for item rs_1 could not be verified.\"}}\n\n"
 
 // The marker alone does not earn the retry: with no encrypted reasoning to drop the same body would
@@ -594,5 +673,118 @@ func TestCodexSSEFirstEventOverCapNotRetried(t *testing.T) {
 	})
 	if rec.Code != http.StatusOK || len(bodies) != 1 || rec.Body.String() != stream {
 		t.Fatalf("code=%d upstream calls=%d body length=%d (want %d), want the upstream stream unchanged after one call", rec.Code, len(bodies), rec.Body.Len(), len(stream))
+	}
+}
+
+// An empty Anthropic-Beta line joins as an empty entry; it must not reach Anthropic as a leading,
+// trailing or doubled comma.
+func TestWithBetasSkipsEmptyEntries(t *testing.T) {
+	need := []string{"oauth-2025-04-20"}
+	cases := map[string]string{
+		"":                   "oauth-2025-04-20",
+		",":                  "oauth-2025-04-20",
+		",a":                 "a,oauth-2025-04-20",
+		"a,":                 "a,oauth-2025-04-20",
+		"a,,b":               "a,b,oauth-2025-04-20",
+		" , a , b":           "a,b,oauth-2025-04-20",
+		"a,oauth-2025-04-20": "a,oauth-2025-04-20",
+	}
+	for in, want := range cases {
+		if got := withBetas(in, need); got != want {
+			t.Errorf("withBetas(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A chat upstream's context overflow reaches a Messages caller as "prompt is too long" and a
+// Responses caller as context_length_exceeded, so each client compacts; a chat caller gets the body.
+func TestChatUpstreamContextOverflowPerClient(t *testing.T) {
+	const overflow = `{"error":{"message":"This model's maximum context length is 131,072 tokens. However, you requested 140,000 tokens.","type":"invalid_request_error","code":null}}`
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, overflow)
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("groq", "a", "ka")
+	h := New(s, map[string]string{"groq": up.URL})
+	send := func(path, body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, loopbackRequest("POST", path, strings.NewReader(body)))
+		return rec
+	}
+	rec := send("/v1/messages", `{"model":"groq/llama","max_tokens":10,"messages":[{"role":"user","content":"go"}]}`)
+	var m struct {
+		Error struct{ Type, Message string }
+	}
+	json.Unmarshal(rec.Body.Bytes(), &m)
+	if rec.Code != http.StatusBadRequest || m.Error.Type != "invalid_request_error" ||
+		!strings.HasPrefix(m.Error.Message, "prompt is too long: 140000 tokens > 131072 maximum") {
+		t.Errorf("messages caller: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = send("/v1/responses", `{"model":"groq/llama","input":"go"}`)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"code":"context_length_exceeded"`) {
+		t.Errorf("responses caller: code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = send("/v1/chat/completions", `{"model":"groq/llama","messages":[{"role":"user","content":"go"}]}`)
+	if rec.Code != http.StatusBadRequest || rec.Body.String() != overflow {
+		t.Errorf("chat caller: code=%d body=%s, want the upstream body", rec.Code, rec.Body.String())
+	}
+}
+
+// Only a provider whose def opts in (zencore, which serves DeepSeek and Kimi in thinking mode) gets the
+// caller's thinking back as reasoning_content on the tool-call turn; Copilot and plain OpenAI-compatible
+// upstreams get the request without the field.
+func TestReasoningReplayFollowsProviderDef(t *testing.T) {
+	const turn = `{"model":"%s","max_tokens":100,"messages":[
+		{"role":"user","content":"go"},
+		{"role":"assistant","content":[{"type":"thinking","thinking":"I should read it.","signature":"s"},{"type":"tool_use","id":"t1","name":"Read","input":{}}]},
+		{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"a"}]}],
+		"tools":[{"name":"Read","input_schema":{"type":"object"}}]}`
+	cases := []struct {
+		provider, model string
+		def             *provider.Def
+		want            bool
+	}{
+		{"zencore", "zencore/deepseek-v4", &provider.Def{ID: "zencore", Kind: provider.KindAPIKey, API: "openai", ReplayReasoning: true}, true},
+		{"infron", "infron/gpt-5", &provider.Def{ID: "infron", Kind: provider.KindAPIKey, API: "openai"}, false},
+		{"groq", "groq/llama", nil, false},
+	}
+	for _, c := range cases {
+		t.Run(c.provider, func(t *testing.T) {
+			var got string
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				b, _ := io.ReadAll(r.Body)
+				if strings.HasSuffix(r.URL.Path, "/chat/completions") {
+					got = string(b)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, `{"id":"1","model":"m","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]}`)
+			}))
+			defer up.Close()
+			s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+			defer s.Close()
+			if c.def != nil {
+				d := *c.def
+				d.BaseURL = up.URL
+				if err := s.PutProviderDef(d); err != nil {
+					t.Fatal(err)
+				}
+				defer provider.SetDeclared(nil)
+			}
+			s.CreateConnection(c.provider, "a", "k")
+			h := New(s, map[string]string{c.provider: up.URL})
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, loopbackRequest("POST", "/v1/messages", strings.NewReader(fmt.Sprintf(turn, c.model))))
+			if rec.Code != http.StatusOK || got == "" {
+				t.Fatalf("code=%d body=%s upstream=%s", rec.Code, rec.Body.String(), got)
+			}
+			if has := strings.Contains(got, `"reasoning_content":"I should read it."`); has != c.want {
+				t.Errorf("reasoning_content sent = %v, want %v: %s", has, c.want, got)
+			}
+		})
 	}
 }

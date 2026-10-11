@@ -565,7 +565,7 @@ const VI={
 "The one the provider's app registered. The browser ends there; the person pastes that address back.":'Địa chỉ mà app của provider đã đăng ký. Trình duyệt sẽ dừng ở đó; người dùng dán địa chỉ ấy lại.',
 'Device code URL':'Device code URL','Verification page':'Trang xác nhận','Only when the device answer names none.':'Chỉ cần khi provider không trả trang xác nhận.',
 'Token URL':'Token URL','Client ID':'Client ID','Client secret':'Client secret','Scope':'Scope','Extra authorize parameters':'Tham số authorize thêm',
-'One per line, name=value.':'Mỗi dòng một tham số, tên=giá trị.','No PKCE (the provider refuses it)':'Không dùng PKCE (provider không nhận)',
+'One per line, name=value.':'Mỗi dòng một tham số, tên=giá trị.','No PKCE (the provider refuses it)':'Không dùng PKCE (provider không nhận)','Send thinking back as reasoning_content on tool calls (DeepSeek, Kimi thinking mode)':'Gửi lại thinking dưới dạng reasoning_content ở lượt gọi tool (DeepSeek, Kimi chế độ thinking)',
 'Token requests as JSON (not a form)':'Gửi token request dạng JSON (không phải form)','Color':'Màu','Icon URL':'URL icon',
 'Paste a definition, or copy this one to declare the provider elsewhere.':'Dán một định nghĩa, hoặc sao chép định nghĩa này để khai báo ở nơi khác.',
 'JSON: {0}':'JSON: {0}','Form':'Form','Edit provider · {0}':'Sửa provider · {0}','Definition':'Định nghĩa','Copy the definition as JSON':'Sao chép định nghĩa dạng JSON',
@@ -1762,7 +1762,7 @@ async function declareProvider(id){
   const row=(label,node,hint,key)=>el('label',{class:'f','data-row':key||''},label,node,hint?el('span',{class:'faint small',text:tr(hint)}):null);
   const kind=el('select',{},DECL_KINDS.map(([k,n])=>el('option',{value:k,text:tr(n)})));
   const apiSel=el('select',{},[['openai','OpenAI Chat Completions'],['anthropic','Anthropic Messages'],['responses','OpenAI Responses'],['typesafe','TypeSafe System One']].map(([k,n])=>el('option',{value:k,text:n})));
-  const noPkce=el('input',{type:'checkbox',style:'width:auto;min-height:0'}),jsonTok=el('input',{type:'checkbox',style:'width:auto;min-height:0'});
+  const noPkce=el('input',{type:'checkbox',style:'width:auto;min-height:0'}),jsonTok=el('input',{type:'checkbox',style:'width:auto;min-height:0'}),replay=el('input',{type:'checkbox',style:'width:auto;min-height:0'});
   const form=el('div',{style:'display:grid;gap:.85rem'},
     el('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:.75rem;align-items:start'},
       row('Kind',kind),row('API standard',apiSel)),
@@ -1776,6 +1776,7 @@ async function declareProvider(id){
     row('Extra headers',area('headers',{placeholder:'anthropic-beta: …\nX-Title: intact'}),'One per line, Name: value.'),
     row('Model list URL',inp('modelsUrl',{placeholder:'<base>/models'}),'Empty: <base>/models. "none": the provider has no list; the models below are the list.'),
     row('Models',area('models',{placeholder:'model-a\nmodel-b'}),'One per line. Used when the list cannot be read, or as the list with "none".'),
+    el('label',{style:'display:flex;gap:.5rem;align-items:center'},replay,tr('Send thinking back as reasoning_content on tool calls (DeepSeek, Kimi thinking mode)')),
     el('div',{'data-oauth':'1',style:'display:grid;gap:.85rem;padding:.85rem;border:1px dashed var(--line);border-radius:10px'},
       el('b',{style:'font-size:.85rem'},'Sign-in'),
       row('Authorize URL',inp('authorizeUrl',{placeholder:'https://auth.example.com/oauth/authorize'}),null,'code'),
@@ -1795,7 +1796,7 @@ async function declareProvider(id){
   const fill=d=>{
     kind.value=d.kind||'apikey';apiSel.value=d.api||'openai';
     for(const k of ['id','name','baseUrl','authHeader','authPrefix','modelsUrl','icon'])f[k].value=d[k]||'';
-    f.color.value=d.color||'#52525b';f.headers.value=kvText(d.headers);f.models.value=(d.models||[]).join('\n');
+    f.color.value=d.color||'#52525b';f.headers.value=kvText(d.headers);f.models.value=(d.models||[]).join('\n');replay.checked=!!d.replayReasoning;
     const o=d.oauth||{};for(const k of ['authorizeUrl','redirectUri','deviceCodeUrl','verifyUrl','tokenUrl','clientId','clientSecret','scope'])f[k].value=o[k]||'';
     f.extra.value=Object.entries(o.extra||{}).map(([k,v])=>k+'='+v).join('\n');noPkce.checked=!!o.noPkce;jsonTok.checked=!!o.jsonToken;
     f.id.readOnly=!!id;show();
@@ -1809,6 +1810,7 @@ async function declareProvider(id){
       deviceCodeUrl:f.deviceCodeUrl.value.trim(),verifyUrl:f.verifyUrl.value.trim(),tokenUrl:f.tokenUrl.value.trim(),
       clientId:f.clientId.value.trim(),clientSecret:f.clientSecret.value,scope:f.scope.value.trim(),
       extra:kvParse(f.extra.value,'='),noPkce:noPkce.checked,jsonToken:jsonTok.checked};
+    if(replay.checked)d.replayReasoning=true;
     for(const k of Object.keys(d))if(d[k]===''||(typeof d[k]==='object'&&!Array.isArray(d[k])&&!Object.keys(d[k]).length)||(Array.isArray(d[k])&&!d[k].length))delete d[k];
     if(d.oauth){for(const k of Object.keys(d.oauth))if(d.oauth[k]===''||d.oauth[k]===false||(typeof d.oauth[k]==='object'&&!Object.keys(d.oauth[k]).length))delete d.oauth[k]}
     return d;

@@ -43,6 +43,9 @@ type Def struct {
 	// Models stands in when the list cannot be read.
 	Models []string `json:"models,omitempty"`
 	OAuth  *OAuth   `json:"oauth,omitempty"`
+	// ReplayReasoning sends a caller's thinking back as reasoning_content on a tool-call turn, which
+	// thinking-mode chat models (DeepSeek, Kimi) require; a strict OpenAI server can refuse the field.
+	ReplayReasoning bool `json:"replayReasoning,omitempty"`
 	// Builtin marks a def as fixed (not stored, not editable).
 	Builtin bool `json:"builtin,omitempty"`
 }
@@ -169,7 +172,7 @@ func (d *Def) Normalize() error {
 // Provider is how intact calls a declared provider.
 func (d Def) Provider() Provider {
 	p := Provider{ID: d.ID, BaseURL: d.BaseURL, AuthHeader: d.AuthHeader, AuthPrefix: d.AuthPrefix,
-		Models: d.Models, Defaults: map[string]string{}}
+		Models: d.Models, Defaults: map[string]string{}, ReplayReasoning: d.ReplayReasoning}
 	if d.API != "openai" {
 		p.API = d.API
 	}

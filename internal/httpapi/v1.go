@@ -1136,7 +1136,7 @@ func withoutEncryptedReasoning(body []byte) ([]byte, bool) {
 }
 
 // firstSSEEvent reads up to the end of a stream's first event, max bytes at most, past comment frames
-// (": ping"); past sseCommentWait, checked between reads, it stops skipping them but finishes an event
+// (": ping"); past sseCommentWait, checked between reads, it stops skipping them but finishes a frame
 // it has begun. What it returns is every byte read, which may run past that event, for the caller.
 func firstSSEEvent(r io.Reader, max int) []byte {
 	head := make([]byte, 0, 4096)
@@ -1155,8 +1155,9 @@ func firstSSEEvent(r io.Reader, max int) []byte {
 		if scan = len(head) - len("\r\n\r\n"); scan < from {
 			scan = from
 		}
-		// Past the bound only comment skipping stops; an event already begun is read to its end.
-		if from > 0 && isCommentFrame(head[from:]) && time.Now().After(deadline) {
+		// Past the bound it stops only between frames: a frame is a comment only once its blank line is
+		// read, so one begun is read to its end and an event behind a comment line is still seen.
+		if from > 0 && from == len(head) && time.Now().After(deadline) {
 			break
 		}
 		n, err := r.Read(buf[:min(len(buf), max-len(head))])

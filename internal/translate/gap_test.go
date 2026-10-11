@@ -162,6 +162,9 @@ func TestResponsesIncompleteZeroUsageIsError(t *testing.T) {
 			`{"type":"response.output_item.added","item":{"type":"reasoning","id":"rs_1","summary":[]}}`) +
 			ev("response.output_item.done", `{"type":"response.output_item.done","item":{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"gAAA"}}`) +
 			incomplete(`[]`, "max_output_tokens", ""), false},
+		{"item added only then max_output_tokens", ev("response.output_item.added",
+			`{"type":"response.output_item.added","item":{"type":"message","id":"msg_1","role":"assistant","content":[]}}`) +
+			incomplete(`[]`, "max_output_tokens", ""), false},
 		{"hosted tool item then max_output_tokens", ev("response.output_item.done",
 			`{"type":"response.output_item.done","item":{"type":"web_search_call","id":"ws_1","status":"completed"}}`) +
 			incomplete(`[]`, "max_output_tokens", ""), false},
@@ -422,6 +425,15 @@ func TestGeminiForcedToolUsesDeclaredName(t *testing.T) {
 		wg.Wait()
 		if n := strings.Count(logs.String(), "\n"); n != 1 {
 			t.Errorf("64 concurrent misses logged %d lines, want 1", n)
+		}
+	})
+	t.Run("an empty name logs nothing", func(t *testing.T) {
+		var logs strings.Builder
+		log.SetOutput(&logs)
+		defer log.SetOutput(os.Stderr)
+		forcedMissLast.Store(0)
+		if _, allowed := forced(t, []string{a}, "", nil); len(allowed) != 0 || logs.Len() != 0 {
+			t.Errorf("an empty forced name: allowedFunctionNames %v, log %q; want neither", allowed, logs.String())
 		}
 	})
 	t.Run("the logged name is escaped", func(t *testing.T) {

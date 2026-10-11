@@ -459,3 +459,106 @@ func TestReasoningReplayedOnToolCallTurn(t *testing.T) {
 		})
 	}
 }
+
+// A user turn ends the reasoning that came before it, and two reasoning items before parallel calls of
+// one turn both reach that turn.
+func TestResponsesReasoningReplayTurnBoundaries(t *testing.T) {
+	user := func(s string) string {
+		return `{"type":"message","role":"user","content":[{"type":"input_text","text":"` + s + `"}]}`
+	}
+	reasoning := func(s string) string {
+		return `{"type":"reasoning","summary":[{"type":"summary_text","text":"` + s + `"}]}`
+	}
+	call := func(id string) string {
+		return `{"type":"function_call","call_id":"` + id + `","name":"Read","arguments":"{}"}`
+	}
+	output := func(id string) string { return `{"type":"function_call_output","call_id":"` + id + `","output":"ok"}` }
+	callTurns := func(t *testing.T, items ...string) []obj {
+		t.Helper()
+		out, err := ResponsesToOpenAIFor([]byte(`{"model":"m","input":[`+strings.Join(items, ",")+`]}`), nil, HubOptions{ReplayReasoning: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var turns []obj
+		for _, raw := range list(mustJSON(t, out)["messages"]) {
+			if m := asObj(raw); str(m["role"]) == "assistant" && m["tool_calls"] != nil {
+				turns = append(turns, m)
+			}
+		}
+		return turns
+	}
+	t.Run("user turn resets", func(t *testing.T) {
+		turns := callTurns(t, user("go"), reasoning("Old"),
+			`{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}`,
+			user("next"), reasoning("New"), call("c2"), output("c2"))
+		if len(turns) != 1 || str(asObj(list(turns[0]["tool_calls"])[0])["id"]) != "c2" || turns[0]["reasoning_content"] != "New" {
+			t.Errorf("c2's turn = %v, want reasoning_content \"New\"", turns)
+		}
+	})
+	t.Run("each turn its own reasoning", func(t *testing.T) {
+		turns := callTurns(t, user("go"), reasoning("A"), call("c1"), output("c1"), reasoning("B"), call("c2"), output("c2"))
+		if len(turns) != 2 || turns[0]["reasoning_content"] != "A" || turns[1]["reasoning_content"] != "B" {
+			t.Errorf("turns = %v, want \"A\" then \"B\"", turns)
+		}
+	})
+	t.Run("tool output resets", func(t *testing.T) {
+		turns := callTurns(t, user("go"), reasoning("A"), call("c1"), reasoning("X"), output("c1"), reasoning("B"), call("c2"), output("c2"))
+		if len(turns) != 2 || turns[1]["reasoning_content"] != "B" {
+			t.Errorf("turns = %v, want c2's turn to carry only \"B\"", turns)
+		}
+	})
+	t.Run("parallel calls merge", func(t *testing.T) {
+		turns := callTurns(t, user("go"), reasoning("A"), call("c1"), reasoning("B"), call("c2"), output("c1"), output("c2"))
+		if len(turns) != 1 || len(list(turns[0]["tool_calls"])) != 2 || turns[0]["reasoning_content"] != "A\n\nB" {
+			t.Errorf("turns = %v, want one turn with 2 calls and reasoning_content \"A\\n\\nB\"", turns)
+		}
+	})
+}
+
+// Only response.incomplete can be a refusal. A completed answer with no output and no output tokens
+// still closes as an answer.
+func TestResponsesTerminalEmptyOutputIsNotARefusal(t *testing.T) {
+	for _, typ := range []string{"response.completed", "response.done"} {
+		for _, usage := range []string{"", `,"usage":{"output_tokens":0}`} {
+			t.Run(typ+usage, func(t *testing.T) {
+				got := responsesToChat("event: " + typ + "\ndata: {\"type\":\"" + typ + "\",\"response\":{\"id\":\"resp_1\",\"output\":[]" + usage + "}}\n\n")
+				if strings.Contains(got, `"error"`) || !strings.Contains(got, `"finish_reason":`) || !strings.Contains(got, "data: [DONE]") {
+					t.Errorf("want a finish and [DONE], no error:\n%s", got)
+				}
+			})
+		}
+	}
+}
+
+// Several thinking blocks of one tool-call turn reach it joined; thinking on a turn without tool calls
+// is not replayed.
+func TestAnthropicReasoningReplayJoinsBlocks(t *testing.T) {
+	body := []byte(`{"model":"m","max_tokens":100,"messages":[
+		{"role":"user","content":"go"},
+		{"role":"assistant","content":[{"type":"thinking","thinking":"plain answer","signature":"s"},{"type":"text","text":"hi"}]},
+		{"role":"user","content":"read it"},
+		{"role":"assistant","content":[{"type":"thinking","thinking":"first","signature":"s"},{"type":"tool_use","id":"t1","name":"Read","input":{}},
+			{"type":"thinking","thinking":"second","signature":"s"},{"type":"tool_use","id":"t2","name":"Read","input":{}}]},
+		{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"a"},{"type":"tool_result","tool_use_id":"t2","content":"b"}]}],
+		"tools":[{"name":"Read","input_schema":{"type":"object"}}]}`)
+	out, err := AnthropicToOpenAIFor(body, nil, HubOptions{ReplayReasoning: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var withCalls, without []any
+	for _, raw := range list(mustJSON(t, out)["messages"]) {
+		if m := asObj(raw); str(m["role"]) == "assistant" {
+			if m["tool_calls"] != nil {
+				withCalls = append(withCalls, m["reasoning_content"])
+			} else {
+				without = append(without, m["reasoning_content"])
+			}
+		}
+	}
+	if len(withCalls) != 1 || withCalls[0] != "first\n\nsecond" {
+		t.Errorf("tool-call turn reasoning_content = %v, want \"first\\n\\nsecond\": %s", withCalls, out)
+	}
+	if len(without) != 1 || without[0] != nil {
+		t.Errorf("the turn without tool calls carries reasoning_content %v: %s", without, out)
+	}
+}

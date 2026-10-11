@@ -785,6 +785,20 @@ func TestReasoningReplayFollowsProviderDef(t *testing.T) {
 			if has := strings.Contains(got, `"reasoning_content":"I should read it."`); has != c.want {
 				t.Errorf("reasoning_content sent = %v, want %v: %s", has, c.want, got)
 			}
+			got = ""
+			rec = httptest.NewRecorder()
+			h.ServeHTTP(rec, loopbackRequest("POST", "/v1/responses", strings.NewReader(`{"model":"`+c.model+`","input":[
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"go"}]},
+				{"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"I should read it."}]},
+				{"type":"function_call","call_id":"c1","name":"Read","arguments":"{}"},
+				{"type":"function_call_output","call_id":"c1","output":"a"}],
+				"tools":[{"type":"function","name":"Read","parameters":{"type":"object"}}]}`)))
+			if rec.Code != http.StatusOK || got == "" {
+				t.Fatalf("responses: code=%d body=%s upstream=%s", rec.Code, rec.Body.String(), got)
+			}
+			if has := strings.Contains(got, `"reasoning_content":"I should read it."`); has != c.want {
+				t.Errorf("responses: reasoning_content sent = %v, want %v: %s", has, c.want, got)
+			}
 		})
 	}
 }

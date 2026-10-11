@@ -48,6 +48,10 @@ const (
 // started it, so it carries its own bound.
 var catalogFetchTimeout = upstream.NewLimit(2 * time.Minute)
 
+// sseCommentWait bounds how long firstSSEEvent holds comment frames back from the caller while it
+// waits for the first event.
+var sseCommentWait = upstream.NewLimit(10 * time.Second)
+
 type catalogEntry struct {
 	ids []string
 	ok  bool
@@ -1125,12 +1129,13 @@ func withoutEncryptedReasoning(body []byte) ([]byte, bool) {
 }
 
 // firstSSEEvent reads from a stream up to the end of its first event, max bytes at most; comment
-// frames before it (": ping") do not count. What it returns may run past that event; it is every
-// byte read, for the caller to relay.
+// frames before it (": ping") do not count, for sseCommentWait at most. What it returns may run past
+// that event; it is every byte read, for the caller to relay.
 func firstSSEEvent(r io.Reader, max int) []byte {
 	head := make([]byte, 0, 4096)
 	buf := make([]byte, 4096)
 	from, scan := 0, 0 // start of the frame looked at; bytes before scan hold no delimiter
+	deadline := time.Now().Add(sseCommentWait.Get())
 	for len(head) < max {
 		if loc := frameEnd.FindIndex(head[scan:]); loc != nil {
 			if !isCommentFrame(head[from : scan+loc[0]]) {
@@ -1142,6 +1147,9 @@ func firstSSEEvent(r io.Reader, max int) []byte {
 		// A delimiter split across reads starts at most its own length before the end.
 		if scan = len(head) - len("\r\n\r\n"); scan < from {
 			scan = from
+		}
+		if from > 0 && time.Now().After(deadline) {
+			break
 		}
 		n, err := r.Read(buf[:min(len(buf), max-len(head))])
 		head = append(head, buf[:n]...)

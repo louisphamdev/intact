@@ -3,6 +3,7 @@ package translate
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -188,9 +189,12 @@ func OpenAIToGemini(body []byte, sigs Signatures, vocab *ToolNames) ([]byte, err
 			case obj:
 				// The object form names one tool. Without allowedFunctionNames the
 				// model stays free to answer in text.
-				if name, ok := declared[str(asObj(tc["function"])["name"])]; ok {
+				want := str(asObj(tc["function"])["name"])
+				if name, ok := declared[want]; ok {
 					fc["mode"] = "ANY"
 					fc["allowedFunctionNames"] = []any{name}
+				} else if want != "" {
+					log.Printf("gemini: forced tool %q has no declaration, so the request goes out unforced", want)
 				}
 			}
 			if len(fc) > 0 {

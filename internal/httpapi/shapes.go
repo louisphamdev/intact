@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -87,6 +88,10 @@ func translatable(shape string) bool {
 	return false
 }
 
+// replayMissLogged holds the provider ids whose lookup miss is already logged, so a custom-URL
+// connection with no def does not log on every request.
+var replayMissLogged sync.Map
+
 // toProvider converts a caller's request to the provider's shape. providerID names the account the
 // request is going to, which decides whether the tool names are translated into that agent's
 // vocabulary; the translation is returned so the answer comes back in the caller's own names.
@@ -95,8 +100,12 @@ func toProvider(body []byte, client, want, providerID string) ([]byte, *translat
 	var names *translate.ToolNames
 	var err error
 	var opt translate.HubOptions
-	if p, ok := provider.Lookup(providerID); ok && want == translate.OpenAI {
-		opt.ReplayReasoning = p.ReplayReasoning
+	if want == translate.OpenAI && (client == translate.Anthropic || client == translate.Responses) {
+		if p, ok := provider.Lookup(providerID); ok {
+			opt.ReplayReasoning = p.ReplayReasoning
+		} else if _, seen := replayMissLogged.LoadOrStore(providerID, true); !seen {
+			log.Printf("provider %s: not found, so its replayReasoning setting is not applied", providerID)
+		}
 	}
 	switch client {
 	case translate.Anthropic:

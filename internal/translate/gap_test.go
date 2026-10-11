@@ -2,6 +2,8 @@ package translate
 
 import (
 	"encoding/json"
+	"log"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -154,6 +156,16 @@ func TestResponsesIncompleteZeroUsageIsError(t *testing.T) {
 		{"tool call then max_output_tokens", ev("response.output_item.added",
 			`{"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"c1","name":"Read"}}`) +
 			incomplete(`[]`, "max_output_tokens", ""), false},
+		{"encrypted reasoning item then max_output_tokens", ev("response.output_item.added",
+			`{"type":"response.output_item.added","item":{"type":"reasoning","id":"rs_1","summary":[]}}`) +
+			ev("response.output_item.done", `{"type":"response.output_item.done","item":{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"gAAA"}}`) +
+			incomplete(`[]`, "max_output_tokens", ""), false},
+		{"hosted tool item then max_output_tokens", ev("response.output_item.done",
+			`{"type":"response.output_item.done","item":{"type":"web_search_call","id":"ws_1","status":"completed"}}`) +
+			incomplete(`[]`, "max_output_tokens", ""), false},
+		{"reasoning item then content_filter", ev("response.output_item.added",
+			`{"type":"response.output_item.added","item":{"type":"reasoning","id":"rs_1","summary":[]}}`) +
+			incomplete(`[]`, "content_filter", ""), true},
 		{"output tokens counted", incomplete(`[]`, "max_output_tokens", `,"usage":{"output_tokens":5}`), false},
 		{"output item present", incomplete(`[{"type":"message"}]`, "max_output_tokens", zero), false},
 	}
@@ -326,8 +338,15 @@ func TestGeminiForcedToolUsesDeclaredName(t *testing.T) {
 		}
 	})
 	t.Run("a tool with no declaration forces nothing else", func(t *testing.T) {
+		var logs strings.Builder
+		log.SetOutput(&logs)
+		defer log.SetOutput(os.Stderr)
 		if _, allowed := forced(t, []string{a, a + "_v2"}, a+"_v2", nil); len(allowed) != 0 {
 			t.Errorf("forcing %q forces %v, another tool's declaration", a+"_v2", allowed)
+		}
+		// The caller asked for a tool and gets none forced; that is logged, naming the tool.
+		if n := strings.Count(logs.String(), a+"_v2"); n != 1 {
+			t.Errorf("want one log line naming %q, got %d:\n%s", a+"_v2", n, logs.String())
 		}
 	})
 }
@@ -340,7 +359,12 @@ func TestContextOverflowErrorPerClient(t *testing.T) {
 		name, body, wantAnthropic string
 	}{
 		{"openai wording", `{"error":{"message":"This model's maximum context length is 131072 tokens. However, you requested 140000 tokens (132000 in the messages, 8000 in the completion).","type":"invalid_request_error","code":"invalid_request_error"}}`,
-			"prompt is too long: 140000 tokens > 131072 maximum"},
+			"prompt is too long: 132000 tokens > 131072 maximum"},
+		// The completion budget is the excess here; the prompt size leads, not the total requested.
+		{"deepseek wording", `{"error":{"message":"This model's maximum context length is 65536 tokens. However, you requested 70543 tokens (62351 in the messages, 8192 in the completion). Please reduce the length of the messages or completion.","type":"invalid_request_error","param":null,"code":"invalid_request_error"}}`,
+			"prompt is too long: 62351 tokens > 65536 maximum"},
+		{"messages resulted in", `{"error":{"message":"This model's maximum context length is 128000 tokens. However, your messages resulted in 130512 tokens (including 1024 in the functions). Please reduce the length of the messages or functions.","type":"invalid_request_error","param":"messages","code":"context_length_exceeded"}}`,
+			"prompt is too long: 130512 tokens > 128000 maximum"},
 		{"thousands separators", `{"error":{"message":"This model's maximum context length is 131,072 tokens. However, you requested 140,000 tokens.","type":"invalid_request_error"}}`,
 			"prompt is too long: 140000 tokens > 131072 maximum"},
 		{"code only", `{"error":{"message":"Input is too large.","type":"invalid_request_error","code":"context_length_exceeded"}}`,
@@ -360,8 +384,10 @@ func TestContextOverflowErrorPerClient(t *testing.T) {
 			if str(e["type"]) != "invalid_request_error" || !strings.HasPrefix(str(e["message"]), c.wantAnthropic) {
 				t.Errorf("anthropic client got %v, want invalid_request_error starting %q", e, c.wantAnthropic)
 			}
-			if e := asObj(mustJSON(t, Error(400, []byte(c.body), Responses))["error"]); str(e["code"]) != "context_length_exceeded" {
-				t.Errorf("responses client got %v, want code context_length_exceeded", e)
+			want := str(asObj(mustJSON(t, []byte(c.body))["error"])["message"])
+			if e := asObj(mustJSON(t, Error(400, []byte(c.body), Responses))["error"]); str(e["code"]) != "context_length_exceeded" ||
+				str(e["type"]) != "invalid_request_error" || str(e["message"]) != want {
+				t.Errorf("responses client got %v, want code context_length_exceeded, type invalid_request_error, message %q", e, want)
 			}
 			if got, want := string(Error(400, []byte(c.body), OpenAI)), string(errorBefore(t, c.body)); got != want {
 				t.Errorf("chat client got %s, want %s", got, want)
@@ -376,6 +402,9 @@ func TestContextOverflowErrorPerClient(t *testing.T) {
 		{429, `{"error":{"message":"Rate limit reached: tokens per min (TPM): limit 30000, requested 140000. This model's maximum context length is 131072 tokens.","type":"tokens"}}`},
 		{500, `{"error":{"message":"maximum context length exceeded while batching","type":"server_error"}}`},
 		{400, `{"error":{"message":"max_tokens is too large: 9000000. This model supports at most 64000 completion tokens.","type":"invalid_request_error"}}`},
+		// The caller's own words, echoed back inside quotes.
+		{400, `{"error":{"message":"Invalid value for 'tool_choice': 'what is the maximum context length of this model?' is not a tool.","type":"invalid_request_error","code":"invalid_value"}}`},
+		{400, `{"error":{"message":"Unknown tool \"prompt is too long\" in tool_choice.","type":"invalid_request_error"}}`},
 	}
 	for _, o := range others {
 		if e := asObj(mustJSON(t, Error(o.status, []byte(o.body), Anthropic))["error"]); strings.HasPrefix(str(e["message"]), "prompt is too long") {
@@ -384,6 +413,18 @@ func TestContextOverflowErrorPerClient(t *testing.T) {
 		if e := asObj(mustJSON(t, Error(o.status, []byte(o.body), Responses))["error"]); str(e["code"]) == "context_length_exceeded" {
 			t.Errorf("%d %s became an overflow for a responses client: %v", o.status, o.body, e)
 		}
+	}
+}
+
+// An upstream's own error code is kept for a Responses caller; only a missing one, or one that only
+// repeats the type, becomes context_length_exceeded.
+func TestContextOverflowKeepsUpstreamCode(t *testing.T) {
+	body := `{"error":{"message":"Your input exceeds the context window of this model.","type":"invalid_request_error","code":"string_above_max_length"}}`
+	if e := asObj(mustJSON(t, Error(400, []byte(body), Responses))["error"]); str(e["code"]) != "string_above_max_length" {
+		t.Errorf("responses client got %v, want the upstream code string_above_max_length", e)
+	}
+	if e := asObj(mustJSON(t, Error(400, []byte(body), Anthropic))["error"]); !strings.HasPrefix(str(e["message"]), "prompt is too long") {
+		t.Errorf("anthropic client got %v, want prompt is too long", e)
 	}
 }
 
@@ -560,5 +601,42 @@ func TestAnthropicReasoningReplayJoinsBlocks(t *testing.T) {
 	}
 	if len(without) != 1 || without[0] != nil {
 		t.Errorf("the turn without tool calls carries reasoning_content %v: %s", without, out)
+	}
+}
+
+// Whitespace-only thinking is no reasoning: a tool-call turn does not carry reasoning_content "   ".
+func TestReasoningReplaySkipsBlankThinking(t *testing.T) {
+	anth, err := AnthropicToOpenAIFor([]byte(`{"model":"m","max_tokens":100,"messages":[
+		{"role":"user","content":"go"},
+		{"role":"assistant","content":[{"type":"thinking","thinking":"   ","signature":"s"},{"type":"tool_use","id":"t1","name":"Read","input":{}}]},
+		{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"a"}]},
+		{"role":"assistant","content":[{"type":"thinking","thinking":" \n ","signature":"s"},{"type":"thinking","thinking":"real","signature":"s"},
+			{"type":"tool_use","id":"t2","name":"Read","input":{}}]},
+		{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","content":"b"}]}],
+		"tools":[{"name":"Read","input_schema":{"type":"object"}}]}`), nil, HubOptions{ReplayReasoning: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := ResponsesToOpenAIFor([]byte(`{"model":"m","input":[
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"go"}]},
+		{"type":"reasoning","summary":[{"type":"summary_text","text":"  \n"}]},
+		{"type":"function_call","call_id":"c1","name":"Read","arguments":"{}"},
+		{"type":"function_call_output","call_id":"c1","output":"ok"},
+		{"type":"reasoning","summary":[{"type":"summary_text","text":"\t"},{"type":"summary_text","text":"real"}]},
+		{"type":"function_call","call_id":"c2","name":"Read","arguments":"{}"},
+		{"type":"function_call_output","call_id":"c2","output":"ok"}]}`), nil, HubOptions{ReplayReasoning: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, out := range map[string][]byte{"anthropic": anth, "responses": resp} {
+		var got []any
+		for _, raw := range list(mustJSON(t, out)["messages"]) {
+			if m := asObj(raw); str(m["role"]) == "assistant" && m["tool_calls"] != nil {
+				got = append(got, m["reasoning_content"])
+			}
+		}
+		if len(got) != 2 || got[0] != nil || got[1] != "real" {
+			t.Errorf("%s: tool-call turns carry reasoning_content %q, want none then \"real\": %s", name, got, out)
+		}
 	}
 }

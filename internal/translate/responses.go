@@ -181,7 +181,7 @@ func ResponsesStreamToOpenAI(dst Flusher, src io.Reader) {
 	toolIndex := map[string]int{} // output item id -> tool call index
 	sawArgs := map[string]bool{}
 	started, done := false, false
-	emitted := false // text or reasoning reached the caller; response.created does not count
+	emitted := false // an output item or text was streamed; response.created does not count
 	fail := func(msg string) {
 		b, _ := json.Marshal(obj{"error": obj{"message": msg, "type": "api_error"}})
 		io.WriteString(dst, "data: "+string(b)+"\n\n")
@@ -258,6 +258,7 @@ func ResponsesStreamToOpenAI(dst Flusher, src io.Reader) {
 			emitted = emitted || str(ev["delta"]) != ""
 			emit(obj{"reasoning_content": ev["delta"]}, nil, nil)
 		case "response.output_item.added":
+			emitted = true
 			item := asObj(ev["item"])
 			if t := str(item["type"]); t == "function_call" || t == "custom_tool_call" {
 				start()
@@ -273,6 +274,7 @@ func ResponsesStreamToOpenAI(dst Flusher, src io.Reader) {
 				emit(obj{"tool_calls": []any{obj{"index": i, "function": obj{"arguments": ev["delta"]}}}}, nil, nil)
 			}
 		case "response.output_item.done":
+			emitted = true
 			item := asObj(ev["item"])
 			key := str(item["id"])
 			if i, ok := toolIndex[key]; ok && !sawArgs[key] {

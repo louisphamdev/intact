@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/louisphamdev/intact/internal/provider"
 	"github.com/louisphamdev/intact/internal/store"
+	"github.com/louisphamdev/intact/internal/translate"
 )
 
 // An account that answers 403 for itself (Antigravity "Verify your account to
@@ -636,6 +639,54 @@ func TestFirstSSEEventSkipsCommentFrames(t *testing.T) {
 	}
 }
 
+// Comment frames are held back only for a while: past sseCommentWait what was read goes to the caller.
+func TestFirstSSEEventCommentSkipIsTimeBounded(t *testing.T) {
+	defer sseCommentWait.Set(20 * time.Millisecond)()
+	r := &pacedReader{pieces: []string{": ping\n\n", ": ping\n\n", "event: error\ndata: {}\n\n"}, pause: 60 * time.Millisecond}
+	if got := string(firstSSEEvent(r, 64<<10)); got != ": ping\n\n: ping\n\n" {
+		t.Errorf("firstSSEEvent read %q, want the two pings and no more", got)
+	}
+}
+
+// pacedReader returns one piece per Read and waits before each piece after the first.
+type pacedReader struct {
+	pieces []string
+	pause  time.Duration
+	n      int
+}
+
+func (p *pacedReader) Read(b []byte) (int, error) {
+	if p.n >= len(p.pieces) {
+		return 0, io.EOF
+	}
+	if p.n > 0 {
+		time.Sleep(p.pause)
+	}
+	p.n++
+	return copy(b, p.pieces[p.n-1]), nil
+}
+
+// A frame with a comment line and an event line is an event, so the refusal behind a note is seen.
+func TestFirstSSEEventMixedCommentFrameIsAnEvent(t *testing.T) {
+	frame := ": note\n" + codexRefusalEvent
+	if isCommentFrame([]byte(strings.TrimSuffix(frame, "\n\n"))) {
+		t.Errorf("isCommentFrame took a frame with event lines for a comment")
+	}
+	head := firstSSEEvent(iotest.OneByteReader(strings.NewReader(frame+"tail")), 64<<10)
+	if string(head) != frame || !isEncryptedContentRefusal(head) {
+		t.Errorf("firstSSEEvent read %q; the refusal behind the note was not seen", head)
+	}
+}
+
+// Comments alone past the byte cap stop the read at the cap, and are not a refusal.
+func TestFirstSSEEventCommentsPastCap(t *testing.T) {
+	src := strings.Repeat(": ping\n\n", 100)
+	head := firstSSEEvent(iotest.OneByteReader(strings.NewReader(src)), 64)
+	if string(head) != src[:64] || isEncryptedContentRefusal(head) {
+		t.Errorf("firstSSEEvent read %d bytes %q, want the first 64 and no refusal", len(head), head)
+	}
+}
+
 const codexRefusalEvent = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"code\":\"invalid_encrypted_content\",\"message\":\"The encrypted content for item rs_1 could not be verified.\"}}\n\n"
 
 // The marker alone does not earn the retry: with no encrypted reasoning to drop the same body would
@@ -800,5 +851,29 @@ func TestReasoningReplayFollowsProviderDef(t *testing.T) {
 				t.Errorf("responses: reasoning_content sent = %v, want %v: %s", has, c.want, got)
 			}
 		})
+	}
+}
+
+// A provider that cannot be looked up cannot say whether it wants reasoning replayed; that is logged
+// once, with its id, rather than replay going off in silence.
+func TestReasoningReplayLookupMissIsLogged(t *testing.T) {
+	var logs strings.Builder
+	log.SetOutput(&logs)
+	defer log.SetOutput(os.Stderr)
+	body := []byte(`{"model":"m","max_tokens":100,"messages":[{"role":"user","content":"go"}]}`)
+	for range 2 {
+		if _, _, err := toProvider(body, translate.Anthropic, translate.OpenAI, "gone-provider"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := strings.Count(logs.String(), "gone-provider"); n != 1 {
+		t.Errorf("want one log line naming gone-provider, got %d:\n%s", n, logs.String())
+	}
+	logs.Reset()
+	if _, _, err := toProvider(body, translate.Anthropic, translate.OpenAI, "groq"); err != nil {
+		t.Fatal(err)
+	}
+	if logs.Len() != 0 {
+		t.Errorf("a known provider logged:\n%s", logs.String())
 	}
 }

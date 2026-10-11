@@ -421,7 +421,7 @@ func AnthropicToOpenAIFor(body []byte, names *ToolNames, opt HubOptions) ([]byte
 			blk := asObj(b)
 			switch str(blk["type"]) {
 			case "thinking":
-				if t := str(blk["thinking"]); t != "" {
+				if t := str(blk["thinking"]); strings.TrimSpace(t) != "" {
 					if thinking.Len() > 0 {
 						thinking.WriteString("\n\n")
 					}

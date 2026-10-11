@@ -107,6 +107,9 @@ func (d *Def) Normalize() error {
 	default:
 		return errors.New("api: openai, anthropic, responses or typesafe")
 	}
+	if d.ReplayReasoning && d.API != "openai" {
+		return errors.New("replayReasoning: only for api openai (Chat Completions)")
+	}
 	if !httpURL(strings.ReplaceAll(d.BaseURL, "{accountId}", "x")) {
 		return errors.New("baseUrl: an http(s) URL")
 	}

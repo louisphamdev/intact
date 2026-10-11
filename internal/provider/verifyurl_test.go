@@ -1,6 +1,9 @@
 package provider
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // verifyUrl becomes the href of the device sign-in link, so a javascript: or
 // data: value is executable. Normalize must refuse it.
@@ -24,6 +27,20 @@ func TestNormalizeAcceptsHTTPVerifyURLAndEmpty(t *testing.T) {
 				ClientID: "cid", VerifyURL: ok}}
 		if err := d.Normalize(); err != nil {
 			t.Errorf("verifyUrl %q: %v", ok, err)
+		}
+	}
+}
+
+// replayReasoning adds reasoning_content to a Chat Completions body; on any other api it would do
+// nothing, so a def that sets it there is refused rather than saved as a silent no-op.
+func TestNormalizeReplayReasoningOnlyForOpenAIChat(t *testing.T) {
+	for _, api := range []string{"", "openai", "anthropic", "responses", "typesafe"} {
+		d := Def{ID: "deepco", API: api, BaseURL: "https://api.deepco.dev/v1", ReplayReasoning: true}
+		err := d.Normalize()
+		if ok := api == "" || api == "openai"; ok && err != nil {
+			t.Errorf("api %q: %v", api, err)
+		} else if !ok && (err == nil || !strings.Contains(err.Error(), "replayReasoning")) {
+			t.Errorf("api %q: replayReasoning accepted (err %v)", api, err)
 		}
 	}
 }

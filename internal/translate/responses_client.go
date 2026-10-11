@@ -319,7 +319,7 @@ func ResponsesToOpenAIFor(body []byte, vocab *ToolNames, opt HubOptions) ([]byte
 				msgs = append(msgs, obj{"role": "tool", "tool_call_id": callID(it), "content": responsesOutputText(it["output"])})
 			case typ == "reasoning":
 				for _, p := range list(it["summary"]) {
-					if t := str(asObj(p)["text"]); t != "" {
+					if t := str(asObj(p)["text"]); strings.TrimSpace(t) != "" {
 						if reasoning.Len() > 0 {
 							reasoning.WriteString("\n\n")
 						}

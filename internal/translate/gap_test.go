@@ -6,7 +6,9 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // Chat upstreams refuse a tool name over 64 characters ("function tool names must be 1-64 letters,
@@ -341,22 +343,92 @@ func TestGeminiForcedToolUsesDeclaredName(t *testing.T) {
 		var logs strings.Builder
 		log.SetOutput(&logs)
 		defer log.SetOutput(os.Stderr)
-		forcedMissLogged.Delete(a + "_v2") // a rerun (-count=2) starts unlogged
+		forcedMissLast.Store(0) // each subtest starts outside the rate limit, also on a rerun
 		for range 2 {
 			if _, allowed := forced(t, []string{a, a + "_v2"}, a+"_v2", nil); len(allowed) != 0 {
 				t.Errorf("forcing %q forces %v, another tool's declaration", a+"_v2", allowed)
 			}
 		}
-		// The caller asked for a tool and gets none forced; that is logged once per tool, naming it.
-		if n := strings.Count(logs.String(), a+"_v2"); n != 1 {
-			t.Errorf("want one log line naming %q, got %d:\n%s", a+"_v2", n, logs.String())
+		// The caller asked for a tool and gets none forced; that is logged, the name cut to 64 bytes with a
+		// marker so it never reads as the declared tool a.
+		if got := logs.String(); strings.Count(got, "\n") != 1 || !strings.Contains(got, `…" (67 bytes)`) ||
+			strings.Contains(got, `"`+a+`" has no declaration`) {
+			t.Errorf("want one log line with the cut marker, got:\n%s", got)
+		}
+	})
+	t.Run("a huge name is cut", func(t *testing.T) {
+		var logs strings.Builder
+		log.SetOutput(&logs)
+		defer log.SetOutput(os.Stderr)
+		forcedMissLast.Store(0)
+		forced(t, []string{a}, strings.Repeat("x", 1<<20), nil)
+		if got := logs.String(); strings.Count(got, "\n") != 1 || len(got) >= 1024 || !strings.Contains(got, `…" (1048576 bytes)`) {
+			t.Errorf("want one line under 1 KiB with the cut marker, got %d bytes: %.300q", len(got), got)
+		}
+	})
+	t.Run("a name of 64 bytes is shown whole", func(t *testing.T) {
+		var logs strings.Builder
+		log.SetOutput(&logs)
+		defer log.SetOutput(os.Stderr)
+		for _, n := range []int{64, 65} {
+			forcedMissLast.Store(0)
+			forced(t, []string{a}, strings.Repeat("b", n), nil)
+		}
+		whole, cut := `"`+strings.Repeat("b", 64)+`" has no`, `"`+strings.Repeat("b", 64)+`…" (65 bytes) has no`
+		if got := logs.String(); strings.Count(got, "\n") != 2 || !strings.Contains(got, whole) || !strings.Contains(got, cut) {
+			t.Errorf("want the 64-byte name whole and the 65-byte name cut, got:\n%s", got)
+		}
+	})
+	t.Run("a miss after the interval logs again", func(t *testing.T) {
+		var logs strings.Builder
+		log.SetOutput(&logs)
+		defer log.SetOutput(os.Stderr)
+		forcedMissLast.Store(0)
+		forced(t, []string{a}, "missing", nil)
+		forced(t, []string{a}, "missing", nil)
+		if n := strings.Count(logs.String(), "\n"); n != 1 {
+			t.Errorf("two misses inside the interval logged %d lines", n)
+		}
+		forcedMissLast.Add(-int64(forcedMissEvery))
+		forced(t, []string{a}, "missing", nil)
+		if n := strings.Count(logs.String(), "\n"); n != 2 {
+			t.Errorf("a miss after the interval: %d lines, want 2", n)
+		}
+		// A clock that went backwards does not silence the log until it catches up.
+		forcedMissLast.Store(time.Now().Add(time.Hour).UnixNano())
+		forced(t, []string{a}, "missing", nil)
+		if n := strings.Count(logs.String(), "\n"); n != 3 {
+			t.Errorf("a miss after the clock went back: %d lines, want 3", n)
+		}
+	})
+	t.Run("concurrent misses log once", func(t *testing.T) {
+		var logs strings.Builder
+		log.SetOutput(&logs)
+		defer log.SetOutput(os.Stderr)
+		forcedMissLast.Store(0)
+		body := []byte(`{"model":"m","messages":[{"role":"user","content":"go"}],"tools":[{"type":"function","function":{"name":"` + a +
+			`","parameters":{"type":"object"}}}],"tool_choice":{"type":"function","function":{"name":"missing"}}}`)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for range 64 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				OpenAIToGemini(body, memSigs{}, nil)
+			}()
+		}
+		close(start)
+		wg.Wait()
+		if n := strings.Count(logs.String(), "\n"); n != 1 {
+			t.Errorf("64 concurrent misses logged %d lines, want 1", n)
 		}
 	})
 	t.Run("the logged name is escaped", func(t *testing.T) {
 		var logs strings.Builder
 		log.SetOutput(&logs)
 		defer log.SetOutput(os.Stderr)
-		forcedMissLogged.Delete("x\ny")
+		forcedMissLast.Store(0)
 		forced(t, []string{a}, `x\ny`, nil)
 		if !strings.Contains(logs.String(), `"x\ny"`) || strings.Count(logs.String(), "\n") != 1 {
 			t.Errorf("want the name quoted on one line, got %q", logs.String())
@@ -435,6 +507,27 @@ func TestContextOverflowErrorPerClient(t *testing.T) {
 		if e := asObj(mustJSON(t, Error(o.status, []byte(o.body), Responses))["error"]); str(e["code"]) == "context_length_exceeded" {
 			t.Errorf("%d %s became an overflow for a responses client: %v", o.status, o.body, e)
 		}
+	}
+}
+
+// vLLM and Mistral answer with a top-level message and no "error" object; its message is the one read.
+func TestContextOverflowTopLevelMessage(t *testing.T) {
+	const msg = "This model's maximum context length is 4096 tokens. However, you requested 5000 tokens (4500 in the messages, 500 in the completion)."
+	body := `{"object":"error","message":"` + msg + `","type":"BadRequestError","param":null,"code":400}`
+	if e := asObj(mustJSON(t, Error(400, []byte(body), Anthropic))["error"]); str(e["type"]) != "invalid_request_error" ||
+		!strings.HasPrefix(str(e["message"]), "prompt is too long: 4500 tokens > 4096 maximum") {
+		t.Errorf("anthropic client got %v, want prompt is too long: 4500 tokens > 4096 maximum", e)
+	}
+	if e := asObj(mustJSON(t, Error(400, []byte(body), Responses))["error"]); str(e["code"]) != "context_length_exceeded" ||
+		str(e["type"]) != "invalid_request_error" || str(e["message"]) != msg {
+		t.Errorf("responses client got %v, want code context_length_exceeded, type invalid_request_error, message %q", e, msg)
+	}
+	echo := `{"object":"error","message":"Invalid value for 'tool_choice': 'what is the maximum context length of this model?' is not a tool.","type":"BadRequestError","param":null,"code":400}`
+	if e := asObj(mustJSON(t, Error(400, []byte(echo), Anthropic))["error"]); strings.HasPrefix(str(e["message"]), "prompt is too long") {
+		t.Errorf("a caller echo became an overflow for an anthropic client: %v", e)
+	}
+	if e := asObj(mustJSON(t, Error(400, []byte(echo), Responses))["error"]); str(e["code"]) == "context_length_exceeded" {
+		t.Errorf("a caller echo became an overflow for a responses client: %v", e)
 	}
 }
 

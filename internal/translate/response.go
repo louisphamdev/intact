@@ -93,6 +93,11 @@ func Error(status int, body []byte, to string) []byte {
 			}
 		case string:
 			msg = e
+		case nil:
+			// vLLM and Mistral put the message at the top level.
+			if s := str(m["message"]); s != "" {
+				msg = s
+			}
 		}
 	}
 	overflow := isContextOverflow(status, msg+" "+str(code))

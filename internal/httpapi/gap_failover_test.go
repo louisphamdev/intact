@@ -648,6 +648,18 @@ func TestFirstSSEEventCommentSkipIsTimeBounded(t *testing.T) {
 	}
 }
 
+// The bound stops only the skipping of comments: an event already begun is read to its end, so a
+// refusal split across reads after the bound still earns the retry.
+func TestFirstSSEEventBoundDoesNotCutAnEvent(t *testing.T) {
+	defer sseCommentWait.Set(20 * time.Millisecond)()
+	half := len(codexRefusalEvent) / 2
+	r := &pacedReader{pieces: []string{": ping\n\n", codexRefusalEvent[:half], codexRefusalEvent[half:]}, pause: 60 * time.Millisecond}
+	head := firstSSEEvent(r, 64<<10)
+	if string(head) != ": ping\n\n"+codexRefusalEvent || !isEncryptedContentRefusal(head) {
+		t.Errorf("firstSSEEvent read %q, want the ping and the whole refusal", head)
+	}
+}
+
 // pacedReader returns one piece per Read and waits before each piece after the first.
 type pacedReader struct {
 	pieces []string
@@ -876,5 +888,45 @@ func TestReasoningReplayLookupMissIsLogged(t *testing.T) {
 	}
 	if logs.Len() != 0 {
 		t.Errorf("a known provider logged:\n%s", logs.String())
+	}
+}
+
+// A /v1 body is read whole before it is routed, so it is capped at 64 MiB: one byte over is a 413 with a
+// JSON error and never reaches an upstream; a large body under the cap goes through.
+func TestV1BodyCap(t *testing.T) {
+	calls := 0
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			w.Write([]byte(`{"data":[]}`))
+			return
+		}
+		io.Copy(io.Discard, r.Body)
+		calls++
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer up.Close()
+	s, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := s.CreateConnection("groq", "a", "ka"); err != nil {
+		t.Fatal(err)
+	}
+	h := New(s, map[string]string{"groq": up.URL})
+	pad := func(n int) string {
+		head, tail := `{"model":"groq/llama","stream":false,"pad":"`, `"}`
+		return head + strings.Repeat("x", n-len(head)-len(tail)) + tail
+	}
+	if rec := postV1(h, pad(5<<20)); rec.Code != http.StatusOK || calls != 1 {
+		t.Fatalf("a 5 MiB body: code=%d upstream calls=%d body=%.200s, want 200 after one call", rec.Code, calls, rec.Body.String())
+	}
+	rec := postV1(h, pad(64<<20+1))
+	var e struct {
+		Error struct{ Message string } `json:"error"`
+	}
+	if rec.Code != http.StatusRequestEntityTooLarge || json.Unmarshal(rec.Body.Bytes(), &e) != nil ||
+		!strings.Contains(e.Error.Message, "64 MiB") || calls != 1 {
+		t.Errorf("a body over 64 MiB: code=%d upstream calls=%d body=%.200s, want 413 with a JSON error naming the cap", rec.Code, calls, rec.Body.String())
 	}
 }

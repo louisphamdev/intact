@@ -48,6 +48,9 @@ const (
 // started it, so it carries its own bound.
 var catalogFetchTimeout = upstream.NewLimit(2 * time.Minute)
 
+// maxV1Body caps a /v1 request body, which is read whole before it is routed.
+const maxV1Body = 64 << 20
+
 // sseCommentWait bounds how long firstSSEEvent holds comment frames back from the caller while it
 // waits for the first event.
 var sseCommentWait = upstream.NewLimit(10 * time.Second)
@@ -84,8 +87,12 @@ type callerModelKey struct{}
 
 // v1 forwards a request to the accounts that serve the model named in its body.
 func (a *api) v1(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxV1Body))
 	r.Body.Close()
+	if tooBig := (*http.MaxBytesError)(nil); errors.As(err, &tooBig) {
+		writeError(w, http.StatusRequestEntityTooLarge, "request body is over the "+strconv.Itoa(maxV1Body>>20)+" MiB limit")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "cannot read body")
 		return
@@ -1129,8 +1136,8 @@ func withoutEncryptedReasoning(body []byte) ([]byte, bool) {
 }
 
 // firstSSEEvent reads up to the end of a stream's first event, max bytes at most, past comment frames
-// (": ping"); past sseCommentWait it stops skipping them, checked between reads, so one blocked read is
-// not cut. What it returns is every byte read, which may run past that event, for the caller to relay.
+// (": ping"); past sseCommentWait, checked between reads, it stops skipping them but finishes an event
+// it has begun. What it returns is every byte read, which may run past that event, for the caller.
 func firstSSEEvent(r io.Reader, max int) []byte {
 	head := make([]byte, 0, 4096)
 	buf := make([]byte, 4096)
@@ -1148,7 +1155,8 @@ func firstSSEEvent(r io.Reader, max int) []byte {
 		if scan = len(head) - len("\r\n\r\n"); scan < from {
 			scan = from
 		}
-		if from > 0 && time.Now().After(deadline) {
+		// Past the bound only comment skipping stops; an event already begun is read to its end.
+		if from > 0 && isCommentFrame(head[from:]) && time.Now().After(deadline) {
 			break
 		}
 		n, err := r.Read(buf[:min(len(buf), max-len(head))])

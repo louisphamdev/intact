@@ -7,13 +7,15 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 )
 
-// forcedMissLogged holds the forced tool names whose missing declaration is already logged, so a
-// caller that forces the same tool every turn logs once.
-var forcedMissLogged sync.Map
+// A forced tool with no declaration is logged at most once per forcedMissEvery; forcedMissLast is the
+// UnixNano of the last such line. Nothing is kept per name, so a caller's names cost no memory.
+const forcedMissEvery = time.Minute
+
+var forcedMissLast atomic.Int64
 
 // Gemini is Google's generateContent shape, which Antigravity (Cloud Code
 // Assist, v1internal) carries inside its own envelope.
@@ -199,8 +201,15 @@ func OpenAIToGemini(body []byte, sigs Signatures, vocab *ToolNames) ([]byte, err
 					fc["mode"] = "ANY"
 					fc["allowedFunctionNames"] = []any{name}
 				} else if want != "" {
-					if _, seen := forcedMissLogged.LoadOrStore(want, true); !seen {
-						log.Printf("gemini: forced tool %q has no declaration, so the request goes out unforced", want)
+					// A clock that went backwards (d < 0) logs too, rather than silencing the log until it catches up.
+					now := time.Now().UnixNano()
+					last := forcedMissLast.Load()
+					if d := now - last; (d >= int64(forcedMissEvery) || d < 0) && forcedMissLast.CompareAndSwap(last, now) {
+						shown := strconv.Quote(want)
+						if len(want) > 64 {
+							shown = strconv.Quote(want[:64]+"…") + " (" + strconv.Itoa(len(want)) + " bytes)"
+						}
+						log.Printf("gemini: forced tool %s has no declaration, so the request goes out unforced", shown)
 					}
 				}
 			}

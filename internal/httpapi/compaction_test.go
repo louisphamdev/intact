@@ -299,3 +299,86 @@ func TestResponsesToChatInputAsksAChatProviderInChat(t *testing.T) {
 		t.Fatalf("the instruction is not a user message: %+v", chat.Messages[2])
 	}
 }
+
+// A function_call_output is the answer to a call, not a second call. Read as a call it reached a
+// chat provider as an assistant tool_call with no name and no tool message, which it refuses.
+func TestResponsesToChatInputPairsCallAndOutput(t *testing.T) {
+	body := []byte(`{"model":"m","tool_choice":"auto",
+	 "tools":[{"type":"function","name":"exec","description":"run","parameters":{"type":"object","properties":{"cmd":{"type":"string"}}}}],
+	 "input":[
+	 {"type":"compaction","id":"cmp_1","encrypted_content":"` + translate.EncodeCompaction("Earlier we set up the repo.") + `"},
+	 {"type":"message","role":"user","content":[{"type":"input_text","text":"list files"}]},
+	 {"type":"function_call","call_id":"c1","name":"exec","arguments":"{\"cmd\":\"ls\"}"},
+	 {"type":"function_call_output","call_id":"c1","output":[{"type":"input_text","text":"a.go"}]},
+	 {"type":"compaction_trigger"}]}`)
+	out, ok := responsesToChatInput(summaryRequest(body))
+	if !ok {
+		t.Fatal("not converted")
+	}
+	var chat struct {
+		Messages []struct {
+			Role       string `json:"role"`
+			Content    any    `json:"content"`
+			ToolCallID string `json:"tool_call_id"`
+			ToolCalls  []struct {
+				ID       string `json:"id"`
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+		} `json:"messages"`
+		Tools      []map[string]any `json:"tools"`
+		ToolChoice any              `json:"tool_choice"`
+	}
+	if err := json.Unmarshal(out, &chat); err != nil {
+		t.Fatal(err)
+	}
+	var roles []string
+	for _, m := range chat.Messages {
+		roles = append(roles, m.Role)
+	}
+	if got := strings.Join(roles, ","); got != "user,assistant,tool,user" {
+		t.Fatalf("roles = %s\n%s", got, out)
+	}
+	call := chat.Messages[1]
+	if len(call.ToolCalls) != 1 || call.ToolCalls[0].ID != "c1" || call.ToolCalls[0].Function.Name != "exec" {
+		t.Errorf("call = %+v\n%s", call, out)
+	}
+	if res := chat.Messages[2]; res.ToolCallID != "c1" || res.Content != "a.go" {
+		t.Errorf("tool result = %+v\n%s", res, out)
+	}
+	if c, _ := chat.Messages[0].Content.(string); !strings.Contains(c, "Earlier we set up the repo.") {
+		t.Errorf("the compaction summary was dropped: %s", out)
+	}
+	if len(chat.Tools) != 1 || chat.ToolChoice != "none" {
+		t.Errorf("tools = %v, tool_choice = %v; want the tools kept and tool_choice none\n%s", chat.Tools, chat.ToolChoice, out)
+	}
+}
+
+// The summary turn keeps the tools, because strict upstreams refuse tool history without them,
+// but it must not call one: a call has no summary in it.
+func TestSummaryRequestKeepsToolsWithToolChoiceNone(t *testing.T) {
+	body := []byte(`{"model":"m","tool_choice":"required",
+	 "tools":[{"type":"function","name":"exec","parameters":{"type":"object"}}],
+	 "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"start"}]},
+	 {"type":"compaction_trigger"}]}`)
+	var got map[string]any
+	if err := json.Unmarshal(summaryRequest(body), &got); err != nil {
+		t.Fatal(err)
+	}
+	if tools, _ := got["tools"].([]any); len(tools) != 1 {
+		t.Errorf("tools = %v, want them kept", got["tools"])
+	}
+	if got["tool_choice"] != "none" {
+		t.Errorf("tool_choice = %v, want none", got["tool_choice"])
+	}
+
+	// No tools: no tool_choice is invented, since an upstream refuses one without tools.
+	var plain map[string]any
+	if err := json.Unmarshal(summaryRequest(triggerBody(false)), &plain); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := plain["tool_choice"]; ok {
+		t.Errorf("tool_choice set on a request without tools: %v", plain)
+	}
+}

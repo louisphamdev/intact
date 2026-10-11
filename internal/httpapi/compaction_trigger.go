@@ -106,7 +106,11 @@ func summaryRequest(body []byte) []byte {
 		return nil
 	}
 	req["input"] = input
-	req["tool_choice"] = json.RawMessage(`"none"`)
+	// The tools stay, because strict upstreams refuse tool history without them; a call is no summary.
+	var tools []json.RawMessage
+	if json.Unmarshal(req["tools"], &tools) == nil && len(tools) > 0 {
+		req["tool_choice"] = json.RawMessage(`"none"`)
+	}
 	delete(req, "text")
 	// The model is not set here. The body already carries the one intact rewrote for this
 	// account, without the provider prefix the client sent; putting the caller's own name

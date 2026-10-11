@@ -201,7 +201,12 @@ func (a *api) antigravityEnvelope(ctx context.Context, conn store.Connection, to
 		}
 		delete(gen, "thinkingConfig")
 		if info.SupportsThinking {
-			gen["thinkingConfig"] = map[string]any{"includeThoughts": true, "thinkingBudget": info.ThinkingBudget}
+			tc := map[string]any{"includeThoughts": true}
+			// 0 is a catalog without the field; Gemini refuses a zero budget with thoughts on.
+			if info.ThinkingBudget != 0 {
+				tc["thinkingBudget"] = info.ThinkingBudget
+			}
+			gen["thinkingConfig"] = tc
 		}
 	}
 	if len(gen) > 0 {

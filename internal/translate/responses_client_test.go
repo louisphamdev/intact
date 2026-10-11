@@ -203,3 +203,29 @@ func TestOpenAIResponseToResponses(t *testing.T) {
 		t.Errorf("usage = %s", j(u))
 	}
 }
+
+// intact answers a Codex compaction_trigger with a compaction item whose encrypted_content is the
+// plain summary. The next turn to a chat provider must still carry that summary. OpenAI's own
+// ciphertext cannot be read, so it becomes a note that the history was compacted, never noise.
+func TestResponsesToOpenAIKeepsCompactionSummary(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{"model": "m", "input": []any{
+		map[string]any{"type": "compaction_summary", "encrypted_content": EncodeCompaction("We fixed the parser in a.go.")},
+		map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "go on"}}},
+	}})
+	out, err := ResponsesToOpenAI(body, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"We fixed the parser in a.go.", "go on"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("translation lacks %q: %s", want, out)
+		}
+	}
+
+	cipher := `{"model":"m","input":[
+	 {"type":"compaction_summary","encrypted_content":"gAAAAABoX1y2kQ3w9Zr8cT4nVb7mPq0sLx5dEe6fGh"},
+	 {"type":"message","role":"user","content":"next"}]}`
+	if out, err := ResponsesToOpenAI([]byte(cipher), nil); err == nil {
+		t.Errorf("native compaction state was converted instead of refused: %s", out)
+	}
+}

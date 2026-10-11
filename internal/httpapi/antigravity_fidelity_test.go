@@ -20,7 +20,8 @@ const agModelsFixture = `{"models":{
 "gemini-3.8-flash-high":{"supportsThinking":true,"thinkingBudget":-1,"maxOutputTokens":65536,"model":"MODEL_PLACEHOLDER_M318","modelProvider":"MODEL_PROVIDER_GOOGLE"},
 "gemini-3.8-flash-medium":{"supportsThinking":true,"thinkingBudget":4000,"maxOutputTokens":65536,"model":"MODEL_PLACEHOLDER_M319","modelProvider":"MODEL_PROVIDER_GOOGLE"},
 "gemini-3.8-flash-low":{"supportsThinking":true,"thinkingBudget":1000,"maxOutputTokens":65536,"model":"MODEL_PLACEHOLDER_M320","modelProvider":"MODEL_PROVIDER_GOOGLE"},
-"claude-sonnet-4-6":{"supportsThinking":true,"thinkingBudget":1024,"maxOutputTokens":64000,"model":"MODEL_PLACEHOLDER_M35","modelProvider":"MODEL_PROVIDER_ANTHROPIC"}}}`
+"claude-sonnet-4-6":{"supportsThinking":true,"thinkingBudget":1024,"maxOutputTokens":64000,"model":"MODEL_PLACEHOLDER_M35","modelProvider":"MODEL_PROVIDER_ANTHROPIC"},
+"gemini-3.5-pro":{"supportsThinking":true,"maxOutputTokens":65536,"model":"MODEL_PLACEHOLDER_M40","modelProvider":"MODEL_PROVIDER_GOOGLE"}}}`
 
 // agToolTurn is the tool round trip of the captured agy session: a request, a
 // call, and the call's result.
@@ -240,5 +241,18 @@ func TestAntigravitySideCallsLookLikeTheCLI(t *testing.T) {
 		if v := got.listHeads.Get(h); v != "" {
 			t.Errorf("fetchAvailableModels sent %s: %s; the CLI sends none", h, v)
 		}
+	}
+}
+
+// A catalog entry with no thinkingBudget means the model picks its own. Sent as 0 with
+// includeThoughts, it asks for thoughts with no budget, and a Gemini model refuses that.
+func TestAntigravityEnvelopeOmitsMissingThinkingBudget(t *testing.T) {
+	h, got := agHarness(t)
+	rec := postV1(h, `{"model":"antigravity/gemini-3.5-pro","messages":[{"role":"user","content":"hi"}]}`)
+	if rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if g := mustJSON(got.last(t)["request"].(map[string]any)["generationConfig"]); g != `{"maxOutputTokens":65536,"thinkingConfig":{"includeThoughts":true}}` {
+		t.Errorf("generationConfig = %s", g)
 	}
 }

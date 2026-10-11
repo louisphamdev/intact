@@ -50,7 +50,7 @@ func ExpandGatewayCompactions(body []byte, native bool) ([]byte, error) {
 			Type    string `json:"type"`
 			Content string `json:"encrypted_content"`
 		}
-		if json.Unmarshal(raw, &item) != nil || item.Type != "compaction" {
+		if json.Unmarshal(raw, &item) != nil || (item.Type != "compaction" && item.Type != "compaction_summary") {
 			continue
 		}
 		if native && !strings.HasPrefix(item.Content, CompactionPrefix) {

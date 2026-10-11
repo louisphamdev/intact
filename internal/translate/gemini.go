@@ -444,15 +444,21 @@ func GeminiStreamToOpenAI(dst Flusher, src io.Reader, sigs Signatures, vocab *To
 		io.WriteString(dst, "data: "+string(b)+"\n\n")
 		dst.Flush()
 	}
+	// An error chunk is the last one: no finish or [DONE] may follow it.
+	failed := false
+	fail := func(msg, typ string) {
+		failed = true
+		b, _ := json.Marshal(obj{"error": obj{"message": msg, "type": typ}})
+		io.WriteString(dst, "data: "+string(b)+"\n\n")
+		dst.Flush()
+	}
 	streamErr := sseEvents(src, func(_, data string) bool {
 		ev, err := decode([]byte(data))
 		if err != nil {
 			return true
 		}
 		if e := asObj(ev["error"]); e != nil {
-			b, _ := json.Marshal(obj{"error": obj{"message": str(e["message"]), "type": str(e["status"])}})
-			io.WriteString(dst, "data: "+string(b)+"\n\n")
-			dst.Flush()
+			fail(str(e["message"]), str(e["status"]))
 			return false
 		}
 		r := asObj(ev["response"])
@@ -488,9 +494,8 @@ func GeminiStreamToOpenAI(dst Flusher, src io.Reader, sigs Signatures, vocab *To
 					sigs.Put(cid, sig)
 				}
 				pendingSig = ""
-				args, _ := json.Marshal(fc["args"])
 				emit(obj{"tool_calls": []any{obj{"index": calls, "id": cid, "type": "function",
-					"function": obj{"name": vocab.ToClient(str(fc["name"])), "arguments": string(args)}}}}, nil, nil)
+					"function": obj{"name": vocab.ToClient(str(fc["name"])), "arguments": argsText(fc["args"])}}}}, nil, nil)
 				calls++
 			case part["thought"] == true:
 				if t := str(part["text"]); t != "" {
@@ -512,7 +517,15 @@ func GeminiStreamToOpenAI(dst Flusher, src io.Reader, sigs Signatures, vocab *To
 				}
 			}
 		}
-		if f := str(cand["finishReason"]); f != "" {
+		if str(asObj(r["promptFeedback"])["blockReason"]) != "" {
+			finish = "content_filter"
+		}
+		f := str(cand["finishReason"])
+		if f == "MALFORMED_FUNCTION_CALL" {
+			fail("the model made a function call Gemini could not parse (MALFORMED_FUNCTION_CALL): "+str(cand["finishMessage"]), "api_error")
+			return false
+		}
+		if f != "" {
 			finish = geminiFinish[f]
 			if finish == "" {
 				finish = "stop"
@@ -527,15 +540,19 @@ func GeminiStreamToOpenAI(dst Flusher, src io.Reader, sigs Signatures, vocab *To
 		dst.Flush()
 		return
 	}
+	if failed {
+		return
+	}
+	if finish == "" {
+		// Gemini closes every answer with a finishReason; without one the stream was cut.
+		fail("upstream stream ended without a finish reason", "api_error")
+		return
+	}
 	if !started {
 		emit(obj{"role": "assistant", "content": ""}, nil, nil)
 	}
-	if finish == "" || (finish == "stop" && calls > 0) {
-		if calls > 0 {
-			finish = "tool_calls"
-		} else {
-			finish = "stop"
-		}
+	if finish == "stop" && calls > 0 {
+		finish = "tool_calls"
 	}
 	var extra obj
 	if usage != nil {

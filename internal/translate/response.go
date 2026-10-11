@@ -3,6 +3,7 @@ package translate
 import (
 	"bufio"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -230,11 +231,18 @@ func messageID(id string) string {
 	return "msg_" + id
 }
 
+// toolID is a tool id Anthropic accepts ([a-zA-Z0-9_-]). A rewritten id keeps a hash of the
+// original, so two ids that differ only in a bad character stay two, and every turn maps alike.
 func toolID(id string) string {
 	if id == "" {
 		return newID("toolu_")
 	}
-	return id
+	clean := badToolChar.ReplaceAllString(id, "_")
+	if clean == id {
+		return id
+	}
+	h := sha256.Sum256([]byte(id))
+	return clean + "_" + hex.EncodeToString(h[:4])
 }
 
 // reasoningOf reads the thinking of a delta or message under any of the names

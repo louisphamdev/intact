@@ -3,6 +3,7 @@ package translate
 import (
 	"bytes"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -523,5 +524,104 @@ func TestStructuredOutputCrossesEveryTranslator(t *testing.T) {
 	r, _ = OpenAIToResponses([]byte(jm))
 	if got := j(mustJSON(t, r)["text"]); got != `{"format":{"type":"json_object"}}` {
 		t.Errorf("responses json mode = %s", got)
+	}
+}
+
+// Anthropic accepts tool ids of [a-zA-Z0-9_-] only. A history written by another provider carries
+// ids like "functions.get_weather:0"; the call and its result must still pair after the mapping,
+// two distinct ids must stay distinct, and the same id must map the same way on every turn.
+func TestOpenAIToAnthropicSanitizesForeignToolIDs(t *testing.T) {
+	body := `{"model":"claude","messages":[
+	 {"role":"user","content":"weather?"},
+	 {"role":"assistant","content":null,"tool_calls":[
+	  {"id":"functions.get_weather:0","type":"function","function":{"name":"get_weather","arguments":"{}"}},
+	  {"id":"functions.get_weather.0","type":"function","function":{"name":"get_weather","arguments":"{}"}},
+	  {"id":"toolu_ok-1","type":"function","function":{"name":"get_weather","arguments":"{}"}}]},
+	 {"role":"tool","tool_call_id":"functions.get_weather:0","content":"sunny"},
+	 {"role":"tool","tool_call_id":"functions.get_weather.0","content":"rain"},
+	 {"role":"tool","tool_call_id":"toolu_ok-1","content":"snow"}]}`
+	run := func() (uses, results []string) {
+		out, err := OpenAIToAnthropic([]byte(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range mustJSON(t, out)["messages"].([]any) {
+			for _, b := range m.(map[string]any)["content"].([]any) {
+				blk := b.(map[string]any)
+				switch blk["type"] {
+				case "tool_use":
+					uses = append(uses, blk["id"].(string))
+				case "tool_result":
+					results = append(results, blk["tool_use_id"].(string))
+				}
+			}
+		}
+		return
+	}
+	uses, results := run()
+	valid := regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	if len(uses) != 3 || len(results) != 3 {
+		t.Fatalf("uses = %v, results = %v", uses, results)
+	}
+	for i := range uses {
+		if !valid.MatchString(uses[i]) || uses[i] != results[i] {
+			t.Errorf("pair %d: tool_use %q, tool_result %q", i, uses[i], results[i])
+		}
+	}
+	if uses[0] == uses[1] {
+		t.Errorf("two distinct ids collapsed into %q", uses[0])
+	}
+	if uses[2] != "toolu_ok-1" {
+		t.Errorf("a valid id was rewritten: %q", uses[2])
+	}
+	if again, _ := run(); strings.Join(again, ",") != strings.Join(uses, ",") {
+		t.Errorf("mapping is not deterministic: %v then %v", uses, again)
+	}
+
+	// The answer to a Messages caller carries the same mapping, so the id it sends back is valid.
+	whole := `{"id":"c","model":"m","choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":"functions.get_weather:0","type":"function","function":{"name":"get_weather","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`
+	back, err := OpenAIResponseToAnthropic([]byte(whole), Reply{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id := mustJSON(t, back)["content"].([]any)[0].(map[string]any)["id"]; id != uses[0] {
+		t.Errorf("whole answer id = %v, want %q", id, uses[0])
+	}
+	stream := toAnthropic(t, sse(`{"id":"c","model":"m","choices":[{"delta":{"tool_calls":[{"index":0,"id":"functions.get_weather:0","type":"function","function":{"name":"get_weather","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`, `[DONE]`), Reply{})
+	if !strings.Contains(stream, `"id":"`+uses[0]+`"`) {
+		t.Errorf("streamed answer lacks id %q:\n%s", uses[0], stream)
+	}
+}
+
+// Some clients send tool_use.input as JSON text. Marshalled again it reached the provider as a
+// string of a string; a missing input reached it as "null". Both must be an object.
+func TestAnthropicToOpenAIToolInputIsAnObject(t *testing.T) {
+	body := `{"model":"m","max_tokens":10,"messages":[
+	 {"role":"user","content":"go"},
+	 {"role":"assistant","content":[
+	  {"type":"tool_use","id":"t1","name":"f","input":"{\"a\":1}"},
+	  {"type":"tool_use","id":"t2","name":"f"}]},
+	 {"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"x"},{"type":"tool_result","tool_use_id":"t2","content":"y"}]}]}`
+	out, err := AnthropicToOpenAI([]byte(body), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := mustJSON(t, out)["messages"].([]any)[1].(map[string]any)["tool_calls"].([]any)
+	var got []string
+	for _, c := range calls {
+		got = append(got, c.(map[string]any)["function"].(map[string]any)["arguments"].(string))
+	}
+	if strings.Join(got, " ") != `{"a":1} {}` {
+		t.Errorf("arguments = %q", got)
+	}
+}
+
+// A Gemini functionCall with no args is a call with no arguments, not "null".
+func TestGeminiFunctionCallWithoutArgsIsEmptyObject(t *testing.T) {
+	src := `data: {"response":{"candidates":[{"content":{"parts":[{"functionCall":{"id":"fc1","name":"list"}}]},"finishReason":"STOP"}]}}` + "\n\n"
+	var o buf
+	GeminiStreamToOpenAI(&o, strings.NewReader(src), nil, nil)
+	if s := o.String(); !strings.Contains(s, `"arguments":"{}"`) {
+		t.Errorf("arguments of a call without args:\n%s", s)
 	}
 }

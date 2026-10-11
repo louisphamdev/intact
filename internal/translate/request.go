@@ -84,12 +84,12 @@ func OpenAIToAnthropic(body []byte) ([]byte, error) {
 			for _, tc := range list(m["tool_calls"]) {
 				t := asObj(tc)
 				fn := asObj(t["function"])
-				blocks = append(blocks, obj{"type": "tool_use", "id": t["id"], "name": fn["name"],
+				blocks = append(blocks, obj{"type": "tool_use", "id": toolID(str(t["id"])), "name": fn["name"],
 					"input": parseArgs(str(fn["arguments"]))})
 			}
 			msgs = appendMsg(msgs, "assistant", blocks)
 		case "tool":
-			res := obj{"type": "tool_result", "tool_use_id": m["tool_call_id"]}
+			res := obj{"type": "tool_result", "tool_use_id": toolID(str(m["tool_call_id"]))}
 			if c := oaContentToBlocks(m["content"]); len(c) > 0 {
 				res["content"] = c
 			}
@@ -252,6 +252,22 @@ func parseArgs(s string) any {
 	return v
 }
 
+// argsText writes a tool input as call arguments, which a provider reads as an object: JSON text
+// that holds an object is used as it is, not encoded a second time, and no input is "{}".
+func argsText(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return "{}"
+	case string:
+		var o obj
+		if json.Unmarshal([]byte(x), &o) == nil && o != nil {
+			return x
+		}
+	}
+	b, _ := json.Marshal(v)
+	return string(b)
+}
+
 // Thinking budget thresholds of docs/routing.md, and Anthropic's smallest
 // accepted budget. Both translators use them, so a request that crosses from
 // one shape to the other and back keeps its reasoning level.
@@ -401,9 +417,8 @@ func AnthropicToOpenAI(body []byte, names *ToolNames) ([]byte, error) {
 			case "document":
 				return nil, errors.New("document blocks are not supported by this provider")
 			case "tool_use":
-				args, _ := json.Marshal(blk["input"])
 				calls = append(calls, obj{"id": blk["id"], "type": "function",
-					"function": obj{"name": names.ToProvider(str(blk["name"])), "arguments": string(args)}})
+					"function": obj{"name": names.ToProvider(str(blk["name"])), "arguments": argsText(blk["input"])}})
 			case "tool_result":
 				// A tool result is its own message in OpenAI, and it must follow
 				// the assistant turn that called the tool, before any user text.

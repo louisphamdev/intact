@@ -224,3 +224,212 @@ func TestGapNonBifrostBetaKeepsCredentialBetas(t *testing.T) {
 		t.Errorf("Anthropic-Beta = %q, want the caller's list with the credential's betas added", gotBeta)
 	}
 }
+
+// A caller may send its betas on several Anthropic-Beta lines. Reading only the first line and then
+// setting the header dropped the rest before the credential's betas were added.
+func TestGapBetaLinesMergedBeforeCredentialBetas(t *testing.T) {
+	for _, ua := range []string{"Anthropic/Python 0.70.0", "claude-cli/2.1.0 (external, cli)"} {
+		t.Run(ua, func(t *testing.T) {
+			var lines []string
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				lines = r.Header.Values("Anthropic-Beta")
+				w.Write([]byte(`{}`))
+			}))
+			defer up.Close()
+			s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+			defer s.Close()
+			s.CreateConnection("claude", "test", "oauth-token")
+			h := New(s, map[string]string{"claude": up.URL})
+			req := loopbackRequest("POST", "/v1/messages", strings.NewReader(`{"model":"claude/m","max_tokens":1}`))
+			req.Header.Set("User-Agent", ua)
+			req.Header.Add("Anthropic-Beta", "prompt-caching-2024-07-31")
+			req.Header.Add("Anthropic-Beta", "files-api-2025-04-14")
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			if len(lines) != 1 {
+				t.Fatalf("upstream got %d Anthropic-Beta lines %q, want one", len(lines), lines)
+			}
+			var betas []string
+			count := map[string]int{}
+			for _, b := range strings.Split(lines[0], ",") {
+				b = strings.TrimSpace(b)
+				betas = append(betas, b)
+				count[b]++
+			}
+			if len(betas) < 2 || betas[0] != "prompt-caching-2024-07-31" || betas[1] != "files-api-2025-04-14" {
+				t.Errorf("Anthropic-Beta = %q, want both caller betas first, in order", lines[0])
+			}
+			for _, b := range []string{"claude-code-20250219", "oauth-2025-04-20"} {
+				if count[b] != 1 {
+					t.Errorf("Anthropic-Beta = %q carries %s %d times, want once", lines[0], b, count[b])
+				}
+			}
+		})
+	}
+}
+
+// Responses and Antigravity always stream upstream, so a chat caller that did not ask for a stream
+// still gets nothing from an empty 200; the next account must take the request.
+func TestGapEmpty200FailsOverOnAlwaysStreamingShape(t *testing.T) {
+	calls := 0
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		if r.URL.Path != "/responses" {
+			w.Write([]byte(`{"data":[]}`))
+			return
+		}
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if calls == 1 {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		io.WriteString(w, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"gpt-5.5\"}}\n\n"+
+			"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\n"+
+			"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\n")
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("codex", "a", fakeJWT("acct-1"))
+	s.CreateConnection("codex", "b", fakeJWT("acct-2"))
+	h := New(s, map[string]string{"codex": up.URL})
+	rec := postV1(h, `{"model":"codex/gpt-5.5","messages":[{"role":"user","content":"hi"}]}`)
+	if b := rec.Body.String(); rec.Code != http.StatusOK || !strings.Contains(b, `"object":"chat.completion"`) || !strings.Contains(b, `"content":"OK"`) || calls != 2 {
+		t.Fatalf("code=%d upstream calls=%d body=%s, want the second account's answer after one empty 200", rec.Code, calls, b)
+	}
+}
+
+// Only invalid_encrypted_content earns the retry without encrypted reasoning. Any other 400 is the
+// caller's to read, as the upstream sent it, after one call.
+func TestCodexResponses400WithoutMarkerIsRelayedOnce(t *testing.T) {
+	const refusal = `{"error":{"message":"Invalid value for 'input[1].summary'.","type":"invalid_request_error","param":"input","code":"invalid_value"}}`
+	calls := 0
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		if r.URL.Path != "/responses" {
+			w.Write([]byte(`{"data":[]}`))
+			return
+		}
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, refusal)
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("codex", "cx", fakeJWT("acct-9"))
+	h := New(s, map[string]string{"codex": up.URL})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/responses", strings.NewReader(`{"model":"codex/gpt-5.5","stream":true,"store":false,"input":[
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]},
+		{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"gAAA-foreign"},
+		{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]},
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"again"}]}]}`)))
+	if rec.Code != http.StatusBadRequest || rec.Body.String() != refusal || calls != 1 {
+		t.Fatalf("code=%d upstream calls=%d body=%s, want the upstream 400 unchanged after one call", rec.Code, calls, rec.Body.String())
+	}
+}
+
+// The last account's empty 200 has no account after it, so it is relayed rather than dropped.
+func TestGapEmpty200OnLastAccountIsRelayed(t *testing.T) {
+	calls := 0
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		if r.URL.Path != "/responses" {
+			w.Write([]byte(`{"data":[]}`))
+			return
+		}
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("codex", "a", fakeJWT("acct-1"))
+	s.CreateConnection("codex", "b", fakeJWT("acct-2"))
+	h := New(s, map[string]string{"codex": up.URL})
+	rec := postV1(h, `{"model":"codex/gpt-5.5","messages":[{"role":"user","content":"hi"}]}`)
+	if b := rec.Body.String(); calls != 2 || !strings.Contains(b, "upstream stream ended without response.completed") {
+		t.Fatalf("code=%d upstream calls=%d body=%s, want the last account's empty answer relayed as a cut stream", rec.Code, calls, b)
+	}
+}
+
+// The marker alone does not earn the retry: with no encrypted reasoning to drop (none sent, or
+// encrypted_content null) the same body would go out again, so the 400 is relayed after one call.
+func TestCodexResponses400MarkerWithNothingToStripIsRelayedOnce(t *testing.T) {
+	const refusal = `{"error":{"message":"The encrypted content for item rs_1 could not be verified.","type":"invalid_request_error","param":null,"code":"invalid_encrypted_content"}}`
+	inputs := map[string]string{
+		"no reasoning":        `{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}`,
+		"null encrypted text": `{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":null}`,
+	}
+	for name, item := range inputs {
+		t.Run(name, func(t *testing.T) {
+			calls := 0
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				io.Copy(io.Discard, r.Body)
+				if r.URL.Path != "/responses" {
+					w.Write([]byte(`{"data":[]}`))
+					return
+				}
+				calls++
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				io.WriteString(w, refusal)
+			}))
+			defer up.Close()
+			s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+			defer s.Close()
+			s.CreateConnection("codex", "cx", fakeJWT("acct-9"))
+			h := New(s, map[string]string{"codex": up.URL})
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, loopbackRequest("POST", "/v1/responses", strings.NewReader(`{"model":"codex/gpt-5.5","stream":true,"store":false,"input":[
+				{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]},`+item+`]}`)))
+			if rec.Code != http.StatusBadRequest || rec.Body.String() != refusal || calls != 1 {
+				t.Fatalf("code=%d upstream calls=%d body=%s, want the upstream 400 unchanged after one call", rec.Code, calls, rec.Body.String())
+			}
+		})
+	}
+}
+
+// A retry that cannot reach the upstream leaves the first answer standing: the caller reads the
+// upstream's own 400, not an error intact made up.
+func TestCodexResponsesRetryFailureRelaysFirst400(t *testing.T) {
+	const refusal = `{"error":{"message":"The encrypted content for item rs_1 could not be verified.","type":"invalid_request_error","param":null,"code":"invalid_encrypted_content"}}`
+	calls := 0
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		if r.URL.Path != "/responses" {
+			w.Write([]byte(`{"data":[]}`))
+			return
+		}
+		calls++
+		if calls > 1 {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				conn.Close()
+			}
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, refusal)
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("codex", "cx", fakeJWT("acct-9"))
+	h := New(s, map[string]string{"codex": up.URL})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/responses", strings.NewReader(`{"model":"codex/gpt-5.5","stream":true,"store":false,"input":[
+		{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]},
+		{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"gAAA-foreign"}]}`)))
+	if rec.Code != http.StatusBadRequest || rec.Body.String() != refusal || calls != 2 {
+		t.Fatalf("code=%d upstream calls=%d body=%s, want the first 400 unchanged after a failed retry", rec.Code, calls, rec.Body.String())
+	}
+}

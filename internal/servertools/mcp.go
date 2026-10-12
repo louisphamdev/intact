@@ -35,7 +35,7 @@ const mcpProtocol = "2025-06-18"
 // ConnectMCP opens a session with the server at url. token, when set, is sent as
 // a bearer token.
 func ConnectMCP(ctx context.Context, url, token string) (*MCP, error) {
-	c := &MCP{url: url, token: token, hc: &http.Client{Timeout: 60 * time.Second}}
+	c := &MCP{url: url, token: token, hc: &http.Client{Timeout: 60 * time.Second, Transport: publicTransport()}}
 	res, err := c.rpc(ctx, "initialize", obj{
 		"protocolVersion": mcpProtocol,
 		"capabilities":    obj{},

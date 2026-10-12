@@ -50,13 +50,8 @@ func Fetch(ctx context.Context, raw string, cfg FetchConfig) (*Fetched, error) {
 		return nil, err
 	}
 	hc := &http.Client{
-		Timeout: 25 * time.Second,
-		Transport: &http.Transport{
-			Proxy:               nil,
-			DialContext:         (&net.Dialer{Timeout: 10 * time.Second, Control: dialControl}).DialContext,
-			TLSHandshakeTimeout: 10 * time.Second,
-			DisableKeepAlives:   true,
-		},
+		Timeout:   25 * time.Second,
+		Transport: publicTransport(),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return errors.New("too many redirects")
@@ -162,6 +157,17 @@ func inDomains(host string, domains []string) bool {
 }
 
 var errPrivate = errors.New("address is not public")
+
+// publicTransport connects only to public addresses. Every client whose address
+// comes from a request uses it: the web fetch tool and the MCP connector.
+func publicTransport() *http.Transport {
+	return &http.Transport{
+		Proxy:               nil,
+		DialContext:         (&net.Dialer{Timeout: 10 * time.Second, Control: dialControl}).DialContext,
+		TLSHandshakeTimeout: 10 * time.Second,
+		DisableKeepAlives:   true,
+	}
+}
 
 // dialControl is publicOnly; a test that fetches from a server on this machine
 // swaps it.

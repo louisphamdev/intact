@@ -153,6 +153,14 @@ func TestFetchRefusesThisMachine(t *testing.T) {
 	}
 }
 
+func TestConnectMCPRefusesThisMachine(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("secret")) }))
+	defer srv.Close()
+	if _, err := ConnectMCP(context.Background(), srv.URL, ""); err == nil || !strings.Contains(err.Error(), errPrivate.Error()) {
+		t.Fatalf("a request connected an MCP server on this machine: %v", err)
+	}
+}
+
 func allowLocal(t *testing.T) {
 	old := dialControl
 	dialControl = func(string, string, syscall.RawConn) error { return nil }
@@ -195,6 +203,7 @@ func TestFetch(t *testing.T) {
 
 // mcpServer is a server of the tools part of MCP. sse answers in an event stream.
 func mcpServer(t *testing.T, sse bool, token string) *httptest.Server {
+	allowLocal(t)
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if token != "" && r.Header.Get("Authorization") != "Bearer "+token {
 			http.Error(w, "no", http.StatusUnauthorized)

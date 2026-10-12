@@ -55,6 +55,8 @@ type api struct {
 	auto autoState
 	// arena holds the model leaderboard and its name index.
 	arena arenaState
+	// web is the search service for a client that asks its model to search.
+	web webState
 	// review is the drift review.
 	review reviewState
 	// notes throttles alerts; errReview is the error review's state.

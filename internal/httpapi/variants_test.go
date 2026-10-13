@@ -161,6 +161,7 @@ func TestAntigravityVariantsFoldAndFallBack(t *testing.T) {
 func TestModelInfos(t *testing.T) {
 	cases := map[string]string{
 		"anthropic":   `{"data":[{"id":"c","capabilities":{"thinking":{"supported":true},"effort":{"supported":true,"low":{"supported":true},"max":{"supported":true},"xhigh":{"supported":false}}}}]}`,
+		"adaptive":    `{"data":[{"id":"o","capabilities":{"thinking":{"supported":true,"types":{"enabled":{"supported":false},"adaptive":{"supported":true}}}}},{"id":"s","capabilities":{"thinking":{"supported":true,"types":{"enabled":{"supported":true},"adaptive":{"supported":true}}}}}]}`,
 		"codex":       `{"models":[{"slug":"g","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}],"default_reasoning_level":"low"}]}`,
 		"copilot":     `{"data":[{"id":"a","capabilities":{"supports":{"reasoning_effort":["high","low"]}}},{"id":"b","capabilities":{"supports":{"tool_calls":true}}},{"id":"h","capabilities":{"supports":{"max_thinking_budget":32000}}}]}`,
 		"openrouter":  `{"data":[{"id":"r","supported_parameters":["reasoning","reasoning_effort"],"reasoning":{"mandatory":true}},{"id":"n","supported_parameters":["tools"]}]}`,
@@ -181,6 +182,7 @@ func TestModelInfos(t *testing.T) {
 	}
 	want := map[string]string{
 		"anthropic":   `{"c":{"thinking":true,"efforts":["low","max"]}}`,
+		"adaptive":    `{"o":{"thinking":true,"adaptive":true},"s":{"thinking":true}}`,
 		"codex":       `{"g":{"thinking":true,"efforts":["low","high"],"default":"low"}}`,
 		"copilot":     `{"a":{"thinking":true,"efforts":["low","high"]},"b":{"thinking":false},"h":{"thinking":true}}`,
 		"openrouter":  `{"n":{"thinking":false},"r":{"thinking":true,"always":true,"efforts":["low","medium","high"]}}`,

@@ -85,7 +85,10 @@ func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, path
 	out.Header.Set("Accept-Encoding", "identity")
 	if p.Bifrost(r.Header.Get("User-Agent")) {
 		// Bifrost: the provider's own client keeps its headers; only the credential changes.
-		out.Header.Set("Anthropic-Beta", withBetas(strings.Join(out.Header.Values("Anthropic-Beta"), ","), p.CredentialBeta))
+		// An empty list is no header at all, or the request carries a header its client never sends.
+		if beta := withBetas(strings.Join(out.Header.Values("Anthropic-Beta"), ","), p.CredentialBeta); beta != "" {
+			out.Header.Set("Anthropic-Beta", beta)
+		}
 		if p.AuthHeader != "" {
 			out.Header.Set(p.AuthHeader, p.AuthPrefix+secret)
 		}

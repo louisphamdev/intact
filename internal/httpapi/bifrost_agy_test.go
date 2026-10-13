@@ -149,10 +149,12 @@ func TestModelsNameTheAntigravityClient(t *testing.T) {
 // The Codex CLI reaching a Codex account keeps its own identity and body.
 func TestBifrostCodexChangesOnlyTheCredential(t *testing.T) {
 	var gotUA, gotBody, gotAuth string
+	betaSent := false
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		if strings.Contains(r.URL.Path, "responses") {
 			gotUA, gotBody, gotAuth = r.Header.Get("User-Agent"), string(b), r.Header.Get("Authorization")
+			_, betaSent = r.Header["Anthropic-Beta"]
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		io.WriteString(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\n")
@@ -171,6 +173,9 @@ func TestBifrostCodexChangesOnlyTheCredential(t *testing.T) {
 	}
 	if gotAuth != "Bearer codex-token" {
 		t.Errorf("Authorization = %q", gotAuth)
+	}
+	if betaSent {
+		t.Errorf("an empty Anthropic-Beta header reached Codex: the client sent none")
 	}
 	if want := strings.Replace(body, "codex/gpt-5.5", "gpt-5.5", 1); gotBody != want {
 		t.Errorf("body changed:\n got %s\nwant %s", gotBody, want)

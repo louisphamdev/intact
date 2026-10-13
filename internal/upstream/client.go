@@ -38,7 +38,16 @@ func (l *Limit) Set(d time.Duration) func() {
 
 func (l *Limit) Get() time.Duration { return time.Duration(l.ns.Load()) }
 
-var client = &http.Client{}
+var client = &http.Client{Transport: upstreamTransport()}
+
+// upstreamTransport is http.DefaultTransport with an HTTP/2 health check: a
+// connection that died in silence is pinged and closed instead of being reused,
+// and the requests sent on it no longer wait for StreamHeader.
+func upstreamTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.HTTP2 = &http.HTTP2Config{SendPingTimeout: 30 * time.Second, PingTimeout: 15 * time.Second}
+	return t
+}
 
 // retryable lists the statuses that mean "the upstream is busy, ask again".
 // A 4xx other than 429 is the caller's fault and repeating it only wastes quota.

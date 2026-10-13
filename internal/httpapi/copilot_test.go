@@ -77,7 +77,11 @@ func TestCopilotRoutesClaudeToMessagesAndLearnsResponses(t *testing.T) {
 	defer func() { copilotTokenURL = old }()
 	paths := []string{}
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		paths = append(paths, r.URL.Path)
+		// The model list is read once for the thinking shape of a translated Claude call;
+		// only the inference calls are counted here.
+		if r.URL.Path != "/models" {
+			paths = append(paths, r.URL.Path)
+		}
 		switch r.URL.Path {
 		case "/v1/messages":
 			w.Header().Set("Content-Type", "application/json")

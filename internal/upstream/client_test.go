@@ -53,3 +53,16 @@ func TestDoDoesNotRetryOnClientError(t *testing.T) {
 		t.Errorf("calls = %d, want 1: a 400 is the caller's fault and must not be retried", calls)
 	}
 }
+
+// An HTTP/2 connection that dies in silence must not take every later request
+// with it (router-for-me/CLIProxyAPI#6534): the transport pings an idle
+// connection and closes it when the ping goes unanswered.
+func TestUpstreamTransportPingsIdleHTTP2Connections(t *testing.T) {
+	tr, ok := client.Transport.(*http.Transport)
+	if !ok || tr.HTTP2 == nil || tr.HTTP2.SendPingTimeout <= 0 || tr.HTTP2.PingTimeout <= 0 {
+		t.Fatalf("upstream transport has no HTTP/2 health check: %#v", client.Transport)
+	}
+	if !tr.ForceAttemptHTTP2 || tr.Proxy == nil {
+		t.Fatal("the transport lost the defaults of http.DefaultTransport")
+	}
+}

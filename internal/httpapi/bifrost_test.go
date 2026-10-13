@@ -288,3 +288,34 @@ func TestChatPassThroughDropsTheDuplicateReasoningField(t *testing.T) {
 		t.Fatalf("upstream got %s", gotBody)
 	}
 }
+
+// A chat client reaching a model that takes only adaptive thinking (Opus 4.7 and
+// later) gets adaptive thinking, also on the first request after a start, before
+// anything listed the models.
+func TestTranslatedThinkingFollowsTheModelList(t *testing.T) {
+	var gotBody string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			w.Write([]byte(`{"data":[{"id":"claude-opus-5-5","capabilities":{"thinking":{"supported":true,"types":{"enabled":{"supported":false},"adaptive":{"supported":true}}}}}]}`))
+			return
+		}
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"m","type":"message","role":"assistant","model":"claude-opus-5-5","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer up.Close()
+	s, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.CreateConnection("claude", "test", "oauth-token")
+	h := New(s, map[string]string{"claude": up.URL})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/chat/completions", strings.NewReader(
+		`{"model":"claude/claude-opus-5-5","reasoning_effort":"high","temperature":0.3,"messages":[{"role":"user","content":"hi"}]}`)))
+	if !strings.Contains(gotBody, `"type":"adaptive"`) || strings.Contains(gotBody, "budget_tokens") || strings.Contains(gotBody, "temperature") {
+		t.Fatalf("status %d, upstream got %s", rec.Code, gotBody)
+	}
+}

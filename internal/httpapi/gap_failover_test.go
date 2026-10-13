@@ -756,8 +756,30 @@ func TestCodexSSENonStreamCallerNotProbed(t *testing.T) {
 		{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"gAAA-foreign"}]}`, func(w http.ResponseWriter, n int, body string) {
 		io.WriteString(w, codexRefusalEvent)
 	})
-	if len(bodies) != 1 || rec.Body.String() != codexRefusalEvent {
-		t.Fatalf("code=%d upstream calls=%d body=%q, want the upstream answer unchanged after one call", rec.Code, len(bodies), rec.Body.String())
+	// One call, no probe; Codex streams only, so intact asks for the stream and the
+	// caller, who asked for one body, gets the refusal as one JSON error.
+	if len(bodies) != 1 || !strings.Contains(bodies[0], `"stream":true`) {
+		t.Fatalf("upstream calls=%d bodies=%q, want one streamed call", len(bodies), bodies)
+	}
+	if rec.Code != http.StatusBadGateway || strings.Contains(rec.Body.String(), "event:") || !strings.Contains(rec.Body.String(), `"error"`) {
+		t.Fatalf("code=%d body=%q, want one JSON error", rec.Code, rec.Body.String())
+	}
+}
+
+// 9router#4733: a Responses caller that asks for no stream gets one JSON response
+// from Codex, which itself answers only as a stream.
+func TestCodexNonStreamResponsesCallerGetsOneJSONBody(t *testing.T) {
+	rec, bodies := codexSSEFor(t, `{"model":"codex/gpt-5.5","store":false,"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}]}`,
+		func(w http.ResponseWriter, n int, body string) {
+			io.WriteString(w, "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"OK\"}]}}\n\n"+
+				"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\n")
+		})
+	if len(bodies) != 1 || !strings.Contains(bodies[0], `"stream":true`) {
+		t.Fatalf("bodies=%q", bodies)
+	}
+	if ct := rec.Header().Get("Content-Type"); rec.Code != http.StatusOK || !strings.HasPrefix(ct, "application/json") ||
+		strings.Contains(rec.Body.String(), "event:") || !strings.Contains(rec.Body.String(), `"text":"OK"`) {
+		t.Fatalf("code=%d ct=%q body=%s", rec.Code, ct, rec.Body.String())
 	}
 }
 
@@ -910,7 +932,7 @@ func TestReasoningReplayLookupMissIsLogged(t *testing.T) {
 	replayMissLogged.Delete("gone-provider") // a rerun (-count=2) starts unlogged
 	body := []byte(`{"model":"m","max_tokens":100,"messages":[{"role":"user","content":"go"}]}`)
 	for range 2 {
-		if _, _, err := toProvider(body, translate.Anthropic, translate.OpenAI, "gone-provider"); err != nil {
+		if _, _, err := toProvider(body, translate.Anthropic, translate.OpenAI, "gone-provider", translate.AnthropicOptions{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -918,7 +940,7 @@ func TestReasoningReplayLookupMissIsLogged(t *testing.T) {
 		t.Errorf("want one log line naming gone-provider, got %d:\n%s", n, logs.String())
 	}
 	logs.Reset()
-	if _, _, err := toProvider(body, translate.Anthropic, translate.OpenAI, "groq"); err != nil {
+	if _, _, err := toProvider(body, translate.Anthropic, translate.OpenAI, "groq", translate.AnthropicOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if logs.Len() != 0 {

@@ -112,6 +112,11 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		// A call with no output is refused upstream and the refusal wedges the thread.
+		if healed, ok := translate.HealResponsesCallOutputs(body); ok {
+			log.Printf("responses: a call had no output; a stand-in was added")
+			body = healed
+		}
 	}
 	model, ok := bodyModel(body)
 	if !ok || model == "" {
@@ -792,9 +797,12 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			model = at.model
 		}
 		path, send, to, via := r.PathValue("path"), body, "", ""
+		// collect: the caller asked for one body from a provider that only streams.
+		collect := false
 		prepare := func() error {
 			want, wantPath := shapeFor(p, model)
 			path, send, to, via = r.PathValue("path"), body, "", ""
+			collect = false
 			if client == "" || !translatable(want) {
 				return nil
 			}
@@ -824,6 +832,12 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 				if wantPath != "" {
 					path = wantPath
 				}
+				// Codex answers only as a stream (9router#4733): ask for one, fold it for the caller.
+				if client == translate.Responses && alwaysStreams(want) && !stream {
+					if streamed := withStream(send, true); streamed != nil {
+						send, collect = streamed, true
+					}
+				}
 				return nil
 			}
 			if client == translate.Antigravity {
@@ -832,7 +846,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			if want == translate.Antigravity {
 				// The envelope names the account's project, so it is built
 				// per account from the chat form of the request.
-				hub, geminiNames, err := toProvider(body, client, translate.OpenAI, p.ID)
+				hub, geminiNames, err := toProvider(body, client, translate.OpenAI, p.ID, translate.AnthropicOptions{})
 				if err != nil {
 					return err
 				}
@@ -863,7 +877,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			if !ok {
 				var err error
 				var names *translate.ToolNames
-				if tb, names, err = toProvider(body, client, want, p.ID); err != nil {
+				if tb, names, err = toProvider(body, client, want, p.ID, a.anthropicOptions(r.Context(), conn.Provider, model)); err != nil {
 					return err
 				}
 				translated[key] = tb
@@ -1004,9 +1018,10 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 				}
 			}
 		}
-		// A 401 that survived the refresh, or a 403, is this account's own refusal (revoked, under
-		// verification): the next account may be healthy. The last account's answer is still relayed.
-		if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && i < len(attempts)-1 {
+		// A 401 that survived the refresh, a 402 or a 403 is this account's own refusal (revoked, out
+		// of credit, under verification): the next account may be healthy. The last account's answer
+		// is still relayed.
+		if accountRefusal(resp.StatusCode) && i < len(attempts)-1 {
 			log.Printf("connection %s: %s answered %d%s", conn.ID, conn.Provider, resp.StatusCode, modelNote(at.model))
 			resp.Body.Close()
 			continue
@@ -1073,9 +1088,20 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 		// Usage counts the model the operator turned on, not the level variant
 		// intact sent nor the name the provider answered under.
 		served, _ := bodyModel(body)
-		if to != "" {
+		switch {
+		case to != "":
 			a.relayVia(out, resp, conn.ID, to, via, stream, tools, reply, conn.Provider, path, served, cap)
-		} else {
+		case collect && resp.StatusCode < 400:
+			rec := &recorder{header: http.Header{}}
+			a.relayObserved(rec, resp, conn.ID, conn.Provider, path, served, cap)
+			if b, reason := translate.CollectResponsesStream(&rec.body); reason != "" {
+				writeError(out, http.StatusBadGateway, reason)
+			} else {
+				out.Header().Set("Content-Type", "application/json")
+				out.WriteHeader(http.StatusOK)
+				out.Write(b)
+			}
+		default:
 			a.relayObserved(out, resp, conn.ID, conn.Provider, path, served, cap)
 		}
 		finish()
@@ -1278,9 +1304,19 @@ func (a *api) activeConnections(prov string) []store.Connection {
 func retryableStatus(code int) bool {
 	return code == http.StatusTooManyRequests ||
 		code == http.StatusNotFound ||
+		code == http.StatusRequestTimeout ||
 		code == http.StatusInternalServerError ||
+		code == http.StatusBadGateway ||
 		code == http.StatusServiceUnavailable ||
+		code == http.StatusGatewayTimeout ||
+		code == 529 || // Anthropic: overloaded
 		code == http.StatusConflict
+}
+
+// accountRefusal is a status that refuses this account, not the request: the
+// credential (401), the account's standing (403) or its balance (402).
+func accountRefusal(code int) bool {
+	return code == http.StatusUnauthorized || code == http.StatusPaymentRequired || code == http.StatusForbidden
 }
 
 func firstNonEmpty(ss ...string) string {

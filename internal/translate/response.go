@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"regexp"
 	"strconv"
@@ -475,6 +476,7 @@ func AnthropicStreamToOpenAI(dst Flusher, src io.Reader) {
 	toolIndex := map[int64]int{} // content block index -> tool call index
 	var usage obj
 	finish := ""
+	stopped := false
 	emit := func(delta obj, fin any, extra obj) {
 		ch := obj{"index": 0, "delta": delta, "finish_reason": fin}
 		c := obj{"id": id, "object": "chat.completion.chunk", "created": created, "model": model, "choices": []any{ch}}
@@ -528,6 +530,7 @@ func AnthropicStreamToOpenAI(dst Flusher, src io.Reader) {
 				}
 			}
 		case "message_stop":
+			stopped = true
 			if finish == "" {
 				finish = "stop"
 			}
@@ -540,6 +543,7 @@ func AnthropicStreamToOpenAI(dst Flusher, src io.Reader) {
 			dst.Flush()
 			return false
 		case "error":
+			stopped = true
 			b, _ := json.Marshal(obj{"error": asObj(ev["error"])})
 			io.WriteString(dst, "data: "+string(b)+"\n\n")
 			dst.Flush()
@@ -547,6 +551,9 @@ func AnthropicStreamToOpenAI(dst Flusher, src io.Reader) {
 		}
 		return true
 	})
+	if err == nil && !stopped {
+		err = errors.New("no message_stop")
+	}
 	if err != nil {
 		b, _ := json.Marshal(obj{"error": obj{"type": "api_error", "message": "upstream stream ended early: " + err.Error()}})
 		io.WriteString(dst, "data: "+string(b)+"\n\n")

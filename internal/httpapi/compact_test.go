@@ -421,7 +421,7 @@ func TestCompactedBodyStillTranslates(t *testing.T) {
 	if !ok {
 		t.Fatal("not compacted")
 	}
-	hub, _, err := toProvider(out, translate.OpenAI, translate.Anthropic, "openai")
+	hub, _, err := toProvider(out, translate.OpenAI, translate.Anthropic, "openai", translate.AnthropicOptions{})
 	if err != nil {
 		t.Fatalf("the shortened body does not translate: %v", err)
 	}

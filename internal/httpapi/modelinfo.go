@@ -13,6 +13,9 @@ type ModelInfo struct {
 	Thinking *bool `json:"thinking,omitempty"`
 	// Always: the model cannot answer without thinking.
 	Always bool `json:"always,omitempty"`
+	// Adaptive: Anthropic takes this model's thinking only as {type: adaptive}
+	// (capabilities.thinking.types: adaptive yes, enabled no).
+	Adaptive bool `json:"adaptive,omitempty"`
 	// Efforts are the levels the request may ask for, as the provider names them.
 	Efforts []string `json:"efforts,omitempty"`
 	Default string   `json:"default,omitempty"`
@@ -180,6 +183,10 @@ func readInfo(m map[string]any) (ModelInfo, bool) {
 	// Anthropic.
 	if t, ok := caps["thinking"].(map[string]any); ok {
 		yes(t["supported"] == true)
+		if ty, ok := t["types"].(map[string]any); ok {
+			supported := func(k string) bool { v, _ := ty[k].(map[string]any); return v["supported"] == true }
+			info.Adaptive = supported("adaptive") && !supported("enabled")
+		}
 	}
 	if e, ok := caps["effort"].(map[string]any); ok && e["supported"] == true {
 		for _, l := range effortOrder {

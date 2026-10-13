@@ -60,6 +60,18 @@ func Stream(body []byte) bool {
 
 // OpenAIToAnthropic converts a Chat Completions request to a Messages request.
 func OpenAIToAnthropic(body []byte) ([]byte, error) {
+	return OpenAIToAnthropicFor(body, AnthropicOptions{})
+}
+
+// AnthropicOptions is what the target model's list entry says about its thinking.
+type AnthropicOptions struct {
+	// Adaptive: the model takes thinking only as {type: adaptive} with an effort
+	// level, and refuses budget_tokens and sampling values (Opus 4.7 and later).
+	Adaptive bool
+}
+
+// OpenAIToAnthropicFor is OpenAIToAnthropic for a model with its own options.
+func OpenAIToAnthropicFor(body []byte, opt AnthropicOptions) ([]byte, error) {
 	in, err := decode(body)
 	if err != nil {
 		return nil, err
@@ -118,7 +130,16 @@ func OpenAIToAnthropic(body []byte) ([]byte, error) {
 	forcedTool := tc != nil && (tc["type"] == "any" || tc["type"] == "tool")
 
 	keep := []string{"temperature", "top_p", "stream"}
-	if !forcedTool {
+	effort := ""
+	if opt.Adaptive {
+		keep = []string{"stream"}
+		effort = anthropicEffort(str(in["reasoning_effort"]))
+		if effort != "" {
+			out["thinking"] = obj{"type": "adaptive"}
+		}
+	} else if !forcedTool && !endsInToolResult(msgs) {
+		// The translated history carries no signed thinking block, and Anthropic refuses
+		// budget thinking on a turn that continues a tool loop without one.
 		if b := thinkingBudget(str(in["reasoning_effort"]), maxTok); b > 0 {
 			out["thinking"] = obj{"type": "enabled", "budget_tokens": b}
 			// Anthropic refuses temperature and top_p while thinking is enabled.
@@ -142,6 +163,14 @@ func OpenAIToAnthropic(body []byte) ([]byte, error) {
 	// Anthropic has no JSON mode without a schema.
 	if s := asObj(asObj(asObj(in["response_format"])["json_schema"])["schema"]); s != nil {
 		out["output_config"] = obj{"format": obj{"type": "json_schema", "schema": s}}
+	}
+	if effort != "" {
+		oc := asObj(out["output_config"])
+		if oc == nil {
+			oc = obj{}
+		}
+		oc["effort"] = effort
+		out["output_config"] = oc
 	}
 	if tools := list(in["tools"]); len(tools) > 0 {
 		var ts []any
@@ -280,6 +309,33 @@ const (
 // thinkingBudget turns an OpenAI reasoning_effort into an Anthropic thinking
 // budget. It returns 0 when the caller asked for no reasoning, or when
 // max_tokens is too small to hold a budget and still leave room for an answer.
+// anthropicEffort is the Anthropic output_config.effort level for a chat
+// reasoning_effort; "" asks for nothing.
+func anthropicEffort(effort string) string {
+	switch effort {
+	case "", "none":
+		return ""
+	case "minimal", "low":
+		return "low"
+	case "high", "xhigh", "max":
+		return effort
+	}
+	return "medium"
+}
+
+// endsInToolResult reports that the last Anthropic turn answers tool calls.
+func endsInToolResult(msgs []obj) bool {
+	if len(msgs) == 0 {
+		return false
+	}
+	for _, b := range list(msgs[len(msgs)-1]["content"]) {
+		if str(asObj(b)["type"]) == "tool_result" {
+			return true
+		}
+	}
+	return false
+}
+
 func thinkingBudget(effort string, maxTokens int64) int64 {
 	var share float64
 	var ceiling int64

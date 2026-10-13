@@ -166,3 +166,33 @@ func TestGeminiBlockReasonIsContentFilter(t *testing.T) {
 		t.Errorf("responses caller stream did not end:\n%s", r)
 	}
 }
+
+// A chat stream that ends cleanly with no finish_reason and no [DONE] was cut
+// short; it must not become a completed response (router-for-me/CLIProxyAPI#6533).
+func TestOpenAIStreamCleanEOFWithoutFinishIsNotCompleted(t *testing.T) {
+	var buf bytes.Buffer
+	OpenAIStreamToResponses(capFlush{&buf}, strings.NewReader(`data: {"id":"c","model":"m","choices":[{"delta":{"content":"The answer is "}}]}`+"\n\n"), nil)
+	out := buf.String()
+	if strings.Contains(out, "response.completed") || !strings.Contains(out, "response.failed") {
+		t.Fatalf("clean EOF without a finish faked a completion:\n%s", out)
+	}
+}
+
+func TestOpenAIStreamWithAFinishButNoDoneStillCompletes(t *testing.T) {
+	var buf bytes.Buffer
+	OpenAIStreamToResponses(capFlush{&buf}, strings.NewReader(`data: {"id":"c","model":"m","choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}`+"\n\n"), nil)
+	if !strings.Contains(buf.String(), "response.completed") {
+		t.Fatalf("a finished stream without [DONE] must complete:\n%s", buf.String())
+	}
+}
+
+func TestAnthropicStreamCleanEOFWithoutMessageStopIsAnError(t *testing.T) {
+	var buf bytes.Buffer
+	src := `data: {"type":"message_start","message":{"model":"m","usage":{}}}` + "\n\n" +
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hal"}}` + "\n\n"
+	AnthropicStreamToOpenAI(capFlush{&buf}, strings.NewReader(src))
+	out := buf.String()
+	if strings.Contains(out, "[DONE]") || !strings.Contains(out, `"error"`) {
+		t.Fatalf("clean EOF without message_stop did not signal an error:\n%s", out)
+	}
+}

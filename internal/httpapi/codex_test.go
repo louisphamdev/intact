@@ -55,3 +55,28 @@ func TestCodexTranslatesChatAndPassesResponsesThrough(t *testing.T) {
 		t.Errorf("passthrough: body sent %s, got %s", gotBody, b)
 	}
 }
+
+// A Codex history with a call and no output (openai/codex#44604) reaches the
+// upstream with a stand-in output, on the same-shape pass-through too.
+func TestCodexPassThroughHealsAMissingCallOutput(t *testing.T) {
+	var gotBody string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")
+	}))
+	defer up.Close()
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	s.CreateConnection("codex", "cx", fakeJWT("acct-9"))
+	h := New(s, map[string]string{"codex": up.URL})
+	body := `{"model":"codex/gpt-5.5","stream":true,"input":[{"type":"message","role":"user","content":"go"},` +
+		`{"type":"function_call","call_id":"a","name":"f","arguments":"{}"},{"type":"function_call","call_id":"b","name":"f","arguments":"{}"},` +
+		`{"type":"function_call_output","call_id":"a","output":"A"}]}`
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/responses", strings.NewReader(body)))
+	if !strings.Contains(gotBody, `"call_id":"b","output"`) && !strings.Contains(gotBody, `"call_id":"b","type":"function_call_output"`) {
+		t.Fatalf("upstream got no output for call b: %s", gotBody)
+	}
+}

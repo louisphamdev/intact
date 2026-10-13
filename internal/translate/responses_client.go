@@ -962,6 +962,11 @@ func OpenAIStreamToResponses(dst Flusher, src io.Reader, tools map[string]ToolMe
 			fail("upstream stream ended early: " + streamErr.Error())
 			return
 		}
+		// A clean end with no finish_reason and no [DONE] is a cut stream, not an answer.
+		if finishReason == "" {
+			fail("upstream stream ended without a finish reason")
+			return
+		}
 		finish()
 	}
 }

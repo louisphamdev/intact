@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -95,7 +96,7 @@ var replayMissLogged sync.Map
 // toProvider converts a caller's request to the provider's shape. providerID names the account the
 // request is going to, which decides whether the tool names are translated into that agent's
 // vocabulary; the translation is returned so the answer comes back in the caller's own names.
-func toProvider(body []byte, client, want, providerID string) ([]byte, *translate.ToolNames, error) {
+func toProvider(body []byte, client, want, providerID string, anth translate.AnthropicOptions) ([]byte, *translate.ToolNames, error) {
 	hub := body
 	var names *translate.ToolNames
 	var err error
@@ -120,7 +121,7 @@ func toProvider(body []byte, client, want, providerID string) ([]byte, *translat
 	}
 	switch want {
 	case translate.Anthropic:
-		out, err := translate.OpenAIToAnthropic(hub)
+		out, err := translate.OpenAIToAnthropicFor(hub, anth)
 		return out, names, err
 	case translate.Responses:
 		out, err := translate.OpenAIToResponses(hub)
@@ -215,7 +216,9 @@ func (a *api) relayVia(w http.ResponseWriter, resp *http.Response, connID, to, v
 		if cap != nil {
 			src = io.TeeReader(resp.Body, captureWriter{cap: cap})
 		}
-		a.toChatChunks(pipeFlusher{pw}, io.TeeReader(src, tapWriter{raw}), via, reply)
+		if err := a.toChatChunks(pipeFlusher{pw}, io.TeeReader(src, tapWriter{raw}), via, reply); err != nil {
+			pw.CloseWithError(err)
+		}
 	}()
 	tap := &respTap{headLimit: usageTapHeadLimit, tailLimit: usageTapTailLimit}
 	chunks := io.TeeReader(pr, tapWriter{tap})
@@ -289,7 +292,9 @@ func isErrorBody(b []byte) bool {
 }
 
 // toChatChunks converts a provider's event stream to Chat Completions chunks.
-func (a *api) toChatChunks(dst translate.Flusher, src io.Reader, via string, reply translate.Reply) {
+// A chat stream passes through as it is, so its read error is returned for the
+// pipe to carry: dropped, a cut stream reads downstream as a finished one.
+func (a *api) toChatChunks(dst translate.Flusher, src io.Reader, via string, reply translate.Reply) error {
 	switch via {
 	case translate.Antigravity:
 		translate.GeminiStreamToOpenAI(dst, src, &a.sigs, reply.Tools)
@@ -298,8 +303,10 @@ func (a *api) toChatChunks(dst translate.Flusher, src io.Reader, via string, rep
 	case translate.Responses:
 		translate.ResponsesStreamToOpenAI(dst, src)
 	default:
-		io.Copy(dst, src)
+		_, err := io.Copy(dst, src)
+		return err
 	}
+	return nil
 }
 
 // wholeToClient converts a whole (non-streamed) response.
@@ -399,4 +406,20 @@ func (a *api) anyAnthropic(targets []store.Connection) bool {
 // size a context, so an estimate serves them better than an error.
 func countTokensEstimate(w http.ResponseWriter, body []byte) {
 	writeJSON(w, map[string]any{"input_tokens": translate.EstimateTokens(body)})
+}
+
+// anthropicOptions is what a provider's model list says about one model's thinking.
+// The list is read first when this provider has none yet, so the first request
+// after a start does not go out in a shape the model refuses.
+func (a *api) anthropicOptions(ctx context.Context, prov, model string) translate.AnthropicOptions {
+	a.cat.mu.Lock()
+	_, listed := a.cat.m[prov]
+	a.cat.mu.Unlock()
+	if !listed {
+		a.catalogIDs(ctx, prov)
+	}
+	a.cat.mu.Lock()
+	info := a.cat.m[prov].info[strings.TrimPrefix(model, prov+"/")]
+	a.cat.mu.Unlock()
+	return translate.AnthropicOptions{Adaptive: info.Adaptive}
 }

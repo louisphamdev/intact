@@ -84,6 +84,9 @@ func responsesOutputText(v any) string {
 					parts = append(parts, t)
 				} else if str(p["type"]) == "input_image" {
 					parts = append(parts, "[image]")
+				} else if str(p["type"]) == "input_file" {
+					// The file's bytes are base64; as text they cost millions of tokens.
+					parts = append(parts, "[file: "+str(p["filename"])+"]")
 				} else {
 					b, _ := json.Marshal(p)
 					parts = append(parts, string(b))
@@ -96,6 +99,19 @@ func responsesOutputText(v any) string {
 	}
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// responsesOutputImages is the input_image parts of a tool output, as chat image parts.
+func responsesOutputImages(v any) []any {
+	var images []any
+	for _, x := range list(v) {
+		if p := asObj(x); str(p["type"]) == "input_image" {
+			if img, _ := responsesContent([]any{p}); len(img) > 0 {
+				images = append(images, img...)
+			}
+		}
+	}
+	return images
 }
 
 func marshalString(v any) string {
@@ -317,6 +333,10 @@ func ResponsesToOpenAIFor(body []byte, vocab *ToolNames, opt HubOptions) ([]byte
 			case typ == "function_call_output" || typ == "custom_tool_call_output" || typ == "local_shell_call_output":
 				reasoning.Reset()
 				msgs = append(msgs, obj{"role": "tool", "tool_call_id": callID(it), "content": responsesOutputText(it["output"])})
+				// A tool message carries text only, so its images follow it as a user turn.
+				if images := responsesOutputImages(it["output"]); len(images) > 0 {
+					msgs = append(msgs, obj{"role": "user", "content": images})
+				}
 			case typ == "reasoning":
 				for _, p := range list(it["summary"]) {
 					if t := str(asObj(p)["text"]); strings.TrimSpace(t) != "" {
@@ -473,9 +493,11 @@ func responsesContent(c any) (parts []any, allText bool) {
 
 // healToolPairs gives every tool call an answer right after its assistant
 // turn, and turns a result with no call into user text: a chat provider
-// refuses a history where the two do not pair.
+// refuses a history where the two do not pair. A non-assistant message inside
+// an unanswered batch (Codex inserts notices there) moves after the batch, so
+// the outputs that follow it still pair.
 func healToolPairs(msgs []obj) []obj {
-	var out, deferred []obj
+	var out, deferred, held []obj
 	var pending []string // call ids of the last assistant turn still unanswered
 	waiting := func(id string) int {
 		for i, p := range pending {
@@ -501,6 +523,8 @@ func healToolPairs(msgs []obj) []obj {
 			out = append(out, orphan(m))
 		}
 		deferred = nil
+		out = append(out, held...)
+		held = nil
 	}
 	for _, m := range msgs {
 		if str(m["role"]) == "tool" {
@@ -513,11 +537,18 @@ func healToolPairs(msgs []obj) []obj {
 			case i >= 0:
 				pending = append(pending[:i], pending[i+1:]...)
 				out = append(out, m)
+				if len(pending) == 0 {
+					flush()
+				}
 			case len(pending) > 0:
 				deferred = append(deferred, m)
 			default:
 				out = append(out, orphan(m))
 			}
+			continue
+		}
+		if len(pending) > 0 && str(m["role"]) != "assistant" {
+			held = append(held, m)
 			continue
 		}
 		flush()

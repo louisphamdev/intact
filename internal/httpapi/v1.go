@@ -906,9 +906,10 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			if want, _ := shapeFor(p, model); want == translate.OpenAI {
 				send, injected = withUsage(send)
 				send, shortNames = translate.ShortenChatToolNames(send)
+				send = translate.WithoutDuplicateReasoning(send)
 			}
 		}
-		send = filterFor(a, r, p, conn.Provider, send)
+		send = filterFor(a, r, p, conn.Provider, path, send)
 		if pendingCompactStat != nil {
 			log.Printf("connection %s: 429, retrying %d bytes shorter (%d -> %d, %d messages cut, %d tools cut)",
 				pendingCompactConnID, lastWireLen-len(send), lastWireLen, len(send),
@@ -929,7 +930,7 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 				resp.Body.Close()
 				copilotResponsesModels.Store(model, true)
 				if err := prepare(); err == nil {
-					send = filterFor(a, r, p, conn.Provider, send)
+					send = filterFor(a, r, p, conn.Provider, path, send)
 					if resp, err = a.sendLogged(forShape(r, to), p, conn, path, secret, send, model); err != nil {
 						continue
 					}
@@ -1092,13 +1093,17 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 
 // filterFor applies a provider's own request rules, then the blacklist, which
 // runs last on the exact bytes the provider will receive. A Bifrost caller (the
-// provider's own client) is sent as it is: the blacklist exists for the others.
-func filterFor(a *api, r *http.Request, p provider.Provider, prov string, body []byte) []byte {
-	if p.Bifrost(r.Header.Get("User-Agent")) {
-		return body
+// provider's own client) skips both: the blacklist exists for the others.
+func filterFor(a *api, r *http.Request, p provider.Provider, prov, path string, body []byte) []byte {
+	if !p.Bifrost(r.Header.Get("User-Agent")) {
+		body = adjustForProvider(p, body)
+		body, _ = filter.Apply(body, a.rulesFor(prov))
 	}
-	body = adjustForProvider(p, body)
-	body, _ = filter.Apply(body, a.rulesFor(prov))
+	// Last, so a block the filter cut to nothing goes too. Bifrost included: a
+	// blank block costs that request a 400 anyway, and a clean body keeps its bytes.
+	if path == "messages" {
+		body = translate.WithoutBlankText(body)
+	}
 	return body
 }
 

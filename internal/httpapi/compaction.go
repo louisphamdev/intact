@@ -150,7 +150,7 @@ func (a *api) askForSummary(
 			continue
 		}
 		send, path := summarySend(r, p, conn, body, model, at.model)
-		send = filterFor(a, r, p, conn.Provider, send)
+		send = filterFor(a, r, p, conn.Provider, path, send)
 		resp, err := a.send(r, p, conn.Provider, path, secret, send)
 		if err != nil {
 			lastErr = err

@@ -227,3 +227,64 @@ func TestOneModelLookupWaitsOnlyForItsProvider(t *testing.T) {
 		t.Errorf("status %d body %s", rec.Code, rec.Body.String())
 	}
 }
+
+// Claude Code can send a blank system block after a compaction (anthropics/claude-code#101181);
+// Anthropic answers that with a 400, so the block goes even on the Bifrost path.
+func TestBifrostDropsABlankSystemBlock(t *testing.T) {
+	var gotBody string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Write([]byte(`{}`))
+	}))
+	defer up.Close()
+	s, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := s.CreateConnection("claude", "test", "oauth-token"); err != nil {
+		t.Fatal(err)
+	}
+	h := New(s, map[string]string{"claude": up.URL})
+	body := `{"model":"claude/claude-opus-5","max_tokens":1,"system":[{"type":"text","text":"keep"},{"type":"text","text":""}],"messages":[{"role":"user","content":"hi"}]}`
+	req := loopbackRequest("POST", "/v1/messages?beta=true", strings.NewReader(body))
+	req.Header.Set("User-Agent", "claude-cli/2.1.300 (external, cli)")
+	req.Header.Set("X-Api-Key", "sk-intact-caller")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(gotBody, `"text":""`) || !strings.Contains(gotBody, `"keep"`) {
+		t.Fatalf("upstream got %s", gotBody)
+	}
+}
+
+// A chat client that replays both reasoning names reaches a chat upstream with one of them.
+func TestChatPassThroughDropsTheDuplicateReasoningField(t *testing.T) {
+	var gotBody string
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer up.Close()
+	s, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.CreateConnection("groq", "test", "gsk-abc")
+	h := New(s, map[string]string{"groq": up.URL})
+	body := `{"model":"groq/llama-3.3-70b-versatile","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"a","reasoning":"r","reasoning_content":"r"},{"role":"user","content":"go"}]}`
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("POST", "/v1/chat/completions", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(gotBody, `"reasoning":`) || !strings.Contains(gotBody, `"reasoning_content":"r"`) {
+		t.Fatalf("upstream got %s", gotBody)
+	}
+}

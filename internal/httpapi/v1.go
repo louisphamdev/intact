@@ -877,7 +877,11 @@ func (a *api) failover(w http.ResponseWriter, r *http.Request, body []byte, targ
 			if !ok {
 				var err error
 				var names *translate.ToolNames
-				if tb, names, err = toProvider(body, client, want, p.ID, a.anthropicOptions(r.Context(), conn.Provider, model)); err != nil {
+				var anth translate.AnthropicOptions
+				if want == translate.Anthropic {
+					anth = a.anthropicOptions(r.Context(), conn.Provider, model)
+				}
+				if tb, names, err = toProvider(body, client, want, p.ID, anth); err != nil {
 					return err
 				}
 				translated[key] = tb
@@ -1127,7 +1131,7 @@ func filterFor(a *api, r *http.Request, p provider.Provider, prov, path string, 
 	}
 	// Last, so a block the filter cut to nothing goes too. Bifrost included: a
 	// blank block costs that request a 400 anyway, and a clean body keeps its bytes.
-	if path == "messages" {
+	if path == "messages" || path == "v1/messages" {
 		body = translate.WithoutBlankText(body)
 	}
 	return body

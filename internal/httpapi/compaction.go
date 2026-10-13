@@ -149,7 +149,9 @@ func (a *api) askForSummary(
 		if secret, err = a.exchanged(r.Context(), p, conn.ID, secret); err != nil {
 			continue
 		}
-		send, path := summarySend(r, p, conn, body, model, at.model, a.anthropicOptions(r.Context(), conn.Provider, firstNonEmpty(at.model, model)))
+		send, path := summarySend(r, p, conn, body, model, at.model, func() translate.AnthropicOptions {
+			return a.anthropicOptions(r.Context(), conn.Provider, firstNonEmpty(at.model, model))
+		})
 		send = filterFor(a, r, p, conn.Provider, path, send)
 		resp, err := a.send(r, p, conn.Provider, path, secret, send)
 		if err != nil {
@@ -157,8 +159,8 @@ func (a *api) askForSummary(
 			continue
 		}
 		if resp.StatusCode >= 400 && (retryableStatus(resp.StatusCode) || accountRefusal(resp.StatusCode)) && i < len(attempts)-1 {
-			// A busy provider is worth trying the next account for. One that answers with
-			// an error is not: the error is the answer.
+			// A busy account, or one that refuses this account (401/402/403), is worth trying
+			// the next account for. Any other error is the answer.
 			resp.Body.Close()
 			lastErr = &providerStatus{provider: conn.Provider, code: resp.StatusCode}
 			continue
@@ -176,7 +178,7 @@ func (a *api) askForSummary(
 // because asking for a summary must not be the thing that fails.
 func summarySend(
 	r *http.Request, p provider.Provider, conn store.Connection, body []byte, callerModel, atModel string,
-	anth translate.AnthropicOptions,
+	anth func() translate.AnthropicOptions,
 ) ([]byte, string) {
 	model := callerModel
 	if atModel != "" {
@@ -196,7 +198,11 @@ func summarySend(
 	}
 	// Any other shape is asked through the same translation a normal turn uses, so the
 	// summary request is a request the account has already proven it can answer.
-	out, _, err := toProvider(body, translate.Responses, want, p.ID, anth)
+	var opt translate.AnthropicOptions
+	if want == translate.Anthropic {
+		opt = anth()
+	}
+	out, _, err := toProvider(body, translate.Responses, want, p.ID, opt)
 	if err != nil {
 		// Untranslatable: the Responses form goes out as it is rather than nothing going
 		// out at all, and the provider's own error is what the caller sees.

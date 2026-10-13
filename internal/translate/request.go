@@ -134,7 +134,9 @@ func OpenAIToAnthropicFor(body []byte, opt AnthropicOptions) ([]byte, error) {
 	if opt.Adaptive {
 		keep = []string{"stream"}
 		effort = anthropicEffort(str(in["reasoning_effort"]))
-		if effort != "" {
+		// The unsigned tool-loop rule is budget thinking's only: adaptive on such a history answered
+		// 200 (live 2026-10-13, opus-5-5 msg_011CfyoJTKCaV8x6FU3RCU79, sonnet-5-5 msg_011CfyoJWJnXNFd9Btj47Q6n).
+		if effort != "" && !forcedTool {
 			out["thinking"] = obj{"type": "adaptive"}
 		}
 	} else if !forcedTool && !endsInToolResult(msgs) {
@@ -306,12 +308,10 @@ const (
 	minThinkingBudget = 1024
 )
 
-// thinkingBudget turns an OpenAI reasoning_effort into an Anthropic thinking
-// budget. It returns 0 when the caller asked for no reasoning, or when
-// max_tokens is too small to hold a budget and still leave room for an answer.
 // anthropicEffort is the Anthropic output_config.effort level for a chat
 // reasoning_effort; "" asks for nothing.
 func anthropicEffort(effort string) string {
+	effort = strings.ToLower(effort)
 	switch effort {
 	case "", "none":
 		return ""
@@ -336,6 +336,9 @@ func endsInToolResult(msgs []obj) bool {
 	return false
 }
 
+// thinkingBudget turns an OpenAI reasoning_effort into an Anthropic thinking
+// budget. It returns 0 when the caller asked for no reasoning, or when
+// max_tokens is too small to hold a budget and still leave room for an answer.
 func thinkingBudget(effort string, maxTokens int64) int64 {
 	var share float64
 	var ceiling int64

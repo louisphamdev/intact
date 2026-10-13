@@ -410,7 +410,7 @@ func countTokensEstimate(w http.ResponseWriter, body []byte) {
 
 // anthropicOptions is what a provider's model list says about one model's thinking.
 // The list is read first when this provider has none yet, so the first request
-// after a start does not go out in a shape the model refuses.
+// after a start tries to go out in the shape the model takes.
 func (a *api) anthropicOptions(ctx context.Context, prov, model string) translate.AnthropicOptions {
 	a.cat.mu.Lock()
 	_, listed := a.cat.m[prov]
@@ -418,8 +418,12 @@ func (a *api) anthropicOptions(ctx context.Context, prov, model string) translat
 	if !listed {
 		a.catalogIDs(ctx, prov)
 	}
+	id := strings.TrimPrefix(model, prov+"/")
 	a.cat.mu.Lock()
-	info := a.cat.m[prov].info[strings.TrimPrefix(model, prov+"/")]
+	info, known := a.cat.m[prov].info[id]
 	a.cat.mu.Unlock()
+	if !known {
+		log.Printf("provider %s: the model list says nothing of %s; thinking goes out as a budget", prov, id)
+	}
 	return translate.AnthropicOptions{Adaptive: info.Adaptive}
 }

@@ -56,3 +56,39 @@ func TestBudgetModelSkipsThinkingInAnUnsignedToolLoop(t *testing.T) {
 		t.Fatalf("a fresh turn keeps budget thinking: %v", m["thinking"])
 	}
 }
+
+// A forced tool and thinking together are refused, so a forced tool call gets
+// the effort level but no thinking.
+func TestAdaptiveForcedToolGetsNoThinking(t *testing.T) {
+	tools := `"tools":[{"type":"function","function":{"name":"t","parameters":{"type":"object"}}}]`
+	for _, choice := range []string{`"required"`, `{"type":"function","function":{"name":"t"}}`} {
+		m := chatToAnthropic(t, `{"model":"m","reasoning_effort":"high","temperature":0.2,"top_p":0.9,`+tools+`,"tool_choice":`+choice+`,"messages":[{"role":"user","content":"hi"}]}`, AnthropicOptions{Adaptive: true})
+		if m["thinking"] != nil || m["temperature"] != nil || m["top_p"] != nil {
+			t.Fatalf("%s: thinking=%v temperature=%v top_p=%v", choice, m["thinking"], m["temperature"], m["top_p"])
+		}
+		if e := str(asObj(m["output_config"])["effort"]); e != "high" {
+			t.Fatalf("%s: effort = %q", choice, e)
+		}
+		if tc := str(asObj(m["tool_choice"])["type"]); tc != "any" && tc != "tool" {
+			t.Fatalf("%s: tool_choice = %v", choice, m["tool_choice"])
+		}
+	}
+}
+
+// Adaptive thinking stays on in an unsigned tool loop: Anthropic answers it (live call 2026-10-13).
+func TestAdaptiveThinkingStaysOnInAnUnsignedToolLoop(t *testing.T) {
+	m := chatToAnthropic(t, `{"model":"m","reasoning_effort":"high","messages":[{"role":"user","content":"go"},`+loopTail+`]}`, AnthropicOptions{Adaptive: true})
+	if str(asObj(m["thinking"])["type"]) != "adaptive" || str(asObj(m["output_config"])["effort"]) != "high" {
+		t.Fatalf("thinking=%v output_config=%v", m["thinking"], m["output_config"])
+	}
+}
+
+func TestAnthropicEffortTable(t *testing.T) {
+	cases := map[string]string{"": "", "none": "", "minimal": "low", "low": "low", "medium": "medium",
+		"MEDIUM": "medium", "high": "high", "HIGH": "high", "xhigh": "xhigh", "max": "max", "unknown": "medium"}
+	for in, want := range cases {
+		if got := anthropicEffort(in); got != want {
+			t.Errorf("anthropicEffort(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

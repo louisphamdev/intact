@@ -169,6 +169,7 @@ func TestModelInfos(t *testing.T) {
 		"antigravity": `{"models":{"x-high":{"supportsThinking":true},"x-low":{"supportsThinking":true},"img":{}}}`,
 		"nvidia":      `{"data":[{"id":"m","owned_by":"x"}]}`,
 		"cloudflare":  `{"result":[{"id":"0b1c-uuid","name":"@cf/a","properties":[{"property_id":"reasoning","value":"true"},{"property_id":"reasoning_effort","value":{"supported_efforts":["high","low"],"default_effort":"low","mandatory":true}},{"property_id":"require_workers_paid","value":"true"}]},{"name":"@cf/b","properties":[{"property_id":"context_window","value":"8000"}]}]}`,
+		"intern-ai":   `{"data":[{"id":"m-6","schema_version":"2.4","input_modalities":[{"type":"text","supported_inputs":{"max_context_length":{"value":1048576}}}],"output_modalities":[{"type":"text","max_length":{"value":1048576},"supported_parameters":{"reasoning":{"type":"boolean"}}}]}]}`,
 	}
 	got := map[string]string{}
 	for name, raw := range cases {
@@ -190,6 +191,7 @@ func TestModelInfos(t *testing.T) {
 		"antigravity": `{"img":{"thinking":false},"x":{"thinking":true,"efforts":["high","low"],"default":"high"}}`,
 		"nvidia":      `null`,
 		"cloudflare":  `{"@cf/a":{"thinking":true,"always":true,"efforts":["low","high"],"default":"low","paid":true},"@cf/b":{"thinking":false,"context":8000}}`,
+		"intern-ai":   `{"m-6":{"thinking":true,"context":1048576,"output":1048576}}`,
 	}
 	for k := range cases {
 		if got[k] != want[k] {

@@ -150,6 +150,32 @@ func readLimits(m map[string]any) (context, input, output, compact int64) {
 			}
 		}
 	}
+	// schema_version 2.4 (InternLM / tokenplan).
+	if inps, ok := m["input_modalities"].([]any); ok {
+		for _, inp := range inps {
+			if o, _ := inp.(map[string]any); str(o["type"]) == "text" {
+				if supp, ok := o["supported_inputs"].(map[string]any); ok {
+					if mcl, ok := supp["max_context_length"].(map[string]any); ok {
+						pick(&context, mcl["value"])
+					}
+				}
+			}
+		}
+	}
+	if outps, ok := m["output_modalities"].([]any); ok {
+		for _, outp := range outps {
+			if o, _ := outp.(map[string]any); str(o["type"]) == "text" {
+				if ml, ok := o["max_length"].(map[string]any); ok {
+					pick(&output, ml["value"])
+				}
+				if supp, ok := o["supported_parameters"].(map[string]any); ok {
+					if mt, ok := supp["max_tokens"].(map[string]any); ok {
+						pick(&output, mt["max"])
+					}
+				}
+			}
+		}
+	}
 	return context, input, output, compact
 }
 
@@ -225,6 +251,18 @@ func readInfo(m map[string]any) (ModelInfo, bool) {
 		}
 		if r, ok := m["reasoning"].(map[string]any); ok && r["mandatory"] == true {
 			info.Always = true
+		}
+	}
+	// schema_version 2.4 (InternLM / tokenplan).
+	if outps, ok := m["output_modalities"].([]any); ok {
+		for _, outp := range outps {
+			if o, _ := outp.(map[string]any); str(o["type"]) == "text" {
+				if supp, ok := o["supported_parameters"].(map[string]any); ok {
+					if _, hasReasoning := supp["reasoning"]; hasReasoning {
+						yes(true)
+					}
+				}
+			}
 		}
 	}
 	// Groq.

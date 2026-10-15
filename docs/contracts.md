@@ -52,9 +52,11 @@ Each rule runs over all input leaves before the next rule starts:
 5. The same enum value on any path.
 
 The enum rule is last, because it must not take the counterpart of a field that a stricter rule matches.
-Unmatched leaves become candidates, with two exceptions:
+Unmatched leaves become candidates, with four exceptions:
 - An empty array or object carries no value, so a converter that drops it loses nothing.
+- A `null` value carries no value either. For example, the `usage: null` of a middle chunk in a chat stream is not lost.
 - The reducer cuts paths deeper than 12 levels. If the output was cut at a field, the absence of the field on the output side proves nothing.
+- The reducer keeps 1500 leaves for each event and 5000 leaves for each record. At this limit, it adds a `{cut}` leaf at the root, so the diff reports no field of that record as lost.
 
 The judge evaluates new candidate signatures from trusted traces.
 Verdicts for `noise`, `normalized`, and `renamed` stay `proposed` until the owner approves them.

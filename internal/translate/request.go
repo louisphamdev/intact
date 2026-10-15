@@ -586,6 +586,9 @@ func AnthropicToOpenAIFor(body []byte, names *ToolNames, opt HubOptions) ([]byte
 			if d := str(td["description"]); d != "" {
 				fn["description"] = d
 			}
+			if s, ok := td["strict"].(bool); ok {
+				fn["strict"] = s
+			}
 			ts = append(ts, obj{"type": "function", "function": fn})
 		}
 		if len(ts) > 0 {

@@ -39,8 +39,8 @@ var StaticNoiseList = []string{
 // every input leaf before the next, from the strictest: same path, approved mapping, same hash
 // (len >= 8), same path under one renamed segment, then same enum anywhere. An enum anywhere
 // comes last so that it cannot take the counterpart of a field a stricter rule would match.
-// An unmatched input leaf is a candidate (at most 200), unless it is an empty container or the
-// output was cut at that field, since its absence then proves nothing.
+// An unmatched input leaf is a candidate (at most 200), unless it is an empty container, a null,
+// or the output was cut at that field, since its absence then proves nothing.
 func Diff(in, out ShapeRecord, mappings []Mapping, noise []string, model, clientFormat, direction string) ([]Candidate, []string) {
 	var outLeaves []Leaf
 	var cutParents []string
@@ -114,7 +114,7 @@ func Diff(in, out ShapeRecord, mappings []Mapping, noise []string, model, client
 
 	var candidates []Candidate
 	for i, inLeaf := range inLeaves {
-		if inMatched[i] || inLeaf.Type == "array" || inLeaf.Type == "object" || cutAt(inLeaf.Path, cutParents) {
+		if inMatched[i] || inLeaf.Type == "array" || inLeaf.Type == "object" || inLeaf.Type == "null" || cutAt(inLeaf.Path, cutParents) {
 			continue
 		}
 		if len(candidates) < 200 {
@@ -168,6 +168,9 @@ func renamedSegment(in, out string) bool {
 func cutAt(path string, cutParents []string) bool {
 	segs := strings.Split(path, ".")
 	for _, c := range cutParents {
+		if c == "" {
+			return true // cut at the root: the whole record was capped
+		}
 		for k := 1; k <= len(segs); k++ {
 			prefix := strings.Join(segs[:k], ".")
 			if prefix == c || renamedSegment(prefix, c) {

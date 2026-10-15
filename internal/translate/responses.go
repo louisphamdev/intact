@@ -68,7 +68,10 @@ func OpenAIToResponses(body []byte) ([]byte, error) {
 			if params == nil {
 				params = obj{"type": "object", "properties": obj{}}
 			}
-			td := obj{"type": "function", "name": fn["name"], "parameters": params}
+			// Responses turns an omitted strict into strict mode, which forces every
+			// optional field; a chat tool is non-strict unless it says otherwise.
+			strict, _ := fn["strict"].(bool)
+			td := obj{"type": "function", "name": fn["name"], "parameters": params, "strict": strict}
 			if d := str(fn["description"]); d != "" {
 				td["description"] = d
 			}

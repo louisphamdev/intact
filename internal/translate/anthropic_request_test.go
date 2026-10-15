@@ -55,3 +55,22 @@ func TestToolChoiceWithoutToolsIsDropped(t *testing.T) {
 		t.Errorf("tool_choice sent with no tools: %s", j(m))
 	}
 }
+
+// An Anthropic strict tool stays strict on the way to a Responses provider.
+func TestAnthropicStrictToolReachesResponses(t *testing.T) {
+	body := `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"}],"tools":[
+	 {"name":"tight","strict":true,"input_schema":{"type":"object"}},
+	 {"name":"loose","input_schema":{"type":"object"}}]}`
+	hub, err := AnthropicToOpenAI([]byte(body), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := OpenAIToResponses(hub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := list(mustJSON(t, out)["tools"])
+	if len(tools) != 2 || asObj(tools[0])["strict"] != true || asObj(tools[1])["strict"] != false {
+		t.Fatalf("tools = %s", j(tools))
+	}
+}

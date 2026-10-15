@@ -228,3 +228,31 @@ func TestReduceDepthLimitCut(t *testing.T) {
 		t.Fatalf("expected cut leaf at depth > 12, got %+v", rec)
 	}
 }
+
+// A shape cut by the leaf cap must say so, or a diff reads it as complete and
+// reports every field past the cut as lost.
+func TestReduceLeafCapMarksTheCut(t *testing.T) {
+	items := make([]string, maxLeavesPerEvent+10)
+	for i := range items {
+		items[i] = `"x"`
+	}
+	big := []byte(`{"messages":[` + strings.Join(items, ",") + `]}`)
+	out := Reduce(big, false, []byte("k"))
+	if !hasCutLeaf(out) {
+		t.Fatalf("no cut leaf in a shape over the cap")
+	}
+	in := Reduce([]byte(`{"model":"some-model-id"}`), false, []byte("k"))
+	if cands, _ := Diff(in, out, nil, nil, "m", "responses", "request"); len(cands) != 0 {
+		t.Fatalf("a field past the cut is reported lost: %+v", cands)
+	}
+}
+
+// A null carries no value, like an empty container: the usage:null of a chat
+// stream's middle chunks is not lost when the converter drops it.
+func TestDiffIgnoresADroppedNull(t *testing.T) {
+	in := Reduce([]byte(`{"usage":null,"id":"chatcmpl-1"}`), false, testKey)
+	out := Reduce([]byte(`{"id":"chatcmpl-1"}`), false, testKey)
+	if cands, _ := Diff(in, out, nil, nil, "m", "responses", "response"); len(cands) != 0 {
+		t.Fatalf("a dropped null is reported lost: %+v", cands)
+	}
+}

@@ -178,8 +178,11 @@ func Reduce(body []byte, sse bool, key []byte) ShapeRecord {
 		if totalLeaves+len(evLeaves) > maxLeavesPerRecord {
 			rem := maxLeavesPerRecord - totalLeaves
 			if rem > 0 {
-				evLeaves = evLeaves[:rem]
+				evLeaves = append(evLeaves[:rem:rem], Leaf{Path: "{cut}", Type: "cut"})
 			} else {
+				if n := len(records); n > 0 && !hasCutLeaf(ShapeRecord{Records: records[n-1:]}) {
+					records[n-1].Leaves = append(records[n-1].Leaves, Leaf{Path: "{cut}", Type: "cut"})
+				}
 				break
 			}
 		}
@@ -283,6 +286,11 @@ func reduceJSON(doc []byte, key []byte) []Leaf {
 
 func walk(v any, path, parentKey string, underJSON, underDataParent bool, depth int, key []byte, leaves *[]Leaf) {
 	if len(*leaves) >= maxLeavesPerEvent {
+		// Map order is random, so the fields past the cap differ per trace: the
+		// shape must say it was cut, or the diff reports them as lost.
+		if len(*leaves) == maxLeavesPerEvent {
+			*leaves = append(*leaves, Leaf{Path: "{cut}", Type: "cut"})
+		}
 		return
 	}
 	if depth > maxDepth {

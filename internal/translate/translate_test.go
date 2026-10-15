@@ -625,3 +625,25 @@ func TestGeminiFunctionCallWithoutArgsIsEmptyObject(t *testing.T) {
 		t.Errorf("arguments of a call without args:\n%s", s)
 	}
 }
+
+// Responses normalizes a function tool to strict mode when strict is omitted,
+// which forces every optional field; Chat Completions is non-strict by default.
+func TestOpenAIToResponsesKeepsToolStrictness(t *testing.T) {
+	in := `{"model":"gpt-5","messages":[{"role":"user","content":"hi"}],"tools":[
+	 {"type":"function","function":{"name":"loose","parameters":{"type":"object"}}},
+	 {"type":"function","function":{"name":"tight","strict":true,"parameters":{"type":"object"}}}]}`
+	out, err := OpenAIToResponses([]byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools := list(mustJSON(t, out)["tools"])
+	if len(tools) != 2 {
+		t.Fatalf("tools = %s", out)
+	}
+	if s, ok := asObj(tools[0])["strict"].(bool); !ok || s {
+		t.Errorf("tool without strict must go as strict:false, got %s", j(tools[0]))
+	}
+	if s, ok := asObj(tools[1])["strict"].(bool); !ok || !s {
+		t.Errorf("strict:true must be kept, got %s", j(tools[1]))
+	}
+}

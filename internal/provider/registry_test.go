@@ -50,7 +50,7 @@ func TestClaudeCarriesTheIdentityOfTheRealTool(t *testing.T) {
 	// Identity is what names the tool. A caller must never be able to replace it,
 	// because the point of this provider is that the upstream sees Claude Code.
 	for k, want := range map[string]string{
-		"User-Agent": "claude-cli/2.1.281 (external, sdk-cli)",
+		"User-Agent": "claude-cli/2.1.300 (external, sdk-cli)",
 		"X-App":      "cli",
 	} {
 		if p.Identity[k] != want {
@@ -115,5 +115,13 @@ func TestNoBuiltinReplaysReasoning(t *testing.T) {
 	}
 	if (Def{ID: "x", Kind: KindAPIKey, API: "openai", BaseURL: "http://x/v1"}).Provider().ReplayReasoning {
 		t.Errorf("a def that does not opt in replays reasoning")
+	}
+}
+
+// The Codex backend hides models from an old client_version: 0.155.1 did not list gpt-6.1-sol (2026-10-15).
+func TestCodexPresentsTheCurrentCLIVersion(t *testing.T) {
+	p, _ := Lookup("codex")
+	if p.Identity["User-Agent"] != "codex_cli_rs/0.162.1" || p.ModelsQuery != "client_version=0.162.1" {
+		t.Fatalf("codex identity = %q, models query = %q", p.Identity["User-Agent"], p.ModelsQuery)
 	}
 }

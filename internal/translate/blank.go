@@ -128,3 +128,63 @@ func WithoutDuplicateReasoning(body []byte) []byte {
 	}
 	return out
 }
+
+// WithoutUnsignedThinking drops the thinking blocks of an Anthropic Messages body that carry no
+// signature. Anthropic itself refuses them ("Invalid `signature` in `thinking` block"), and intact
+// writes exactly such blocks (signature "") when it answers from a converted route, so a client that
+// replays that turn to the real API would fail. Signed blocks stay untouched, byte for byte in a body
+// with none to drop. A turn left empty gets the stand-in text, or goes when it is a trailing prefill.
+func WithoutUnsignedThinking(body []byte) []byte {
+	if !bytes.Contains(body, []byte(`"thinking"`)) {
+		return body
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	var m obj
+	if dec.Decode(&m) != nil {
+		return body
+	}
+	changed := false
+	msgs := list(m["messages"])
+	var kept []any
+	for i, raw := range msgs {
+		msg := asObj(raw)
+		blocks, ok := msg["content"].([]any)
+		if !ok {
+			kept = append(kept, raw)
+			continue
+		}
+		var keep []any
+		dropped := false
+		for _, b := range blocks {
+			bm := asObj(b)
+			if str(bm["type"]) == "thinking" && strings.TrimSpace(str(bm["signature"])) == "" {
+				dropped = true
+				continue
+			}
+			keep = append(keep, b)
+		}
+		if !dropped {
+			kept = append(kept, raw)
+			continue
+		}
+		changed = true
+		if len(keep) == 0 {
+			if i == len(msgs)-1 && str(msg["role"]) == "assistant" {
+				continue
+			}
+			keep = []any{obj{"type": "text", "text": blankStandIn}}
+		}
+		msg["content"] = keep
+		kept = append(kept, msg)
+	}
+	if !changed {
+		return body
+	}
+	m["messages"] = kept
+	out, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	return out
+}

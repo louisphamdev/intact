@@ -332,7 +332,11 @@ func ResponsesToOpenAIFor(body []byte, vocab *ToolNames, opt HubOptions) ([]byte
 				pushCall(callID(it), "local_shell", marshalString(args))
 			case typ == "function_call_output" || typ == "custom_tool_call_output" || typ == "local_shell_call_output":
 				reasoning.Reset()
-				msgs = append(msgs, obj{"role": "tool", "tool_call_id": callID(it), "content": responsesOutputText(it["output"])})
+				out := responsesOutputText(it["output"])
+				if str(it["status"]) == "incomplete" {
+					out = "Error: " + out // an interrupted tool run is an error result, as is_error is on the Messages route
+				}
+				msgs = append(msgs, obj{"role": "tool", "tool_call_id": callID(it), "content": out})
 				// A tool message carries text only, so its images follow it as a user turn.
 				if images := responsesOutputImages(it["output"]); len(images) > 0 {
 					msgs = append(msgs, obj{"role": "user", "content": images})

@@ -1133,6 +1133,7 @@ func filterFor(a *api, r *http.Request, p provider.Provider, prov, path string, 
 	// blank block costs that request a 400 anyway, and a clean body keeps its bytes.
 	if path == "messages" || path == "v1/messages" {
 		body = translate.WithoutBlankText(body)
+		body = translate.WithoutUnsignedThinking(body)
 	}
 	return body
 }

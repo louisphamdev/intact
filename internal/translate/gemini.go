@@ -316,7 +316,7 @@ func init() {
 		prefixItems additionalItems default examples $schema $defs definitions $ref $comment $id
 		deprecated readOnly writeOnly additionalProperties propertyNames patternProperties enumDescriptions
 		not dependencies dependentSchemas dependentRequired title optional if then else
-		contentMediaType contentEncoding strict encrypted cache_control example`) {
+		contentMediaType contentEncoding strict encrypted cache_control example discriminator`) {
 		geminiDropKeys[k] = true
 	}
 }

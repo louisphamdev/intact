@@ -421,7 +421,7 @@ func AnthropicToolNames(body []byte) []string {
 		return nil
 	}
 	var out []string
-	for _, raw := range list(in["tools"]) {
+	for _, raw := range append(list(in["tools"]), inlineToolDefs(in)...) {
 		t := asObj(raw)
 		if t["input_schema"] == nil || str(t["name"]) == "" {
 			continue
@@ -496,6 +496,8 @@ func AnthropicToOpenAIFor(body []byte, names *ToolNames, opt HubOptions) ([]byte
 				parts = append(parts, obj{"type": "image_url", "image_url": obj{"url": u}})
 			case "document":
 				return nil, errors.New("document blocks are not supported by this provider")
+			case "tool_addition":
+				// carried in tools[] by inlineToolDefs
 			case "tool_use":
 				calls = append(calls, obj{"id": blk["id"], "type": "function",
 					"function": obj{"name": names.ToProvider(str(blk["name"])), "arguments": argsText(blk["input"])}})
@@ -575,10 +577,17 @@ func AnthropicToOpenAIFor(body []byte, names *ToolNames, opt HubOptions) ([]byte
 	if str(f["type"]) == "json_schema" && asObj(f["schema"]) != nil {
 		out["response_format"] = obj{"type": "json_schema", "json_schema": obj{"name": "response", "schema": f["schema"]}}
 	}
-	if tools := list(in["tools"]); len(tools) > 0 {
+	if tools := append(list(in["tools"]), inlineToolDefs(in)...); len(tools) > 0 {
 		var ts []any
+		seen := map[string]bool{}
 		for _, t := range tools {
 			td := asObj(t)
+			if n := str(td["name"]); n != "" {
+				if seen[n] {
+					continue
+				}
+				seen[n] = true
+			}
 			if td["input_schema"] == nil {
 				continue // a server tool (web search, …) has no OpenAI counterpart
 			}
@@ -660,4 +669,32 @@ func simplifyParts(parts []any) any {
 		}
 	}
 	return joinText(parts)
+}
+
+// inlineToolDefs lists the tools Claude Code's inline-tools beta declares inside the messages (and a
+// system array) as `tool_addition` blocks. Only Anthropic's own Messages API reads those blocks; a
+// converted route has to carry them as ordinary tools or the model never sees them. A
+// `tool_reference` names a tool already declared, so it adds nothing.
+func inlineToolDefs(in obj) []any {
+	var out []any
+	scan := func(content any) {
+		for _, b := range list(content) {
+			blk := asObj(b)
+			if str(blk["type"]) != "tool_addition" {
+				continue
+			}
+			tool := asObj(blk["tool"])
+			if str(tool["type"]) != "tool_definition" {
+				continue
+			}
+			if def := asObj(tool["definition"]); def != nil {
+				out = append(out, def)
+			}
+		}
+	}
+	scan(in["system"])
+	for _, m := range list(in["messages"]) {
+		scan(asObj(m)["content"])
+	}
+	return out
 }

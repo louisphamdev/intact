@@ -772,3 +772,18 @@ func TestReasoningReplaySkipsBlankThinking(t *testing.T) {
 		}
 	}
 }
+
+// A terminal event that carries status failed or cancelled is a failure, not an answer: the caller
+// must get an error and no clean "stop" (OmniRoute#16909).
+func TestResponsesTerminalFailedStatusIsAnError(t *testing.T) {
+	for _, typ := range []string{"response.done", "response.completed"} {
+		for _, status := range []string{"failed", "cancelled"} {
+			t.Run(typ+"/"+status, func(t *testing.T) {
+				got := responsesToChat("event: " + typ + "\ndata: {\"type\":\"" + typ + "\",\"response\":{\"id\":\"resp_1\",\"status\":\"" + status + "\",\"output\":[],\"error\":{\"message\":\"upstream boom\"}}}\n\n")
+				if strings.Contains(got, `"finish_reason":"stop"`) || strings.Contains(got, "[DONE]") || !strings.Contains(got, `"error"`) {
+					t.Errorf("a %s response closed as a clean answer:\n%s", status, got)
+				}
+			})
+		}
+	}
+}

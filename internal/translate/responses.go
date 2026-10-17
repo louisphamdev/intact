@@ -289,6 +289,15 @@ func ResponsesStreamToOpenAI(dst Flusher, src io.Reader) {
 			}
 		case "response.completed", "response.done", "response.incomplete":
 			r := asObj(ev["response"])
+			// A terminal event whose status is failed or cancelled is not an answer, whatever its type.
+			if st := str(r["status"]); st == "failed" || st == "cancelled" {
+				msg := str(asObj(r["error"])["message"])
+				if msg == "" {
+					msg = "upstream response " + st
+				}
+				fail(msg)
+				return false
+			}
 			// An incomplete answer with nothing in it is a refusal; only streamed content keeps length.
 			if reason := str(asObj(r["incomplete_details"])["reason"]); typ == "response.incomplete" && len(list(r["output"])) == 0 &&
 				num(asObj(r["usage"])["output_tokens"]) == 0 && (reason != "max_output_tokens" || (!emitted && len(toolIndex) == 0)) {

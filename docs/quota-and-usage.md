@@ -14,6 +14,7 @@ Each account's quota is read from the provider's own endpoint where one exists:
 | Antigravity | quota summary + `fetchAvailableModels` | per-model share of the model's bucket, with its reset |
 | Groq | the rate-limit headers of a `/models` call | requests and tokens per window |
 | OpenRouter | `/api/v1/key` | credit used against the key's limit |
+| A declared provider with `quotaUrl` | its `quotaUrl` | the windows that the URL gives |
 
 A provider without a quota endpoint falls back to the rate-limit headers of its
 last answer. intact keeps those headers passively from every response:
@@ -31,6 +32,34 @@ On the page:
   server (the `quota-view` setting).
 
 API: `GET /api/quota?provider=&connection=`. MCP: `get_quota`.
+
+### Quota URL of a declared provider
+
+A [declared provider](providers.md#declared-providers) can set `quotaUrl`.
+intact sends `GET <quotaUrl>` with the account's credential, the auth header
+and prefix, and the extra headers of the definition. `{accountId}` in
+`quotaUrl` is filled with the account id. It is allowed only when the base URL
+also holds `{accountId}`, because only then does an account store its id. The
+answer must be JSON in this shape:
+
+```json
+{"plan": "Free",
+ "windows": [{"name": "Bonus Pack", "usedPct": 4, "used": "10", "limit": "250",
+              "resetAt": "2026-11-01T06:02:06Z"}]}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `plan` | Optional. The plan name on the card. |
+| `windows[].name` | Required. A window without a name is dropped. |
+| `windows[].usedPct` | The used share, 0 to 100. A larger value shows as 100. When it is absent or negative, the card shows `used / limit` with no bar. |
+| `windows[].used`, `windows[].limit` | Optional. Text or a number. |
+| `windows[].resetAt` | Optional. RFC 3339 text, or epoch seconds or milliseconds. Any other value is dropped. |
+| `windows[].unlimited` | Optional. `true` shows the window as unlimited. |
+
+If the URL answers with a status of 300 or more, the card shows the error.
+If the rate-limit headers of a recent answer give windows, the card shows
+those windows instead, with the **last answer** badge.
 
 ### Resets
 

@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -440,6 +442,76 @@ func quotaOpenRouter(a *api, ctx context.Context, c store.Connection, token stri
 	}
 	q.Windows = append(q.Windows, w)
 	return q, nil
+}
+
+// quotaDeclared reads a declared provider's quotaUrl, which answers in intact's
+// own shape. A window without a name is dropped; usedPct is kept in 0–100, or
+// -1 when the answer gives none.
+func quotaDeclared(a *api, ctx context.Context, c store.Connection, token string) (AccountQuota, error) {
+	p, ok := a.providerFor(c)
+	if !ok || p.QuotaURL == "" {
+		return AccountQuota{}, fmt.Errorf("provider %q has no quotaUrl", c.Provider)
+	}
+	secret, err := a.exchanged(ctx, p, c.ID, token)
+	if err != nil {
+		return AccountQuota{}, err
+	}
+	headers := map[string]string{}
+	for k, v := range p.Defaults {
+		headers[k] = v
+	}
+	for k, v := range p.Identity {
+		headers[k] = v
+	}
+	if p.AuthHeader != "" {
+		headers[p.AuthHeader] = p.AuthPrefix + secret
+	}
+	var d struct {
+		Plan    string `json:"plan"`
+		Windows []struct {
+			Name      string   `json:"name"`
+			UsedPct   *float64 `json:"usedPct"`
+			Used      any      `json:"used"`
+			Limit     any      `json:"limit"`
+			ResetAt   any      `json:"resetAt"`
+			Unlimited bool     `json:"unlimited"`
+		} `json:"windows"`
+	}
+	url := p.QuotaURL
+	if strings.Contains(url, "{accountId}") {
+		acct := c.Meta["accountId"]
+		if acct == "" {
+			return AccountQuota{}, errors.New("the account has no account id for quotaUrl")
+		}
+		url = strings.ReplaceAll(url, "{accountId}", neturl.PathEscape(acct))
+	}
+	if _, err := fetchJSON(ctx, http.MethodGet, url, headers, nil, &d); err != nil {
+		return AccountQuota{}, err
+	}
+	q := AccountQuota{Plan: d.Plan, Windows: []QuotaWindow{}}
+	for _, w := range d.Windows {
+		if w.Name == "" {
+			continue
+		}
+		qw := QuotaWindow{Name: w.Name, UsedPct: -1, Used: quotaText(w.Used), Limit: quotaText(w.Limit),
+			ResetAt: resetTime(w.ResetAt), Unlimited: w.Unlimited}
+		if w.UsedPct != nil && *w.UsedPct >= 0 {
+			qw.UsedPct = clampPct(*w.UsedPct)
+		}
+		q.Windows = append(q.Windows, qw)
+	}
+	return q, nil
+}
+
+// quotaText shows a used or limit value given as text or as a number.
+func quotaText(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case json.Number:
+		return x.String()
+	}
+	return ""
 }
 
 // shortBucket trims Antigravity's bucket wording: "Gemini Models" → "Gemini",

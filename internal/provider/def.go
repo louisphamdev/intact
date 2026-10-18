@@ -42,7 +42,10 @@ type Def struct {
 	ModelsURL string `json:"modelsUrl,omitempty"`
 	// Models stands in when the list cannot be read.
 	Models []string `json:"models,omitempty"`
-	OAuth  *OAuth   `json:"oauth,omitempty"`
+	// QuotaURL, when set, is read with the account's credential for its
+	// quota, answered as {plan, windows} ({accountId} is filled).
+	QuotaURL string `json:"quotaUrl,omitempty"`
+	OAuth    *OAuth `json:"oauth,omitempty"`
 	// ReplayReasoning sends a caller's thinking back as reasoning_content on a tool-call turn, which
 	// thinking-mode chat models (DeepSeek, Kimi) require; a strict OpenAI server can refuse the field.
 	ReplayReasoning bool `json:"replayReasoning,omitempty"`
@@ -116,6 +119,14 @@ func (d *Def) Normalize() error {
 	if d.ModelsURL != "" && d.ModelsURL != "none" && !httpURL(strings.ReplaceAll(d.ModelsURL, "{accountId}", "x")) {
 		return errors.New("modelsUrl: an http(s) URL, or none")
 	}
+	d.QuotaURL = strings.TrimSpace(d.QuotaURL)
+	if d.QuotaURL != "" && !httpURL(strings.ReplaceAll(d.QuotaURL, "{accountId}", "x")) {
+		return errors.New("quotaUrl: an http(s) URL")
+	}
+	// An account stores its id only when the base URL asks for one.
+	if strings.Contains(d.QuotaURL, "{accountId}") && !strings.Contains(d.BaseURL, "{accountId}") {
+		return errors.New("quotaUrl: {accountId} needs {accountId} in baseUrl too")
+	}
 	if d.Icon != "" && !strings.HasPrefix(d.Icon, "https://") && !strings.HasPrefix(d.Icon, "data:image/") {
 		return errors.New("icon: an https: or data:image/ URL")
 	}
@@ -175,7 +186,7 @@ func (d *Def) Normalize() error {
 // Provider is how intact calls a declared provider.
 func (d Def) Provider() Provider {
 	p := Provider{ID: d.ID, BaseURL: d.BaseURL, AuthHeader: d.AuthHeader, AuthPrefix: d.AuthPrefix,
-		Models: d.Models, Defaults: map[string]string{}, ReplayReasoning: d.ReplayReasoning}
+		Models: d.Models, Defaults: map[string]string{}, ReplayReasoning: d.ReplayReasoning, QuotaURL: d.QuotaURL}
 	if d.API != "openai" {
 		p.API = d.API
 	}

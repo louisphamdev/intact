@@ -63,8 +63,22 @@ type quotaCache struct {
 	flights   map[string]*quotaFlight
 }
 
+type quotaFetcher func(a *api, ctx context.Context, c store.Connection, token string) (AccountQuota, error)
+
 // quotaFetchers read an account's quota from the provider's own endpoint.
-var quotaFetchers = map[string]func(a *api, ctx context.Context, c store.Connection, token string) (AccountQuota, error){}
+var quotaFetchers = map[string]quotaFetcher{}
+
+// quotaFetcherFor is the built-in reader of the account's provider, or the
+// quotaUrl reader of a declared provider that sets one.
+func (a *api) quotaFetcherFor(c store.Connection) (quotaFetcher, bool) {
+	if fetch, ok := quotaFetchers[c.Provider]; ok {
+		return fetch, true
+	}
+	if p, ok := a.providerFor(c); ok && p.QuotaURL != "" {
+		return quotaDeclared, true
+	}
+	return nil, false
+}
 
 // quotaFor returns an account's quota: from the provider when it has a quota
 // endpoint, otherwise from the rate-limit headers of its last answer.
@@ -129,7 +143,7 @@ func (a *api) quotaFor(ctx context.Context, c store.Connection, refresh bool) Ac
 		}
 		fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
 		defer cancel()
-		if fetch, ok := quotaFetchers[c.Provider]; ok {
+		if fetch, ok := a.quotaFetcherFor(c); ok {
 			token, err := a.secretFor(fctx, c.ID)
 			if err == nil {
 				var got AccountQuota
@@ -216,7 +230,7 @@ func (a *api) quotaFor(ctx context.Context, c store.Connection, refresh bool) Ac
 // stores through the sequence rule, fills the same fields as quotaFor,
 // 20-second timeout on context.WithoutCancel.
 func (a *api) freshQuota(ctx context.Context, c store.Connection) (AccountQuota, error) {
-	fetch, ok := quotaFetchers[c.Provider]
+	fetch, ok := a.quotaFetcherFor(c)
 	if !ok {
 		return AccountQuota{}, fmt.Errorf("no quota fetcher for provider %q", c.Provider)
 	}

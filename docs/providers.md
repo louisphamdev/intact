@@ -205,7 +205,7 @@ The form asks for the fields of its **kind**:
 
 | Kind | Accounts | Fields |
 | --- | --- | --- |
-| `apikey` | a pasted key or token | id, name, API standard, base URL, auth header and prefix, extra headers, model list URL or fixed models, colour, icon |
+| `apikey` | a pasted key or token | id, name, API standard, base URL, auth header and prefix, extra headers, model list URL or fixed models, quota URL, colour, icon |
 | `oauth-code` | sign in in the browser, paste back the address it ends on (or the code) | as `apikey`, plus authorize URL, redirect URI, token URL, client id and secret, scope, extra authorize parameters, PKCE on or off |
 | `oauth-device` | enter a device code on the provider's page; intact polls | as `apikey`, plus device code URL, token URL, client id and secret, scope, verification page (when the provider names none) |
 
@@ -223,6 +223,10 @@ Defaults and conventions:
   (Google) is dropped. With `none`, the declared models are the list.
 - **Account id:** `{accountId}` in the base URL (or the model list URL) makes a
   new account ask for its account id.
+- **Quota URL:** optional. When it is set, the Quota page reads it for each
+  account, with the same credential and headers as a call. The answer has the
+  shape of [a quota URL answer](quota-and-usage.md#quota-url-of-a-declared-provider).
+  When it is empty, the account shows the rate-limit headers of its last answer.
 - **OAuth tokens** are refreshed with the declared token URL, client id and
   secret. The provider must use the standard `refresh_token` grant.
 

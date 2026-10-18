@@ -55,6 +55,8 @@ type Provider struct {
 	ModelsURL string
 	// NoModelList: the provider has no list; Models is the list.
 	NoModelList bool
+	// QuotaURL, when set, is where a declared provider's quota is read (see Def).
+	QuotaURL string
 	// BifrostUA is the User-Agent prefix of the provider's own client. A caller
 	// that sends it crosses Bifrost: intact changes only the credential.
 	BifrostUA string

@@ -1775,6 +1775,7 @@ async function declareProvider(id){
       row('Auth prefix',inp('authPrefix',{placeholder:'Bearer '}),'Empty: "Bearer " (none for x-api-key)')),
     row('Extra headers',area('headers',{placeholder:'anthropic-beta: …\nX-Title: intact'}),'One per line, Name: value.'),
     row('Model list URL',inp('modelsUrl',{placeholder:'<base>/models'}),'Empty: <base>/models. "none": the provider has no list; the models below are the list.'),
+    row('Quota URL',inp('quotaUrl',{placeholder:'https://api.example.com/quota'}),'Optional. Read with the account\'s credential; it answers {plan, windows}. {accountId} works only when the base URL has it too.'),
     row('Models',area('models',{placeholder:'model-a\nmodel-b'}),'One per line. Used when the list cannot be read, or as the list with "none".'),
     el('label',{style:'display:flex;gap:.5rem;align-items:center'},replay,tr('Send thinking back as reasoning_content on tool calls (DeepSeek, Kimi thinking mode)')),
     el('div',{'data-oauth':'1',style:'display:grid;gap:.85rem;padding:.85rem;border:1px dashed var(--line);border-radius:10px'},
@@ -1795,7 +1796,7 @@ async function declareProvider(id){
       row('Icon URL',inp('icon',{placeholder:'https://…/logo.png'}))));
   const fill=d=>{
     kind.value=d.kind||'apikey';apiSel.value=d.api||'openai';
-    for(const k of ['id','name','baseUrl','authHeader','authPrefix','modelsUrl','icon'])f[k].value=d[k]||'';
+    for(const k of ['id','name','baseUrl','authHeader','authPrefix','modelsUrl','quotaUrl','icon'])f[k].value=d[k]||'';
     f.color.value=d.color||'#52525b';f.headers.value=kvText(d.headers);f.models.value=(d.models||[]).join('\n');replay.checked=!!d.replayReasoning;
     const o=d.oauth||{};for(const k of ['authorizeUrl','redirectUri','deviceCodeUrl','verifyUrl','tokenUrl','clientId','clientSecret','scope'])f[k].value=o[k]||'';
     f.extra.value=Object.entries(o.extra||{}).map(([k,v])=>k+'='+v).join('\n');noPkce.checked=!!o.noPkce;jsonTok.checked=!!o.jsonToken;
@@ -1804,7 +1805,7 @@ async function declareProvider(id){
   const read=()=>{
     const d={id:f.id.value.trim(),name:f.name.value.trim(),kind:kind.value,api:apiSel.value,baseUrl:f.baseUrl.value.trim(),
       authHeader:f.authHeader.value.trim(),authPrefix:f.authPrefix.value,headers:kvParse(f.headers.value,':'),
-      modelsUrl:f.modelsUrl.value.trim(),models:f.models.value.split('\n').map(s=>s.trim()).filter(Boolean),
+      modelsUrl:f.modelsUrl.value.trim(),quotaUrl:f.quotaUrl.value.trim(),models:f.models.value.split('\n').map(s=>s.trim()).filter(Boolean),
       color:f.color.value==='#52525b'?'':f.color.value,icon:f.icon.value.trim()};
     if(kind.value!=='apikey')d.oauth={authorizeUrl:f.authorizeUrl.value.trim(),redirectUri:f.redirectUri.value.trim(),
       deviceCodeUrl:f.deviceCodeUrl.value.trim(),verifyUrl:f.verifyUrl.value.trim(),tokenUrl:f.tokenUrl.value.trim(),
@@ -1865,6 +1866,7 @@ function defCard(p){
           try{await postJSON('/provider-defs/'+encodeURIComponent(p)+'/delete',{});toast('Deleted');await load();location.hash='#/providers'}catch(e){alert(e.message)}}},svg(ICON.trash),'Delete')),
       el('div',{class:'kv'},...kv(tr('Kind'),tr((DECL_KINDS.find(x=>x[0]===d.kind)||[,d.kind])[1])),...kv(tr('API standard'),d.api),...kv('Base URL',d.baseUrl),
         ...kv(tr('Model list URL'),d.modelsUrl||(d.baseUrl+'/models')),...kv(tr('Models'),(d.models||[]).join(', ')),
+        ...(d.quotaUrl?kv(tr('Quota URL'),d.quotaUrl):[]),
         ...kv('Auth',(d.authHeader||'')+(d.authPrefix?' '+d.authPrefix.trim()+' …':'')),
         ...(d.oauth?kv('OAuth',[d.oauth.authorizeUrl||d.oauth.deviceCodeUrl,d.oauth.tokenUrl].filter(Boolean).join(' → ')):[])));
   }).catch(e=>box.replaceChildren(el('span',{class:'err-msg',text:e.message})));

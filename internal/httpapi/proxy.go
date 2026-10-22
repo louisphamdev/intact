@@ -190,6 +190,7 @@ func (a *api) relayObserved(w http.ResponseWriter, resp *http.Response, connID, 
 		_ = cap.Seal(isSSE, clientErr, upstreamErr)
 	}
 	a.recordUsage(connID, keyIDOf(resp), served, tapped, resp.Header.Get("Content-Encoding"))
+	a.traceCache(resp, connID, served, tapped, resp.Header.Get("Content-Encoding"))
 	if resp.StatusCode < 300 && resp.Header.Get("Content-Encoding") == "" && watched(provider) {
 		a.drift.Observe(drift.Response, provider, path, tapped, isEventStream(resp, tapped))
 	}

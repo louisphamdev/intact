@@ -550,12 +550,14 @@ func (a *api) contractReviewSignature(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true, "verdictState": sig.VerdictState, "verdict": sig.Verdict})
 }
 
+// Prunes at start too: a gateway restarted more often than daily never reaches the first tick.
 func (a *api) contractPruneLoop() {
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
-	for range ticker.C {
+	for {
 		if err := a.store.PruneContracts(time.Now(), contract.ReducerVersion); err != nil {
 			log.Printf("contract prune: %v", err)
 		}
+		<-ticker.C
 	}
 }

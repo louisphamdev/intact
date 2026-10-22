@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -172,6 +173,18 @@ func (a *api) sendLogged(r *http.Request, p provider.Provider, conn store.Connec
 		go a.store.PruneUpstreamErrors(errKeepDays, errKeepRows)
 	}
 	return resp, err
+}
+
+// The insert counter resets on restart, so prune at start and daily as well.
+func (a *api) errorPruneLoop() {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		if err := a.store.PruneUpstreamErrors(errKeepDays, errKeepRows); err != nil {
+			log.Printf("upstream error prune: %v", err)
+		}
+		<-ticker.C
+	}
 }
 
 // recheckGate lets a 429 force one quota read per account per interval, so a

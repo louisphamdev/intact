@@ -122,6 +122,7 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	go a.reviewLoop()
 	go a.errorReviewLoop()
 	go a.contractPruneLoop()
+	go a.errorPruneLoop()
 	mux := http.NewServeMux()
 	// One base URL: the model in the body picks the provider and its accounts.
 	// The contract of /v1 is public, like the API it describes.

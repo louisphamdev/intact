@@ -121,7 +121,7 @@ func TestNoBuiltinReplaysReasoning(t *testing.T) {
 // The Codex backend hides models from an old client_version: 0.155.1 did not list gpt-6.1-sol (2026-10-15).
 func TestCodexPresentsTheCurrentCLIVersion(t *testing.T) {
 	p, _ := Lookup("codex")
-	if p.Identity["User-Agent"] != "codex_cli_rs/0.162.1" || p.ModelsQuery != "client_version=0.162.1" {
+	if p.Identity["User-Agent"] != "codex_cli_rs/0.164.0" || p.ModelsQuery != "client_version=0.164.0" {
 		t.Fatalf("codex identity = %q, models query = %q", p.Identity["User-Agent"], p.ModelsQuery)
 	}
 }

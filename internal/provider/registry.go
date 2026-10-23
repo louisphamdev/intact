@@ -273,7 +273,7 @@ const (
 
 // CodexCLIVersion is the Codex CLI version intact presents; the backend hides
 // models that need a newer client.
-const CodexCLIVersion = "0.162.1"
+const CodexCLIVersion = "0.164.0"
 
 // Bifrost reports that a caller with this User-Agent is the provider's own
 // client, which reaches its account with only the credential changed.

@@ -127,9 +127,9 @@ func TestCodexPresentsTheCurrentCLIVersion(t *testing.T) {
 }
 
 // The Antigravity CLI user agent carries the version and the changelist its release binary embeds
-// (1.4.5 embeds "changelist 1004422050", 2026-10-22).
+// (1.4.6 embeds "changelist 1005129088", 2026-10-23).
 func TestAntigravityPresentsTheCurrentCLIVersion(t *testing.T) {
-	want := "antigravity/cli/1.4.5 (aidev_client; os_type=windows; arch=amd64; cl=1004422050; auth_method=consumer)"
+	want := "antigravity/cli/1.4.6 (aidev_client; os_type=windows; arch=amd64; cl=1005129088; auth_method=consumer)"
 	if AntigravityUserAgent != want {
 		t.Fatalf("antigravity UA = %q, want %q", AntigravityUserAgent, want)
 	}

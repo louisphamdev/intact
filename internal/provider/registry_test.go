@@ -50,7 +50,7 @@ func TestClaudeCarriesTheIdentityOfTheRealTool(t *testing.T) {
 	// Identity is what names the tool. A caller must never be able to replace it,
 	// because the point of this provider is that the upstream sees Claude Code.
 	for k, want := range map[string]string{
-		"User-Agent": "claude-cli/2.1.310 (external, sdk-cli)",
+		"User-Agent": "claude-cli/2.1.311 (external, sdk-cli)",
 		"X-App":      "cli",
 	} {
 		if p.Identity[k] != want {
@@ -135,9 +135,9 @@ func TestAntigravityPresentsTheCurrentCLIVersion(t *testing.T) {
 	}
 }
 
-// Anthropic refuses claude-opus-5-5 to older Claude Code; intact presents 2.1.310 (2026-10-24).
+// Anthropic refuses claude-opus-5-5 to older Claude Code; intact presents 2.1.311 (2026-10-27).
 func TestClaudePresentsTheCurrentCLIVersion(t *testing.T) {
-	if ClaudeCLIVersion != "2.1.310" {
-		t.Fatalf("ClaudeCLIVersion = %q, want 2.1.310", ClaudeCLIVersion)
+	if ClaudeCLIVersion != "2.1.311" {
+		t.Fatalf("ClaudeCLIVersion = %q, want 2.1.311", ClaudeCLIVersion)
 	}
 }

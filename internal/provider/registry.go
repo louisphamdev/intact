@@ -104,7 +104,7 @@ func (p Provider) WithAccount(accountID string) string {
 
 // ClaudeCLIVersion is the Claude Code version intact presents. An old version loses models
 // (claude-opus-5-5 needs 2.1.280, 2026-10-01) and quota resets (ineligible:cli_version).
-const ClaudeCLIVersion = "2.1.314"
+const ClaudeCLIVersion = "2.1.316"
 
 // ClaudeInteractiveUserAgent names the interactive Claude Code CLI. Anthropic offers quota
 // resets only to this surface: the "sdk-cli" surface below gets ineligible:surface.

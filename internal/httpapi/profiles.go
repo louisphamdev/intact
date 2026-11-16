@@ -10,6 +10,7 @@ import (
 
 	"github.com/louisphamdev/intact/internal/provider"
 	"github.com/louisphamdev/intact/internal/store"
+	"github.com/louisphamdev/intact/internal/translate"
 )
 
 // A profile is a named group of one provider's accounts. Its model prefix is
@@ -320,5 +321,92 @@ func (a *api) profileMembers(p store.Profile) []store.Connection {
 			out = append(out, c)
 		}
 	}
+	return out
+}
+
+// profileModelsHandler answers GET /api/profiles/{id}/models with the
+// models a profile serves, read fresh from one of its own accounts when
+// ?refresh=1 is set. The ids the provider's list gives are filtered by the
+// profile's own list, so a profile with one sees only its own models.
+func (a *api) profileModelsHandler(w http.ResponseWriter, r *http.Request) {
+	p, err := a.store.Profile(r.PathValue("id"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "no profile has that id")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot read the profile")
+		return
+	}
+	if r.URL.Query().Get("refresh") != "" {
+		if ids, _, ok := a.fetchProfileModels(r.Context(), p); ok {
+			a.catalogIDs(r.Context(), p.Provider) // refresh the shared cache too
+			_ = ids
+		}
+	}
+	writeJSON(w, map[string]any{"models": a.profileModelIDs(r.Context(), p)})
+}
+
+// fetchProfileModels reads one of the profile's own accounts' model list
+// straight from the provider: the profile fetches through its members, not
+// through whichever account of the provider the catalog picked.
+func (a *api) fetchProfileModels(ctx context.Context, p store.Profile) ([]string, []byte, bool) {
+	conns := a.profileMembers(p)
+	if len(conns) == 0 {
+		return nil, nil, false
+	}
+	pr, ok := a.providerFor(conns[0])
+	if !ok {
+		return nil, nil, false
+	}
+	if pr.API == translate.Antigravity {
+		ids, raw, ok := a.antigravityModels(ctx, conns[0])
+		if ok {
+			ids, _ = groupVariants(ids)
+		}
+		return ids, raw, ok
+	}
+	if pr.NoModelList {
+		return append([]string(nil), pr.Models...), nil, true
+	}
+	return a.fetchModelIDs(ctx, conns[0])
+}
+
+// profileRotationHandler answers GET /api/profiles/{id}/rotation with whose
+// turn it is inside the profile: its own cursor, which moves apart from the
+// provider's and from every other profile's.
+func (a *api) profileRotationHandler(w http.ResponseWriter, r *http.Request) {
+	p, err := a.store.Profile(r.PathValue("id"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "no profile has that id")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot read the profile")
+		return
+	}
+	writeJSON(w, a.profileRotationState(p))
+}
+
+// profileRotationState is a profile's rotation: the provider's rotation
+// (mode, sticky, order) applied to the profile's members, plus whose turn it
+// is on the profile's own cursor.
+func (a *api) profileRotationState(p store.Profile) map[string]any {
+	rot := a.rotation(p.Provider)
+	out := map[string]any{"rotation": rot}
+	conns := rot.ordered(a.profileMembers(p))
+	if len(conns) == 0 {
+		return out
+	}
+	if rot.Mode == RotateFallback {
+		conns, _ = withStandbyLast(conns, func(int) int { return 0 })
+		out["next"] = conns[0].ID
+		return out
+	}
+	a.rrMu.Lock()
+	c := a.rrNext["p:"+p.Provider+"@"+p.Name]
+	a.rrMu.Unlock()
+	conns, i := withStandbyLast(conns, func(n int) int { return c.i % n })
+	out["next"], out["used"] = conns[i].ID, c.used
 	return out
 }

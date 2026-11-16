@@ -81,11 +81,11 @@ func TestProfileAPIRefusesAnUnknownModel(t *testing.T) {
 	s.SyncModels("groq", []string{"llama"}, true, nil)
 
 	if rec := sendJSON(h, "POST", "/api/profiles", `{"provider":"groq","name":"lite",
-		"members":["` + groq1.ID + `"],"models":["nope"]}`); rec.Code != http.StatusBadRequest {
+		"members":["`+groq1.ID+`"],"models":["nope"]}`); rec.Code != http.StatusBadRequest {
 		t.Errorf("unknown model: %d %s, want 400", rec.Code, rec.Body.String())
 	}
 	rec := sendJSON(h, "POST", "/api/profiles", `{"provider":"groq","name":"lite",
-		"members":["` + groq1.ID + `"],"models":["llama"]}`)
+		"members":["`+groq1.ID+`"],"models":["llama"]}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("known model: %d %s", rec.Code, rec.Body.String())
 	}
@@ -163,6 +163,10 @@ func profileUpstream(t *testing.T, fail map[string]bool) (*httptest.Server, func
 	calls := map[string]int{}
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/models" {
+			secret := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			mu.Lock()
+			calls["models:"+secret]++
+			mu.Unlock()
 			w.Write([]byte(`{"data":[{"id":"llama"}]}`))
 			return
 		}
@@ -275,5 +279,80 @@ func TestProfileModelListServesOnlyItsModels(t *testing.T) {
 	// at intact's own routing.
 	if got := postV1(h, `{"model":"groq/mixtral","messages":[]}`); got.Code == http.StatusNotFound {
 		t.Errorf("provider prefix: %d %s, want anything but intact's 404", got.Code, got.Body.String())
+	}
+}
+
+// A profile fetches its models through its own accounts, and its rotation
+// cursor moves apart from the provider's: a call through the profile moves
+// the profile's turn and leaves the provider's where it was.
+func TestProfileModelsAndRotation(t *testing.T) {
+	up, calls := profileUpstream(t, nil)
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	c1, _ := s.CreateConnection("groq", "one", "s1")
+	c2, _ := s.CreateConnection("groq", "two", "s2")
+	_, h := newServer(s, map[string]string{"groq": up.URL}, nil)
+	s.SyncModels("groq", []string{"llama", "mixtral"}, true, nil)
+	rec := sendJSON(h, "POST", "/api/profiles", `{"provider":"groq","name":"lite",
+		"members":["`+c1.ID+`","`+c2.ID+`"],"models":["llama"]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	var pr store.Profile
+	jsonUnmarshal(t, rec, &pr)
+
+	// The profile's own list, and a fetch through its own account.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("GET", "/api/profiles/"+pr.ID+"/models", nil))
+	var got struct {
+		Models []string `json:"models"`
+	}
+	jsonUnmarshal(t, rec, &got)
+	if len(got.Models) != 1 || got.Models[0] != "llama" {
+		t.Fatalf("profile models: %+v", got.Models)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("GET", "/api/profiles/"+pr.ID+"/models?refresh=1", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("refresh: %d %s", rec.Code, rec.Body.String())
+	}
+	if c := calls(); c["models:s1"] == 0 && c["models:s2"] == 0 {
+		t.Errorf("the refresh reached no account of the profile: %+v", c)
+	}
+
+	// Whose turn it is inside the profile, before and after a call through it.
+	rotationOf := func() (string, int) {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, loopbackRequest("GET", "/api/profiles/"+pr.ID+"/rotation", nil))
+		var st struct {
+			Next string `json:"next"`
+			Used int    `json:"used"`
+		}
+		jsonUnmarshal(t, rec, &st)
+		return st.Next, st.Used
+	}
+	first, _ := rotationOf()
+	if first != c1.ID {
+		t.Fatalf("profile's first turn: %s, want %s", first, c1.ID)
+	}
+	if rec := postV1(h, `{"model":"groq-lite/llama","messages":[]}`); rec.Code != http.StatusOK {
+		t.Fatalf("call through the profile: %d %s", rec.Code, rec.Body.String())
+	}
+	next, used := rotationOf()
+	if next != c2.ID || used != 0 {
+		t.Fatalf("after one call: next=%s used=%d, want %s and 0", next, used, c2.ID)
+	}
+	// The provider's own cursor is untouched by the profile's call.
+	provNext := func() string {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, loopbackRequest("GET", "/api/providers/groq/rotation", nil))
+		var st struct {
+			Next string `json:"next"`
+		}
+		jsonUnmarshal(t, rec, &st)
+		return st.Next
+	}
+	if n := provNext(); n != c1.ID {
+		t.Fatalf("provider's turn after a profile call: %s, want %s (the profile moved only its own)", n, c1.ID)
 	}
 }

@@ -13,12 +13,12 @@ import (
 // profile ("<provider>-<name>/<model>") is served by the group's members
 // alone; every other call of the provider keeps using all of its accounts.
 type Profile struct {
-	ID        string   `json:"id"`
-	Provider  string   `json:"provider"`
-	Name      string   `json:"name"`
+	ID       string `json:"id"`
+	Provider string `json:"provider"`
+	Name     string `json:"name"`
 	// Members are connection ids, in the order they were added. A member that
 	// is gone or switched off just does not serve.
-	Members   []string `json:"members"`
+	Members []string `json:"members"`
 	// Models are the model ids the profile serves, when it has its own list;
 	// nil serves everything its provider does. A listed model's level
 	// variants ("-high", …) are served with it.
@@ -136,7 +136,7 @@ func (s *Store) CreateProfile(providerID, name string, members, models []string)
 }
 
 // encodeProfileModels turns a profile's model list into its column value: an
-// empty or nil list stores '' (no list of its own).
+// empty or nil list stores ” (no list of its own).
 func encodeProfileModels(models []string) (string, error) {
 	if len(models) == 0 {
 		return "", nil

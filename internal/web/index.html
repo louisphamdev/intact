@@ -449,6 +449,12 @@
 
 <script>
 const VI={
+// profiles
+'Profiles':'Nhóm tài khoản','Profile':'Nhóm','No members yet':'Chưa có tài khoản nào',
+'No profile yet. A profile is a named group of these accounts: callers that name it get those accounts alone.':'Chưa có nhóm nào. Nhóm là bộ tài khoản đặt tên: ai gọi tới tên nhóm sẽ chỉ dùng đúng các tài khoản đó.',
+'Delete profile "{0}"? The accounts stay.':'Xoá nhóm "{0}"? Các tài khoản vẫn giữ nguyên.',
+'Profile added':'Đã thêm nhóm',
+'A call named {0} reaches this profile\'s members alone; every other call of {1} keeps using all accounts.':'Call đặt tên {0} chỉ dùng đúng các tài khoản của nhóm này; mọi call khác của {1} vẫn dùng toàn bộ tài khoản.',
 // menu, frame
 'Endpoint':'Endpoint','Providers':'Nhà cung cấp','Blacklist':'Blacklist','Drift':'Drift','Docs':'Tài liệu','Quota':'Hạn mức','Usage':'Sử dụng',
 'Sign out':'Đăng xuất','Not available':'Chưa dùng được','Valid from':'Hiệu lực từ','Expires':'Hết hạn','Next available':'Lượt tiếp theo','extra usage':'mức dùng thêm','now':'ngay bây giờ','in {0}':'sau {0}','1 per week':'1 lần/tuần','Clears':'Xoá giới hạn','{0} window':'khung {0}','5-hour limit reset':'Reset giới hạn 5 giờ','Available once you hit the 5-hour limit':'Dùng được khi bạn chạm giới hạn 5 giờ','Not offered to this client':'Không áp dụng cho client này','Needs a newer Claude Code version in intact':'Cần intact dùng Claude Code bản mới hơn','Available once you hit the limit':'Dùng được khi bạn chạm giới hạn','Already used':'Đã dùng','Cooling down':'Đang chờ hồi','Paused':'Tạm dừng','Not started yet':'Chưa bắt đầu','Expired':'Hết hạn','Not available ({0})':'Chưa dùng được ({0})','Collapse':'Thu gọn','Collapse menu':'Thu gọn menu','Expand menu':'Mở rộng menu','credential proxy':'proxy tài khoản LLM','intact home':'Trang chủ intact','Close':'Đóng',
@@ -785,6 +791,7 @@ async function api(path,opts){
   return d;
 }
 const postJSON=(path,body)=>api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+const putJSON=(path,body)=>api(path,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 
 // A form sends once: a second submit while the first is in flight is dropped.
 function guard(f){if(f.dataset.busy)return true;f.dataset.busy='1';const b=f.querySelector('button[type=submit]');b.disabled=true;b.setAttribute('aria-busy','true');return false}
@@ -988,6 +995,87 @@ function viewProviders(v){
     for(const c of body.querySelectorAll('.pcard'))c.hidden=!!s&&!c.dataset.q.includes(s)};
 }
 
+// ---- Profiles
+// A profile is a named group of this provider's accounts: callers that name
+// it ("<provider>-<name>/<model>") are served by the members alone, and the
+// provider's other callers keep using every account.
+function profilesCard(p,list){
+  let profiles=[];
+  const body=el('div');
+  const byId=new Map(list.map(a=>[a.id,a]));
+  const label=id=>{const a=byId.get(id);return a?(a.label||a.id):short(id)};
+  const prefix=pr=>el('span',{class:'mono faint',text:p+'-'+pr.name+'/<model>'});
+  const chips=pr=>pr.members.length
+    ?pr.members.map(id=>el('span',{class:'badge',title:id,text:label(id)}))
+    :[el('span',{class:'faint small',text:t('No members yet')})];
+  // A member picker: one checkbox per account of this provider.
+  const checkList=pr=>{
+    const chosen=new Set(pr?pr.members:[]);
+    return list.map(a=>el('input',{type:'checkbox',checked:chosen.has(a.id),'data-id':a.id,'aria-label':a.label||a.id}));
+  };
+  const wrapChecks=boxes=>boxes.map(c=>el('label',{style:'display:inline-flex;gap:.35rem;align-items:center'},c,el('span',{text:label(c.dataset.id)})));
+  const buttons=(save,cancel)=>el('span',{style:'display:inline-flex;gap:.5rem'},
+    el('button',{class:'primary',type:'button',onclick:save},tr('Save')),
+    el('button',{class:'ghost',type:'button',onclick:cancel},tr('Cancel')));
+  function paint(){
+    body.replaceChildren(...profiles.map(pr=>{
+      const row=el('div',{class:'row'});
+      const paintRow=()=>row.replaceChildren(
+        el('div',{style:'min-width:0'},
+          el('div',{style:'display:flex;gap:.5rem;align-items:center;flex-wrap:wrap'},el('b',{text:pr.name}),prefix(pr)),
+          el('div',{style:'display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.25rem'},chips(pr))),
+        el('span',{style:'display:inline-flex;gap:.5rem'},
+          el('button',{class:'ghost',type:'button',onclick:edit},svg(ICON.edit),'Edit'),
+          el('button',{class:'danger',type:'button',onclick:del},svg(ICON.trash),'Delete')));
+      function edit(){
+        const boxes=checkList(pr);
+        row.replaceChildren(
+          el('div',{style:'min-width:0;display:flex;gap:.9rem;align-items:center;flex-wrap:wrap'},
+            el('b',{text:pr.name}),prefix(pr),...wrapChecks(boxes)),
+          buttons(async()=>save(boxes.filter(b=>b.checked).map(b=>b.dataset.id)),paintRow));
+      }
+      async function save(ids){
+        try{pr=Object.assign(pr,await putJSON('/profiles/'+pr.id,{members:ids}));
+          profiles=profiles.map(x=>x.id===pr.id?pr:x);paint();toast('Saved')}
+        catch(e){alert(e.message)}
+      }
+      async function del(){
+        if(!confirm(t('Delete profile "{0}"? The accounts stay.',pr.name)))return;
+        try{await postJSON('/profiles/'+pr.id+'/delete',{});profiles=profiles.filter(x=>x.id!==pr.id);paint();toast('Deleted')}
+        catch(e){alert(e.message)}
+      }
+      paintRow();
+      return row;
+    }));
+    if(!profiles.length)body.replaceChildren(el('div',{class:'empty',style:'padding:1rem 1.25rem'},
+      el('span',{class:'faint',text:t('No profile yet. A profile is a named group of these accounts: callers that name it get those accounts alone.')})));
+  }
+  function add(){
+    const name=el('input',{placeholder:'name',style:'min-height:30px;padding:.2rem .5rem;max-width:10rem','aria-label':'Profile name'});
+    const boxes=checkList(null);
+    const form=el('div',{class:'row'},
+      el('div',{style:'min-width:0;display:flex;gap:.9rem;align-items:center;flex-wrap:wrap'},
+        name,...wrapChecks(boxes)),
+      buttons(async()=>{
+        const n=name.value.trim();
+        if(!n){name.focus();return}
+        try{profiles.push(await postJSON('/profiles',{provider:p,name:n,members:boxes.filter(b=>b.checked).map(b=>b.dataset.id)}));
+          form.remove();paint();toast('Profile added')}
+        catch(e){alert(e.message)}
+      },()=>form.remove()));
+    box.append(form);name.focus();
+  }
+  const box=el('div',{class:'card'},
+    el('div',{class:'cardh'},el('h2',{class:'grow'},'Profiles'),
+      el('button',{class:'ghost',type:'button',onclick:add},svg(ICON.plus),'Profile')),
+    el('div',{class:'small faint',style:'padding:.55rem 1.25rem;border-bottom:1px solid var(--line)'},
+      t('A call named {0} reaches this profile\'s members alone; every other call of {1} keeps using all accounts.',p+'-<profile>/<model>',p)),
+    body);
+  body.replaceChildren(el('div',{class:'empty',style:'padding:1rem 1.25rem'},el('span',{class:'faint'},'…')));
+  (async()=>{try{profiles=(await api('/profiles')).profiles.filter(x=>x.provider===p)}catch(e){}paint()})();
+  return box;
+}
+
 function viewProvider(v,p){
   const list=accountsOf(p),ok=wired(p);
   header(el('div',{style:'display:flex;align-items:center;gap:.6rem'},
@@ -1064,6 +1152,8 @@ function viewProvider(v,p){
     list.length?rowsBox:el('div',{class:'empty'},el('b',{},'No connections yet'),ok?t('Add an API key to start using {0}.',pname(p)):null,addBtn),
     list.length&&addBtn?el('div',{style:'padding:.8rem 1.25rem;border-top:1px solid var(--line)'},addBtn):null);
   v.append(card);
+  // Profiles: named groups of this provider's accounts.
+  if(list.length)v.append(profilesCard(p,list));
   // Keep "next" current while the page is open.
   if(list.length>1&&ok){const poll=async()=>{if(!card.isConnected)return;
     // A repaint rebuilds the rows and drops keyboard focus, so it runs only

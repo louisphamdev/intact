@@ -450,7 +450,11 @@
 <script>
 const VI={
 // profiles
-'Profiles':'Nhóm tài khoản','Profile':'Nhóm','No members yet':'Chưa có tài khoản nào',
+'Profiles':'Nhóm tài khoản',
+'Profile {0}':'Nhóm {0}','{0} account':'{0} tài khoản','{0} accounts':'{0} tài khoản',
+'See all {0} accounts':'Xem tất cả {0} tài khoản',
+'See all {0} accounts of {1}':'Xem tất cả {0} tài khoản của {1}',
+'Viewing profile {0}: only its {1} account(s) are listed here. Callers named {2} reach those accounts alone.':'Đang xem nhóm {0}: chỉ liệt kê {1} tài khoản của nhóm này. Call đặt tên {2} chỉ dùng đúng các tài khoản đó.','Profile':'Nhóm','No members yet':'Chưa có tài khoản nào',
 'No profile yet. A profile is a named group of these accounts: callers that name it get those accounts alone.':'Chưa có nhóm nào. Nhóm là bộ tài khoản đặt tên: ai gọi tới tên nhóm sẽ chỉ dùng đúng các tài khoản đó.',
 'Delete profile "{0}"? The accounts stay.':'Xoá nhóm "{0}"? Các tài khoản vẫn giữ nguyên.',
 'Delete this profile. The accounts stay.':'Xoá nhóm này. Các tài khoản vẫn giữ nguyên.',
@@ -1191,17 +1195,40 @@ function profilesCard(p,list,models,tab){
   return box;
 }
 
-function viewProvider(v,p,tab){
-  const list=accountsOf(p),ok=wired(p);
+async function viewProvider(v,p,tab){
+  const all=accountsOf(p),ok=wired(p);
+  // Khi URL đặt tên một profile, trang chỉ hiện đúng account của profile
+  // đó: tab "pro" là 1 account, tab "lite" là 5. Không có profile trong URL
+  // (xem tất cả) thì thấy mọi account của provider.
+  let list=all,prof=null;
+  if(tab){
+    try{
+      const d=await api('/profiles');
+      prof=(d.profiles||[]).find(x=>x.provider===p&&x.name===tab)||null;
+    }catch(e){}
+    if(!prof){location.hash='#/providers/'+encodeURIComponent(p);return}
+    const ids=new Set(prof.members);
+    list=all.filter(a=>ids.has(a.id));
+  }
   header(el('div',{style:'display:flex;align-items:center;gap:.6rem'},
     el('a',{class:'crumb',href:'#/providers'},'Providers'),el('span',{class:'faint'},'›'),avatar(p,true),el('h1',{text:pname(p)}),authTag(p)),
-    t(list.length===1?'{0} connection':'{0} connections',list.length));
+    prof
+      ? el('span',{style:'display:inline-flex;gap:.5rem;align-items:center;flex-wrap:wrap'},
+          el('b',{text:t('Profile {0}',prof.name)}),
+          el('span',{class:'faint small',text:t(list.length===1?'{0} account':'{0} accounts',list.length)}),
+          el('a',{class:'small',href:'#/providers/'+encodeURIComponent(p),text:t('See all {0} accounts',all.length)}))
+      : t(list.length===1?'{0} connection':'{0} connections',list.length));
   if(!ok)v.append(el('div',{class:'notice'},t('intact cannot call "{0}" yet, so these accounts are stored but not used.',pname(p))));
   if(setupOf(p)==='account'&&list.some(a=>!a.baseUrl))v.append(el('div',{class:'notice'},'A connection without an account ID cannot be used. Delete it and add it again with the account ID.'));
   if(isDeclared(p))v.append(defCard(p));
+  if(prof)v.append(el('div',{class:'notice',style:'display:flex;gap:.6rem;align-items:center;flex-wrap:wrap'},
+    el('span',{text:t('Viewing profile {0}: only its {1} account(s) are listed here. Callers named {2} reach those accounts alone.',prof.name,list.length,p+'-'+prof.name)}),
+    el('a',{href:'#/providers/'+encodeURIComponent(p),text:t('See all {0} accounts of {1}',all.length,pname(p))})));
   const loginBtn=LOGIN[p]||infoOf(p).flow?el('button',{class:'primary',type:'button',onclick:()=>startLogin(p)},svg(ICON.plus),'Login'):null;
   const keyBtn=ok&&setupOf(p)!=='oauth'?el('button',{class:loginBtn?'ghost':'primary',type:'button',onclick:()=>addAccount(p)},svg(ICON.plus),loginBtn?'Add token':'Add'):null;
-  const addBtn=loginBtn||keyBtn?el('span',{style:'display:inline-flex;gap:.5rem'},loginBtn,keyBtn):null;
+  // Thêm account khi đang xem một nhóm sẽ không cho account đó vào nhóm,
+  // nên nút thêm bị ẩn và chú thích nói rõ điều đó.
+  const addBtn=prof?null:(loginBtn||keyBtn?el('span',{style:'display:inline-flex;gap:.5rem'},loginBtn,keyBtn):null);
   // Rotation: whose turn it is, round-robin (N requests a turn) or fallback,
   // and the accounts' priority (the ▲▼ buttons).
   let rot={rotation:{mode:'round-robin',sticky:1,order:[]}};
@@ -1218,7 +1245,7 @@ function viewProvider(v,p,tab){
   const stickyBox=el('label',{class:'small',style:'display:inline-flex;align-items:center;gap:.4rem',title:'How many requests in a row one account serves before the next takes over'},
     tr('Turn every'),sticky,tr('requests'));
   const modeNote=el('span',{class:'faint small'});
-  const rotBar=list.length>1&&ok?el('div',{style:'display:flex;gap:1rem;align-items:center;flex-wrap:wrap;padding:.6rem 1.25rem;border-bottom:1px solid var(--line)'},
+  const rotBar=!prof&&list.length>1&&ok?el('div',{style:'display:flex;gap:1rem;align-items:center;flex-wrap:wrap;padding:.6rem 1.25rem;border-bottom:1px solid var(--line)'},
     el('label',{style:'display:inline-flex;align-items:center;gap:.5rem;cursor:pointer',title:'On: accounts take turns. Off (fallback): the first account serves every request, the next only when it fails or is busy.'},
       el('span',{class:'switch'},rrSw,el('span')),el('b',{style:'font-size:.85rem'},'Round robin')),
     stickyBox,modeNote):null;
@@ -1274,14 +1301,14 @@ function viewProvider(v,p,tab){
   if(list.length)(async()=>{
     let models=[];
     try{const d=await api('/providers/'+encodeURIComponent(p)+'/model-table');models=d.models||[]}catch(e){}
-    v.append(profilesCard(p,list,models,tab));
+    v.append(profilesCard(p,all,models,tab));
   })();
   // Keep "next" current while the page is open.
-  if(list.length>1&&ok){const poll=async()=>{if(!card.isConnected)return;
+  if(!prof&&list.length>1&&ok){const poll=async()=>{if(!card.isConnected)return;
     // A repaint rebuilds the rows and drops keyboard focus, so it runs only
     // when the rotation state changed.
     if(!document.hidden){try{const r=await api('/providers/'+p+'/rotation');if(JSON.stringify(r)!==JSON.stringify(rot)){rot=r;paint()}}catch(e){}}setTimeout(poll,5000)};poll()}
-  if(ok&&activeOf(p).length)v.append(modelTable(p));
+  if(!prof&&ok&&activeOf(p).length)v.append(modelTable(p));
   loadAcctTests();
 }
 // Account tests: one short call on that account alone. The last result of

@@ -420,7 +420,9 @@ func bearerToken(r *http.Request) string {
 	return tok
 }
 
-// dashboard serves the page embedded in the binary.
+// dashboard serves the page embedded in the binary. The page is not cached:
+// it carries the build's own JavaScript, and a stale one would keep the old
+// behaviour after an upgrade.
 func (a *api) dashboard(w http.ResponseWriter, r *http.Request) {
 	b, err := web.Files.ReadFile("index.html")
 	if err != nil {
@@ -428,5 +430,6 @@ func (a *api) dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	w.Write(b)
 }

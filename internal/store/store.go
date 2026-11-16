@@ -119,6 +119,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply profiles schema: %w", err)
 	}
+	if err := (&Store{DB: db}).migrateProfiles(); err != nil {
+		db.Close()
+		return nil, err
+	}
 	st := &Store{DB: db}
 	if err := st.migrateAPIKeys(); err != nil {
 		db.Close()

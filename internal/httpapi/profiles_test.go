@@ -71,6 +71,31 @@ func TestProfileAPI(t *testing.T) {
 	}
 }
 
+// A model list of its own is checked against the provider's: a profile cannot
+// be configured with a model no account of that provider serves.
+func TestProfileAPIRefusesAnUnknownModel(t *testing.T) {
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	groq1, _ := s.CreateConnection("groq", "one", "k1")
+	_, h := newServer(s, nil, nil)
+	s.SyncModels("groq", []string{"llama"}, true, nil)
+
+	if rec := sendJSON(h, "POST", "/api/profiles", `{"provider":"groq","name":"lite",
+		"members":["` + groq1.ID + `"],"models":["nope"]}`); rec.Code != http.StatusBadRequest {
+		t.Errorf("unknown model: %d %s, want 400", rec.Code, rec.Body.String())
+	}
+	rec := sendJSON(h, "POST", "/api/profiles", `{"provider":"groq","name":"lite",
+		"members":["` + groq1.ID + `"],"models":["llama"]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("known model: %d %s", rec.Code, rec.Body.String())
+	}
+	var created store.Profile
+	jsonUnmarshal(t, rec, &created)
+	if len(created.Models) != 1 || created.Models[0] != "llama" {
+		t.Fatalf("created models: %+v", created.Models)
+	}
+}
+
 // The rest of the CRUD runs without the colliding def, in its own store.
 func TestProfileAPICRUD(t *testing.T) {
 	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
@@ -212,5 +237,43 @@ func TestProfileModelLookup(t *testing.T) {
 	h.ServeHTTP(rec, loopbackRequest("GET", "/v1/models/groq-lite/llama", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"id":"groq-lite/llama"`) {
 		t.Fatalf("profile model lookup: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A profile with a model list of its own serves only that list: a call for
+// another model of the same provider is refused with 404, while the
+// provider's own prefix keeps serving it.
+func TestProfileModelListServesOnlyItsModels(t *testing.T) {
+	s, _ := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	defer s.Close()
+	c1, _ := s.CreateConnection("groq", "one", "s1")
+	_, h := newServer(s, map[string]string{"groq": "http://127.0.0.1:1/v1"}, nil)
+	s.SyncModels("groq", []string{"llama", "mixtral"}, true, nil)
+	rec := sendJSON(h, "POST", "/api/profiles", `{"provider":"groq","name":"lite",
+		"members":["`+c1.ID+`"],"models":["llama"]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// The listed model is looked up under the profile's prefix.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("GET", "/v1/models/groq-lite/llama", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"id":"groq-lite/llama"`) {
+		t.Fatalf("listed model: %d %s", rec.Code, rec.Body.String())
+	}
+	// The model the list does not name is not served by the profile.
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, loopbackRequest("GET", "/v1/models/groq-lite/mixtral", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("unlisted model lookup: %d, want 404", rec.Code)
+	}
+	if got := postV1(h, `{"model":"groq-lite/mixtral","messages":[]}`); got.Code != http.StatusNotFound {
+		t.Errorf("unlisted model call: %d %s, want 404", got.Code, got.Body.String())
+	}
+	// The provider's own prefix is not limited by the profile's list: its
+	// call reaches the (unreachable) upstream, so it fails there rather than
+	// at intact's own routing.
+	if got := postV1(h, `{"model":"groq/mixtral","messages":[]}`); got.Code == http.StatusNotFound {
+		t.Errorf("provider prefix: %d %s, want anything but intact's 404", got.Code, got.Body.String())
 	}
 }

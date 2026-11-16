@@ -150,6 +150,13 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 			prof = &p
 		}
 	}
+	// A profile with a model list of its own serves only that list: the call
+	// names a model the group does not have, so no account of it is tried.
+	if prof != nil && !profileServes(*prof, upstreamModel) {
+		writeAPIError(w, http.StatusNotFound, "model_not_found", "model",
+			"profile "+prov+"-"+prof.Name+" does not serve "+upstreamModel)
+		return
+	}
 	caller := principalOf(r)
 	if !caller.allowsModel(prov, upstreamModel, model) {
 		writeError(w, http.StatusForbidden, "model is not permitted for this api key")
@@ -387,10 +394,7 @@ func (a *api) model(w http.ResponseWriter, r *http.Request) {
 		// A profile-prefixed id serves the provider's entries under the
 		// profile's own prefix, so a caller can discover what its profile
 		// can call.
-		for _, e := range a.entriesOf(p.Provider, a.providerModels(r.Context(), p.Provider)) {
-			e.ID = p.Provider + "-" + p.Name + "/" + strings.TrimPrefix(e.ID, p.Provider+"/")
-			entries = append(entries, e)
-		}
+		entries = a.profileEntries(r.Context(), p)
 	} else if prov, _ := a.splitModel(want); prov != "" && slices.Contains(a.activeProviders(), prov) {
 		entries = a.entriesOf(prov, a.providerModels(r.Context(), prov))
 	} else {
@@ -449,7 +453,9 @@ type modelEntry struct {
 }
 
 // modelEntries lists every model an active account serves. A provider list
-// gives no creation date, so created is when intact read the list.
+// gives no creation date, so created is when intact read the list. Each
+// profile's models are listed under the profile's own prefix as well, so a
+// client can discover what a profile serves.
 func (a *api) modelEntries(ctx context.Context) []modelEntry {
 	provs := a.activeProviders()
 	lists := make([][]string, len(provs))
@@ -465,6 +471,12 @@ func (a *api) modelEntries(ctx context.Context) []modelEntry {
 	data := []modelEntry{}
 	for i, p := range provs {
 		data = append(data, a.entriesOf(p, lists[i])...)
+	}
+	profiles, _ := a.store.ListProfiles()
+	for _, pr := range profiles {
+		if _, ok := a.providerFor(store.Connection{Provider: pr.Provider}); ok {
+			data = append(data, a.profileEntries(ctx, pr)...)
+		}
 	}
 	return data
 }

@@ -1,9 +1,11 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/louisphamdev/intact/internal/provider"
@@ -26,13 +28,16 @@ func (a *api) listProfiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"profiles": list})
 }
 
-// createProfile stores a profile: {"provider","name","members"}. Members are
-// connection ids of that provider, in the order they should serve.
+// createProfile stores a profile: {"provider","name","members","models"}.
+// Members are connection ids of that provider, in the order they should
+// serve; models are the model ids the profile serves (empty or left out
+// means everything its provider does).
 func (a *api) createProfile(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		Provider string   `json:"provider"`
 		Name     string   `json:"name"`
 		Members  []string `json:"members"`
+		Models   []string `json:"models"`
 	}
 	if !readBody(w, r, &b) {
 		return
@@ -41,10 +46,10 @@ func (a *api) createProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if !a.checkProfile(w, b.Provider, b.Name, b.Members) {
+	if !a.checkProfile(w, b.Provider, b.Name, b.Members, b.Models) {
 		return
 	}
-	p, err := a.store.CreateProfile(b.Provider, b.Name, b.Members)
+	p, err := a.store.CreateProfile(b.Provider, b.Name, b.Members, b.Models)
 	if errors.Is(err, store.ErrProfileExists) {
 		writeError(w, http.StatusConflict, b.Provider+" already has a profile named "+b.Name)
 		return
@@ -56,12 +61,13 @@ func (a *api) createProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, p)
 }
 
-// updateProfile changes a profile's name, members or both: fields left out
-// keep their value.
+// updateProfile changes a profile's name, members, models or any of them;
+// fields left out keep their value.
 func (a *api) updateProfile(w http.ResponseWriter, r *http.Request) {
 	var b struct {
 		Name    *string   `json:"name"`
 		Members *[]string `json:"members"`
+		Models  *[]string `json:"models"`
 	}
 	if !readBody(w, r, &b) {
 		return
@@ -76,18 +82,21 @@ func (a *api) updateProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "cannot read the profile")
 		return
 	}
-	name := ""
+	name, members, models := "", []string(nil), []string(nil)
 	if b.Name != nil {
 		name = *b.Name
 	}
-	var members []string
 	if b.Members != nil {
 		members = *b.Members
 	}
-	if !a.checkProfile(w, p.Provider, name, members) {
+	if b.Models != nil {
+		models = *b.Models
+	}
+	if !a.checkProfile(w, p.Provider, name, members, models) {
 		return
 	}
-	p, err = a.store.UpdateProfile(id, name, members)
+	p, err = a.store.UpdateProfile(id, store.ProfileUpdate{
+		Name: b.Name, Members: b.Members, Models: b.Models})
 	if errors.Is(err, store.ErrProfileExists) {
 		writeError(w, http.StatusConflict, p.Provider+" already has a profile named "+name)
 		return
@@ -119,8 +128,9 @@ func (a *api) deleteProfile(w http.ResponseWriter, r *http.Request) {
 // checkProfile reports whether a profile's fields fit the routing. It writes
 // the refusal itself and returns false when one does not. An empty name means
 // "keep the current one" (an update that only moves members); createProfile
-// checks for itself that its name is there.
-func (a *api) checkProfile(w http.ResponseWriter, prov, name string, members []string) bool {
+// checks for itself that its name is there. A nil members or models list
+// keeps its value too; an empty one sets that empty value.
+func (a *api) checkProfile(w http.ResponseWriter, prov, name string, members, models []string) bool {
 	if prov == "" {
 		writeError(w, http.StatusBadRequest, "provider is required")
 		return false
@@ -166,7 +176,40 @@ func (a *api) checkProfile(w http.ResponseWriter, prov, name string, members []s
 			}
 		}
 	}
+	// A model list of its own is checked against the provider's, so a profile
+	// cannot be configured with a model no account of it serves.
+	if len(models) > 0 {
+		known := map[string]bool{}
+		if list, err := a.store.ListModels(prov); err == nil {
+			for _, m := range list {
+				known[m.Model] = true
+			}
+		}
+		for _, id := range models {
+			if !known[id] {
+				if base, _ := splitVariant(id); base == id || !known[base] {
+					writeError(w, http.StatusBadRequest, "model "+id+" is not in "+prov+"'s model list")
+					return false
+				}
+			}
+		}
+	}
 	return true
+}
+
+// profileServes reports whether a profile serves model. With no list of its
+// own it serves everything its provider does; with one, the model must be
+// listed or be a level variant of a listed one ("gemini-3.8-flash" serves
+// "gemini-3.8-flash-high").
+func profileServes(p store.Profile, model string) bool {
+	if len(p.Models) == 0 {
+		return true
+	}
+	if slices.Contains(p.Models, model) {
+		return true
+	}
+	base, _ := splitVariant(model)
+	return base != model && slices.Contains(p.Models, base)
 }
 
 // readBody decodes a JSON request body of a set size into v.
@@ -197,6 +240,64 @@ func (a *api) routeProfile(model string) (store.Profile, bool) {
 		}
 	}
 	return store.Profile{}, false
+}
+
+// profileEntries lists a profile's models under its own prefix
+// ("<provider>-<profile>/<model>"), in the provider's own order. With no
+// list of its own it lists the provider's whole list; with one it lists the
+// ids it names, the folded bases a level variant refers to included.
+func (a *api) profileEntries(ctx context.Context, p store.Profile) []modelEntry {
+	ids := a.profileModelIDs(ctx, p)
+	out := make([]modelEntry, 0, len(ids))
+	for _, e := range a.entriesOf(p.Provider, ids) {
+		e.ID = p.Provider + "-" + p.Name + "/" + strings.TrimPrefix(e.ID, p.Provider+"/")
+		out = append(out, e)
+	}
+	return out
+}
+
+// profileModelIDs returns the models a profile serves: its own list when it
+// has one, else everything its provider does. The ids come from the stored
+// model table, which is what a profile's list is checked against, so a
+// profile never serves an id the provider's own list does not carry.
+func (a *api) profileModelIDs(ctx context.Context, p store.Profile) []string {
+	if len(p.Models) == 0 {
+		return a.providerModels(ctx, p.Provider)
+	}
+	list, err := a.store.ListModels(p.Provider)
+	if err != nil {
+		return nil
+	}
+	a.cat.mu.Lock()
+	groups := a.cat.m[p.Provider].groups
+	a.cat.mu.Unlock()
+	out := []string{}
+	for _, m := range list {
+		if !m.Active {
+			continue
+		}
+		if profileHasModel(p.Models, m.Model, groups) {
+			out = append(out, m.Model)
+		}
+	}
+	return out
+}
+
+// profileHasModel reports whether a profile's list covers a provider's model
+// id: the id is listed, or its folded base is, so "gemini-3.8-flash" in a
+// list keeps the "gemini-3.8-flash-high" the provider offers.
+func profileHasModel(want []string, id string, groups map[string]variantSet) bool {
+	if slices.Contains(want, id) {
+		return true
+	}
+	// A folded base (a level variant folded into it) is listed by its own
+	// base id, so the provider's -high of it keeps serving.
+	if g, ok := groups[id]; ok {
+		_ = g
+		return slices.Contains(want, id)
+	}
+	base, _ := splitVariant(id)
+	return base != id && slices.Contains(want, base)
 }
 
 // profileMembers returns the profile's active members: its provider's

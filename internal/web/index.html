@@ -1158,7 +1158,9 @@ function profilesCard(p,list,models,tab){
   }
 
   function paintTabs(){
-    tabsBox.hidden=profiles.length<2;
+    // The tabs stay with one profile left: a profile keeps its tab, and the
+    // tab is only gone when no profile is.
+    tabsBox.hidden=!profiles.length;
     tabsBox.replaceChildren(...profiles.map(pr=>el('a',{role:'tab',
       href:'#/providers/'+encodeURIComponent(p)+'/'+pr.name,
       'aria-selected':String(pr.name===cur),class:pr.name===cur?'on':''},pr.name)));

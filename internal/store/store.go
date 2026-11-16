@@ -115,6 +115,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply filter schema: %w", err)
 	}
+	if _, err := db.Exec(profilesSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply profiles schema: %w", err)
+	}
 	st := &Store{DB: db}
 	if err := st.migrateAPIKeys(); err != nil {
 		db.Close()

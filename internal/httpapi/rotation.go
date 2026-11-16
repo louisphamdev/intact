@@ -71,8 +71,10 @@ func (r Rotation) ordered(conns []store.Connection) []store.Connection {
 // startFor picks the first account a request tries and advances the
 // rotation. One provider's accounts follow its rotation; a pool across
 // providers (a bare model several providers list) turns on every request,
-// per model.
-func (a *api) startFor(model string, targets []store.Connection) ([]store.Connection, int) {
+// per model. Scope separates the rotation cursors: "" is the provider's own,
+// and a profile's callers advance their own, so the two pools take turns
+// apart.
+func (a *api) startFor(model string, targets []store.Connection, scope string) ([]store.Connection, int) {
 	prov := targets[0].Provider
 	for _, c := range targets[1:] {
 		if c.Provider != prov {
@@ -84,7 +86,7 @@ func (a *api) startFor(model string, targets []store.Connection) ([]store.Connec
 	if rot.Mode == RotateFallback {
 		return withStandbyLast(targets, func(int) int { return 0 })
 	}
-	return withStandbyLast(targets, func(n int) int { return a.advance("p:"+prov, n, rot.Sticky) })
+	return withStandbyLast(targets, func(n int) int { return a.advance("p:"+prov+scope, n, rot.Sticky) })
 }
 
 // withStandbyLast lets the normal accounts take turns from the index pick

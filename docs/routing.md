@@ -8,6 +8,7 @@ where the call goes. The path after `/v1` decides the request shape.
 | `model` in the body | Served by |
 | --- | --- |
 | `groq/llama-3.3-70b-versatile` | The provider named by the prefix. intact removes the prefix from the body (a byte splice; nothing else in the body is touched). |
+| `groq-lite/llama-3.3-70b-versatile` | The provider's profile `lite` ([Profiles](profiles.md)): the prefix is `<provider>-<profile>`, and only the profile's members serve the call. |
 | `llama-3.3-70b-versatile` | Every provider whose model list has that id. Their active accounts are pooled. |
 | `meta-llama/llama-3.3-70b-instruct` | A bare id: the part before the slash is a provider id only when a provider of that id exists. |
 

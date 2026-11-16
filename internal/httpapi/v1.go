@@ -31,6 +31,8 @@ import (
 //
 //   - "groq/llama-3.3-70b-versatile" names the provider. intact strips the
 //     prefix from the body's model and uses that provider's active accounts.
+//   - "groq-lite/llama-3.3-70b-versatile" names the provider's profile "lite",
+//     a named group of its accounts: only the profile's members serve it.
 //   - "llama-3.3-70b-versatile" names only the model. intact looks it up in the
 //     model list of every provider and pools the accounts of all that list it.
 //
@@ -138,6 +140,16 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	prov, upstreamModel := a.splitModel(model)
+	// A profile prefix ("<provider>-<profile>/<model>") is what splitModel
+	// leaves: the prefix is not a provider, but a profile of one is.
+	var prof *store.Profile
+	if prov == "" {
+		if p, ok := a.routeProfile(model); ok {
+			prov = p.Provider
+			upstreamModel = model[strings.IndexByte(model, '/')+1:]
+			prof = &p
+		}
+	}
 	caller := principalOf(r)
 	if !caller.allowsModel(prov, upstreamModel, model) {
 		writeError(w, http.StatusForbidden, "model is not permitted for this api key")
@@ -189,7 +201,11 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "this model is switched off in intact")
 			return
 		}
-		targets = a.activeConnections(prov)
+		if prof != nil {
+			targets = a.profileMembers(*prof)
+		} else {
+			targets = a.activeConnections(prov)
+		}
 		if upstreamModel != model {
 			if body, ok = setModel(body, upstreamModel); !ok {
 				if cap != nil {
@@ -242,7 +258,13 @@ func (a *api) v1(w http.ResponseWriter, r *http.Request) {
 	if ordered, ok := a.sessionOrder(key, targets); ok {
 		targets = ordered
 	} else {
-		targets, start = a.startFor(model, targets)
+		// A profile's accounts take their own turns, apart from the provider's
+		// other callers, so the lite pool does not spend the main pool's turn.
+		scope := ""
+		if prof != nil {
+			scope = "@" + prof.Name
+		}
+		targets, start = a.startFor(model, targets, scope)
 	}
 	ctx := context.WithValue(r.Context(), callerModelKey{}, model)
 	if key != "" {
@@ -361,7 +383,15 @@ func (a *api) model(w http.ResponseWriter, r *http.Request) {
 	// A prefixed id needs one provider's list; waiting on every provider's
 	// refresh made llm-switcher's 3 s Bifrost lookup time out.
 	entries := []modelEntry(nil)
-	if prov, _ := a.splitModel(want); prov != "" && slices.Contains(a.activeProviders(), prov) {
+	if p, ok := a.routeProfile(want); ok {
+		// A profile-prefixed id serves the provider's entries under the
+		// profile's own prefix, so a caller can discover what its profile
+		// can call.
+		for _, e := range a.entriesOf(p.Provider, a.providerModels(r.Context(), p.Provider)) {
+			e.ID = p.Provider + "-" + p.Name + "/" + strings.TrimPrefix(e.ID, p.Provider+"/")
+			entries = append(entries, e)
+		}
+	} else if prov, _ := a.splitModel(want); prov != "" && slices.Contains(a.activeProviders(), prov) {
 		entries = a.entriesOf(prov, a.providerModels(r.Context(), prov))
 	} else {
 		entries = a.modelEntries(r.Context())

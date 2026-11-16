@@ -206,6 +206,17 @@ func newServer(s *store.Store, baseOverride map[string]string, authCfg *auth.Con
 	mux.HandleFunc("GET /api/providers/{id}/model-policy", a.requireToken(a.getModelPolicy))
 	mux.HandleFunc("POST /api/providers/{id}/model-policy", a.requireAdmin(a.setModelPolicy))
 	mux.HandleFunc("GET /api/providers/{id}/models", a.requireToken(a.providerModelTable))
+	// Profiles: named groups of one provider's accounts, called through the
+	// "<provider>-<name>/<model>" prefix. Read is any token; writes change the
+	// routing, so they need the session or the master token.
+	mux.HandleFunc("GET /api/profiles", a.requireToken(a.listProfiles))
+	mux.HandleFunc("POST /api/profiles", a.requireAdmin(a.createProfile))
+	mux.HandleFunc("PUT /api/profiles/{id}", a.requireAdmin(a.updateProfile))
+	mux.HandleFunc("DELETE /api/profiles/{id}", a.requireAdmin(a.deleteProfile))
+	mux.HandleFunc("GET /profiles", a.requireSession(a.listProfiles))
+	mux.HandleFunc("POST /profiles", a.requireSession(a.createProfile))
+	mux.HandleFunc("PUT /profiles/{id}", a.requireSession(a.updateProfile))
+	mux.HandleFunc("POST /profiles/{id}/delete", a.requireSession(a.deleteProfile))
 	mux.HandleFunc("GET /api/providers/{id}/models/raw", a.requireToken(a.providerModelsRaw))
 	mux.HandleFunc("GET /api/provider-defs", a.requireToken(a.listDefs))
 	mux.HandleFunc("GET /api/provider-defs/{id}", a.requireToken(a.getDef))

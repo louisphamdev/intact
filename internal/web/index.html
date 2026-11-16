@@ -453,6 +453,8 @@ const VI={
 'Profiles':'Nhóm tài khoản','Profile':'Nhóm','No members yet':'Chưa có tài khoản nào',
 'No profile yet. A profile is a named group of these accounts: callers that name it get those accounts alone.':'Chưa có nhóm nào. Nhóm là bộ tài khoản đặt tên: ai gọi tới tên nhóm sẽ chỉ dùng đúng các tài khoản đó.',
 'Delete profile "{0}"? The accounts stay.':'Xoá nhóm "{0}"? Các tài khoản vẫn giữ nguyên.',
+'Delete this profile. The accounts stay.':'Xoá nhóm này. Các tài khoản vẫn giữ nguyên.',
+'Edit this profile: its accounts and its models':'Sửa nhóm này: tài khoản và model của nó',
 'Profile added':'Đã thêm nhóm',
 'A call named {0} reaches this profile\'s members alone; every other call of {1} keeps using all accounts.':'Call đặt tên {0} chỉ dùng đúng các tài khoản của nhóm này; mọi call khác của {1} vẫn dùng toàn bộ tài khoản.',
 'All models':'Mọi model','No profile yet. A profile is a named group of these accounts, and optionally of their models.':'Chưa có nhóm nào. Nhóm là bộ tài khoản đặt tên, và tuỳ chọn cả danh sách model riêng.',
@@ -1073,8 +1075,8 @@ function profilesCard(p,list,models,tab){
           el('div',{style:'display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.3rem'},members(pr)),
           el('div',{style:'display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.3rem'},modelsChip(pr))),
         el('span',{style:'display:inline-flex;gap:.5rem'},
-          el('button',{class:'ghost',type:'button',onclick:edit},svg(ICON.edit),'Edit'),
-          el('button',{class:'danger',type:'button',onclick:del},svg(ICON.trash),'Delete')));
+          el('button',{class:'ghost',type:'button',title:t('Edit this profile: its accounts and its models'),onclick:edit},svg(ICON.edit),'Edit'),
+          el('button',{class:'danger',type:'button',title:t('Delete this profile. The accounts stay.'),onclick:del},svg(ICON.trash),'Delete')));
       loadRot();
     };
     // Editor: the same data, writable.

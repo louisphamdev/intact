@@ -246,6 +246,36 @@ Other rules:
 - **Custom endpoints** made by older versions (a base URL kept on an account)
   are turned into declared providers at start.
 
+## Copies of a built-in provider
+
+A copy is a second instance of a built-in provider. It uses the same upstream,
+the same sign-in, and the same request filters as the original. Its accounts,
+rotation, and model table are its own. A call names the copy by its id:
+`antigravity-lite/<model>` uses only the accounts of `antigravity-lite`, and
+`antigravity/<model>` never uses them.
+
+To make a copy:
+1. Open the page of the built-in provider.
+2. Click **Copy** and type a name, for example `Lite`.
+3. Click **Create**. The id is `<provider>-<name>`, for example `antigravity-lite`.
+
+A new copy starts with the model switches and the model policy of the original.
+After that, the two model tables change separately.
+
+To move an account between the original and a copy, click **Move** on the
+account. The account keeps its sign-in. The API is
+`POST /api/accounts/{id}/provider` with `{"provider":"<id>"}`. intact refuses a
+move to a provider of a different family, because the credential belongs to one
+upstream only.
+
+A copy is stored as a declared provider with the field `of`:
+
+```json
+{ "id": "antigravity-lite", "name": "Antigravity Lite", "of": "antigravity" }
+```
+
+To delete a copy, move or delete its accounts first.
+
 ## Adding a provider to the registry
 
 Most providers need no code: declare them instead. A provider needs code only

@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/louisphamdev/intact/internal/provider"
 	"github.com/louisphamdev/intact/internal/store"
 )
 
@@ -71,7 +72,7 @@ var quotaFetchers = map[string]quotaFetcher{}
 // quotaFetcherFor is the built-in reader of the account's provider, or the
 // quotaUrl reader of a declared provider that sets one.
 func (a *api) quotaFetcherFor(c store.Connection) (quotaFetcher, bool) {
-	if fetch, ok := quotaFetchers[c.Provider]; ok {
+	if fetch, ok := quotaFetchers[provider.Base(c.Provider)]; ok {
 		return fetch, true
 	}
 	if p, ok := a.providerFor(c); ok && p.QuotaURL != "" {

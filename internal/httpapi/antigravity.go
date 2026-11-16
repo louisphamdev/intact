@@ -100,7 +100,7 @@ func (a *api) antigravityProject(ctx context.Context, conn store.Connection, tok
 
 // antigravityBase is the Code Assist host of a connection.
 func (a *api) antigravityBase(conn store.Connection) string {
-	if over, ok := a.baseOverride[conn.Provider]; ok {
+	if over, ok := a.baseOverride[provider.Base(conn.Provider)]; ok {
 		return over
 	}
 	p, _ := a.providerFor(conn)

@@ -105,7 +105,7 @@ func (a *api) loginStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Google refuses the code exchange without it; get it before the user signs in.
-	if prov == "antigravity" {
+	if provider.Base(prov) == "antigravity" {
 		if err := a.ensureAntigravitySecret(r.Context()); err != nil {
 			writeError(w, http.StatusBadRequest, "intact could not get the client secret of the Antigravity app ("+
 				err.Error()+"): set INTACT_ANTIGRAVITY_CLIENT_SECRET and restart intact (see docs/providers.md)")
@@ -201,7 +201,7 @@ type tokenAnswer struct {
 
 // specFor returns a provider's browser sign-in: built in, or declared.
 func specFor(prov string) (loginSpec, bool) {
-	if s, ok := loginSpecs[prov]; ok {
+	if s, ok := loginSpecs[provider.Base(prov)]; ok {
 		return s, true
 	}
 	d, ok := provider.Declared(prov)
@@ -218,7 +218,7 @@ func specFor(prov string) (loginSpec, bool) {
 // refuses it and the account dies at the first expiry. The declared def is read
 // directly, because the device flow also obeys jsonToken and specFor drops it.
 func jsonTokenBody(prov string) bool {
-	if s, ok := loginSpecs[prov]; ok {
+	if s, ok := loginSpecs[provider.Base(prov)]; ok {
 		return s.jsonExchange
 	}
 	d, ok := provider.Declared(prov)
@@ -228,7 +228,8 @@ func jsonTokenBody(prov string) bool {
 func (a *api) exchangeLogin(ctx context.Context, p store.PendingLogin, code string) (store.Connection, error) {
 	spec, _ := specFor(p.Provider)
 	secret := spec.secret
-	if p.Provider == "antigravity" {
+	base := provider.Base(p.Provider)
+	if base == "antigravity" {
 		secret = a.antigravityClientSecret()
 	}
 	fields := map[string]string{"grant_type": "authorization_code", "client_id": spec.clientID, "code": code,
@@ -270,7 +271,7 @@ func (a *api) exchangeLogin(ctx context.Context, p store.PendingLogin, code stri
 	}
 
 	label, meta := p.Provider, map[string]string{}
-	switch p.Provider {
+	switch base {
 	case "claude":
 		if t.Account.Email != "" {
 			label = t.Account.Email
@@ -296,7 +297,7 @@ func (a *api) exchangeLogin(ctx context.Context, p store.PendingLogin, code stri
 	if err != nil {
 		return store.Connection{}, err
 	}
-	if p.Provider == "claude" && isUUID(t.Organization.UUID) {
+	if base == "claude" && isUUID(t.Organization.UUID) {
 		if err := a.store.SetMeta(c.ID, map[string]string{"claudeOrgId": t.Organization.UUID}); err != nil {
 			log.Printf("store claudeOrgId for %s: %v", c.ID, err)
 		}

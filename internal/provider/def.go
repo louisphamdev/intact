@@ -51,6 +51,9 @@ type Def struct {
 	ReplayReasoning bool `json:"replayReasoning,omitempty"`
 	// Builtin marks a def as fixed (not stored, not editable).
 	Builtin bool `json:"builtin,omitempty"`
+	// Of names the built-in provider this one copies: the same upstream, sign-in and
+	// behaviour, with its own accounts, rotation and models. A copy keeps only ID and Name.
+	Of string `json:"of,omitempty"`
 }
 
 // OAuth is how an account signs in and refreshes.
@@ -98,6 +101,13 @@ func (d *Def) Normalize() error {
 	}
 	if d.Name == "" {
 		d.Name = d.ID
+	}
+	if d.Of != "" {
+		if _, ok := registry[d.Of]; !ok {
+			return errors.New("of: the id of a built-in provider")
+		}
+		*d = Def{ID: d.ID, Name: d.Name, Of: d.Of}
+		return nil
 	}
 	if d.Kind == "" {
 		d.Kind = KindAPIKey
@@ -185,6 +195,11 @@ func (d *Def) Normalize() error {
 
 // Provider is how intact calls a declared provider.
 func (d Def) Provider() Provider {
+	if d.Of != "" {
+		p := registry[d.Of]
+		p.ID = d.ID
+		return p
+	}
 	p := Provider{ID: d.ID, BaseURL: d.BaseURL, AuthHeader: d.AuthHeader, AuthPrefix: d.AuthPrefix,
 		Models: d.Models, Defaults: map[string]string{}, ReplayReasoning: d.ReplayReasoning, QuotaURL: d.QuotaURL}
 	if d.API != "openai" {
@@ -243,6 +258,15 @@ func Declared(id string) (Def, bool) {
 	defer declared.RUnlock()
 	d, ok := declared.defs[id]
 	return d, ok
+}
+
+// Base is the built-in provider a copy copies, and any other provider's own id. Code that
+// picks behaviour by provider id (sign-in, quota, filters) asks Base, so a copy acts as the original.
+func Base(id string) string {
+	if d, ok := Declared(id); ok && d.Of != "" {
+		return d.Of
+	}
+	return id
 }
 
 // DeclaredIDs lists the declared providers.

@@ -114,8 +114,18 @@ func (a *api) saveDef(d provider.Def) (provider.Def, error) {
 	if err := d.Normalize(); err != nil {
 		return d, err
 	}
+	_, existed := provider.Declared(d.ID)
 	if err := a.store.PutProviderDef(d); err != nil {
 		return d, err
+	}
+	// A new copy serves its original's models until the operator changes them.
+	if d.Of != "" && !existed {
+		if err := a.store.CopyModels(d.Of, d.ID); err != nil {
+			log.Printf("provider defs: %s: %v", d.ID, err)
+		}
+		if v, _ := a.store.GetSetting(policyKey(d.Of)); v != "" {
+			a.store.SetSetting(policyKey(d.ID), v)
+		}
 	}
 	a.loadDefs()
 	// Its model list may live elsewhere now.

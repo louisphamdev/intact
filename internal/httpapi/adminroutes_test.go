@@ -15,6 +15,7 @@ import (
 // dashboard inference key must not reach any of them.
 var adminAPIRoutes = []struct{ method, path, body string }{
 	{"POST", "/api/accounts/no-such-account/active", `{"active":true}`},
+	{"POST", "/api/accounts/no-such-account/provider", `{"provider":"groq"}`},
 	{"POST", "/api/accounts/no-such-account/test", `{}`},
 	{"POST", "/api/providers/groq/rotation", `{"mode":"fallback"}`},
 	{"POST", "/api/providers/groq/model-policy", `{"autoTest":false,"onlyFree":true}`},

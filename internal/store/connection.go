@@ -125,6 +125,20 @@ func (s *Store) SetLabel(id, label string) error {
 	return nil
 }
 
+// SetProvider moves a connection to another provider. The caller checks that both
+// providers reach the same upstream, or the credential is sent where it does not belong.
+func (s *Store) SetProvider(id, prov string) error {
+	res, err := s.DB.Exec(`UPDATE connections SET provider = ?, updated_at = ? WHERE id = ?`,
+		prov, time.Now().UTC().Format(time.RFC3339), id)
+	if err != nil {
+		return fmt.Errorf("set provider: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // SetMeta merges values into a connection's provider-specific metadata. The
 // merge runs inside SQLite with json_patch, in one statement, so two concurrent
 // calls do not lose each other's keys through a read-modify-write race.

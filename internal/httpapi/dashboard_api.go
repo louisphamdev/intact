@@ -38,6 +38,32 @@ func (a *api) setActive(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true, "active": body.Active})
 }
 
+// setProvider moves an account between a built-in provider and its copies, which reach
+// the same upstream; a move anywhere else would send the credential to another service.
+func (a *api) setProvider(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Provider string `json:"provider"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	c, err := a.connection(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "unknown connection")
+		return
+	}
+	if _, ok := provider.Lookup(body.Provider); !ok || provider.Base(body.Provider) != provider.Base(c.Provider) {
+		writeError(w, http.StatusBadRequest, "an account moves only between a provider and its copies")
+		return
+	}
+	if err := a.store.SetProvider(c.ID, body.Provider); err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot update connection")
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "provider": body.Provider})
+}
+
 // providers lists the providers this build can proxy and what a new
 // connection of each needs, so the dashboard can offer them and mark a stored
 // connection it cannot reach.
@@ -56,6 +82,8 @@ func (a *api) providers(w http.ResponseWriter, r *http.Request) {
 		IconURL  string `json:"iconUrl,omitempty"`
 		Flow     string `json:"flow,omitempty"`
 		API      string `json:"api,omitempty"`
+		// Of: a copy's built-in original, whose icon and sign-in it uses.
+		Of string `json:"of,omitempty"`
 	}
 	out := []info{}
 	for _, id := range provider.IDs() {
@@ -68,10 +96,10 @@ func (a *api) providers(w http.ResponseWriter, r *http.Request) {
 		if p.Setup == "oauth" || p.Exchange != "" {
 			auth = "oauth"
 		}
-		_, err := web.Files.Open("icons/" + id + ".png")
+		_, err := web.Files.Open("icons/" + provider.Base(id) + ".png")
 		in := info{ID: id, Setup: setup, Auth: auth, Icon: err == nil}
 		if d, ok := provider.Declared(id); ok {
-			in.Declared, in.Name, in.Color, in.IconURL, in.API = true, d.Name, d.Color, d.Icon, d.API
+			in.Declared, in.Name, in.Color, in.IconURL, in.API, in.Of = true, d.Name, d.Color, d.Icon, d.API, d.Of
 			switch d.Kind {
 			case provider.KindOAuthCode:
 				in.Flow = "code"

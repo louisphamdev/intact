@@ -145,6 +145,19 @@ func (s *Store) InactiveModels(provider string) map[string]bool {
 	return out
 }
 
+// CopyModels gives provider to the model rows of from, switches and test results included.
+// A row to already holds is kept.
+func (s *Store) CopyModels(from, to string) error {
+	_, err := s.DB.Exec(`INSERT OR IGNORE INTO provider_models
+		(provider, model, active, stale, first_seen, last_seen, test_at, test_ok, test_ms, test_msg, test_conn)
+		SELECT ?, model, active, stale, first_seen, last_seen, test_at, test_ok, test_ms, test_msg, ''
+		FROM provider_models WHERE provider = ?`, to, from)
+	if err != nil {
+		return fmt.Errorf("copy models: %w", err)
+	}
+	return nil
+}
+
 // SetModelsActive switches models on or off.
 func (s *Store) SetModelsActive(provider string, models []string, active bool) (int64, error) {
 	v := 0

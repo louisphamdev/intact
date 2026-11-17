@@ -1037,7 +1037,7 @@ func TestClaimCodex(t *testing.T) {
 					map[string]any{
 						"id":         "credit_abc_123",
 						"status":     "available",
-						"expires_at": "2026-10-23T00:00:00Z",
+						"expires_at": time.Now().Add(24 * time.Hour).Format(time.RFC3339),
 					},
 				},
 			})

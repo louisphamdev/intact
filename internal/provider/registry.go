@@ -267,8 +267,8 @@ const (
 // OAuth client is the one intact signs in with, so the pair stays consistent.
 // cl= is the changelist the release binary embeds; it changes with the version.
 const (
-	AntigravityVersion   = "1.5.9"
-	AntigravityUserAgent = "antigravity/cli/" + AntigravityVersion + " (aidev_client; os_type=windows; arch=amd64; cl=1021519450; auth_method=consumer)"
+	AntigravityVersion   = "1.5.10"
+	AntigravityUserAgent = "antigravity/cli/" + AntigravityVersion + " (aidev_client; os_type=windows; arch=amd64; cl=1023297289; auth_method=consumer)"
 )
 
 // CodexCLIVersion is the Codex CLI version intact presents; the backend hides

@@ -1233,7 +1233,7 @@ async function viewProvider(v,p,tab){
           el('a',{class:'small',href:'#/providers/'+encodeURIComponent(p),text:t('See all {0} accounts',all.length)}))
       : el('span',{style:'display:inline-flex;gap:.5rem;align-items:center;flex-wrap:wrap'},
           t(list.length===1?'{0} connection':'{0} connections',list.length),
-          !isDeclared(p)&&ok?el('button',{class:'ghost',type:'button',title:t('A second {0} with its own accounts, rotation and models',pname(p)),onclick:()=>copyProvider(p)},svg(ICON.layers),'Copy'):null);
+          !isDeclared(p)&&ok?el('button',{class:'ghost',type:'button',title:t('A second {0} with its own accounts, rotation and models',pname(p)),onclick:()=>copyProvider(p)},svg(ICON.layers),'Copy'):null));
   if(!ok)v.append(el('div',{class:'notice'},t('intact cannot call \"{0}\" yet, so these accounts are stored but not used.',pname(p))));
   if(setupOf(p)==='account'&&list.some(a=>!a.baseUrl))v.append(el('div',{class:'notice'},'A connection without an account ID cannot be used. Delete it and add it again with the account ID.'));
   if(isCopy(p))v.append(copyCard(p));

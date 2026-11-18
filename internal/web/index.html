@@ -2031,6 +2031,7 @@ async function declareProvider(id){
       row('Auth header',inp('authHeader',{placeholder:'Authorization'}),'Empty: Authorization (x-api-key for an Anthropic key)'),
       row('Auth prefix',inp('authPrefix',{placeholder:'Bearer '}),'Empty: "Bearer " (none for x-api-key)')),
     row('Extra headers',area('headers',{placeholder:'anthropic-beta: …\nX-Title: intact'}),'One per line, Name: value.'),
+    row('Identity headers',area('identity',{placeholder:'User-Agent: opencode/latest/2.3.0/cli\nx-opencode-session: ses_…'}),'One per line, Name: value. These replace whatever the caller sent, for an upstream that refuses an unrecognised client.'),
     row('Model list URL',inp('modelsUrl',{placeholder:'<base>/models'}),'Empty: <base>/models. "none": the provider has no list; the models below are the list.'),
     row('Quota URL',inp('quotaUrl',{placeholder:'https://api.example.com/quota'}),'Optional. Read with the account\'s credential; it answers {plan, windows}. {accountId} works only when the base URL has it too.'),
     row('Models',area('models',{placeholder:'model-a\nmodel-b'}),'One per line. Used when the list cannot be read, or as the list with "none".'),
@@ -2054,14 +2055,14 @@ async function declareProvider(id){
   const fill=d=>{
     kind.value=d.kind||'apikey';apiSel.value=d.api||'openai';
     for(const k of ['id','name','baseUrl','authHeader','authPrefix','modelsUrl','quotaUrl','icon'])f[k].value=d[k]||'';
-    f.color.value=d.color||'#52525b';f.headers.value=kvText(d.headers);f.models.value=(d.models||[]).join('\n');replay.checked=!!d.replayReasoning;
+    f.color.value=d.color||'#52525b';f.headers.value=kvText(d.headers);f.identity.value=kvText(d.identity);f.models.value=(d.models||[]).join('\n');replay.checked=!!d.replayReasoning;
     const o=d.oauth||{};for(const k of ['authorizeUrl','redirectUri','deviceCodeUrl','verifyUrl','tokenUrl','clientId','clientSecret','scope'])f[k].value=o[k]||'';
     f.extra.value=Object.entries(o.extra||{}).map(([k,v])=>k+'='+v).join('\n');noPkce.checked=!!o.noPkce;jsonTok.checked=!!o.jsonToken;
     f.id.readOnly=!!id;show();
   };
   const read=()=>{
     const d={id:f.id.value.trim(),name:f.name.value.trim(),kind:kind.value,api:apiSel.value,baseUrl:f.baseUrl.value.trim(),
-      authHeader:f.authHeader.value.trim(),authPrefix:f.authPrefix.value,headers:kvParse(f.headers.value,':'),
+      authHeader:f.authHeader.value.trim(),authPrefix:f.authPrefix.value,headers:kvParse(f.headers.value,':'),identity:kvParse(f.identity.value,':'),
       modelsUrl:f.modelsUrl.value.trim(),quotaUrl:f.quotaUrl.value.trim(),models:f.models.value.split('\n').map(s=>s.trim()).filter(Boolean),
       color:f.color.value==='#52525b'?'':f.color.value,icon:f.icon.value.trim()};
     if(kind.value!=='apikey')d.oauth={authorizeUrl:f.authorizeUrl.value.trim(),redirectUri:f.redirectUri.value.trim(),

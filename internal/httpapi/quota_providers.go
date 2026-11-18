@@ -37,6 +37,7 @@ func init() {
 	quotaFetchers["antigravity"] = quotaAntigravity
 	quotaFetchers["groq"] = quotaGroq
 	quotaFetchers["openrouter"] = quotaOpenRouter
+	quotaFetchers["opencode-go"] = quotaOpenCodeGo
 }
 
 // fetchJSON sends one request and decodes a JSON answer; it returns the
@@ -497,6 +498,45 @@ func quotaDeclared(a *api, ctx context.Context, c store.Connection, token string
 			ResetAt: resetTime(w.ResetAt), Unlimited: w.Unlimited}
 		if w.UsedPct != nil && *w.UsedPct >= 0 {
 			qw.UsedPct = clampPct(*w.UsedPct)
+		}
+		q.Windows = append(q.Windows, qw)
+	}
+	return q, nil
+}
+
+// quotaOpenCodeGo reads the OpenCode Go usage endpoint (rolling, weekly, monthly).
+func quotaOpenCodeGo(a *api, ctx context.Context, c store.Connection, token string) (AccountQuota, error) {
+	url := "https://opencode.ai/zen/go/v1/usage"
+	headers := map[string]string{
+		"Authorization":      "Bearer " + token,
+		"User-Agent":         "opencode/latest/2.3.0/cli",
+		"x-opencode-session": "ses_0123456789abcdef0123456789",
+	}
+	var resp struct {
+		Usage map[string]struct {
+			Status   string   `json:"status"`
+			Percent  *float64 `json:"percent"`
+			ResetsAt string   `json:"resetsAt"`
+		} `json:"usage"`
+	}
+	if _, err := fetchJSON(ctx, http.MethodGet, url, headers, nil, &resp); err != nil {
+		return AccountQuota{}, err
+	}
+	q := AccountQuota{Plan: "OpenCode Go", Windows: []QuotaWindow{}}
+	order := []string{"rolling", "weekly", "monthly"}
+	for _, name := range order {
+		item, ok := resp.Usage[name]
+		if !ok {
+			continue
+		}
+		qw := QuotaWindow{
+			Name:      name,
+			UsedPct:   -1,
+			ResetAt:   resetTime(item.ResetsAt),
+			Unlimited: false,
+		}
+		if item.Percent != nil && *item.Percent >= 0 {
+			qw.UsedPct = clampPct(*item.Percent)
 		}
 		q.Windows = append(q.Windows, qw)
 	}

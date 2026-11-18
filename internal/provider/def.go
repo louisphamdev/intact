@@ -37,6 +37,11 @@ type Def struct {
 	AuthPrefix string `json:"authPrefix,omitempty"`
 	// Headers are sent on every call (for example anthropic-version).
 	Headers map[string]string `json:"headers,omitempty"`
+	// Identity headers always replace what the caller sent, the way a built-in
+	// provider's Identity does: an upstream that refuses an unrecognised client
+	// needs the provider's own client to name itself here, not merely as a
+	// default the caller can shadow.
+	Identity map[string]string `json:"identity,omitempty"`
 	// ModelsURL is where the model list is read: empty means BaseURL +
 	// "/models"; "none" means the provider has no list (use Models).
 	ModelsURL string `json:"modelsUrl,omitempty"`
@@ -198,10 +203,21 @@ func (d Def) Provider() Provider {
 	if d.Of != "" {
 		p := registry[d.Of]
 		p.ID = d.ID
+		if len(d.Identity) > 0 {
+			id := make(map[string]string, len(p.Identity)+len(d.Identity))
+			for k, v := range p.Identity {
+				id[k] = v
+			}
+			for k, v := range d.Identity {
+				id[k] = v
+			}
+			p.Identity = id
+		}
 		return p
 	}
 	p := Provider{ID: d.ID, BaseURL: d.BaseURL, AuthHeader: d.AuthHeader, AuthPrefix: d.AuthPrefix,
-		Models: d.Models, Defaults: map[string]string{}, ReplayReasoning: d.ReplayReasoning, QuotaURL: d.QuotaURL}
+		Models: d.Models, Defaults: map[string]string{}, Identity: d.Identity,
+		ReplayReasoning: d.ReplayReasoning, QuotaURL: d.QuotaURL}
 	if d.API != "openai" {
 		p.API = d.API
 	}

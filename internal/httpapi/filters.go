@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/louisphamdev/intact/internal/filter"
+	"github.com/louisphamdev/intact/internal/provider"
 	"github.com/louisphamdev/intact/internal/store"
 )
 
@@ -23,7 +24,12 @@ type filterCache struct {
 func (a *api) rulesFor(prov string) []filter.Rule {
 	a.filters.mu.RLock()
 	if a.filters.ready {
-		out := append(append([]filter.Rule{}, a.filters.by["*"]...), a.filters.by[prov]...)
+		out := append([]filter.Rule{}, a.filters.by["*"]...)
+		// A copy runs its original's rules first, then its own.
+		if base := provider.Base(prov); base != prov {
+			out = append(out, a.filters.by[base]...)
+		}
+		out = append(out, a.filters.by[prov]...)
 		a.filters.mu.RUnlock()
 		return out
 	}

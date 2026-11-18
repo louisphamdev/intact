@@ -61,7 +61,7 @@ func proxyAdded(k string) bool {
 // always reads plain bytes.
 func (a *api) newOutbound(r *http.Request, p provider.Provider, providerID, path, secret string, body io.Reader) (*http.Request, error) {
 	base := p.BaseURL
-	if over, ok := a.baseOverride[providerID]; ok {
+	if over, ok := a.baseOverride[provider.Base(providerID)]; ok {
 		base = over
 	}
 	target := base + "/" + path

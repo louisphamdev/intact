@@ -622,7 +622,7 @@ func (a *api) claimReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claimer, hasClaimer := resetClaimers[conn.Provider]
+	claimer, hasClaimer := resetClaimers[provider.Base(conn.Provider)]
 	if !hasClaimer {
 		writeError(w, http.StatusNotFound, "provider has no claimer")
 		return
@@ -705,7 +705,7 @@ func (a *api) claimReset(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "cannot read resets now")
 		return
 	}
-	if conn.Provider == "claude" {
+	if provider.Base(conn.Provider) == "claude" {
 		if body.ResetID == "weekly" && !fresh.HasJuniperTide {
 			writeError(w, http.StatusServiceUnavailable, "cannot read resets now")
 			return

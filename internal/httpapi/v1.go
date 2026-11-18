@@ -729,7 +729,7 @@ func (a *api) getModels(ctx context.Context, conn store.Connection) (*http.Respo
 		return nil, err
 	}
 	base := p.BaseURL
-	if over, ok := a.baseOverride[conn.Provider]; ok {
+	if over, ok := a.baseOverride[provider.Base(conn.Provider)]; ok {
 		base = over
 	}
 	url := base + "/models"

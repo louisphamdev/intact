@@ -469,6 +469,14 @@ const VI={
 'Whose turn the next request of this profile goes to':'Lượt tiếp theo của nhóm này đi tới tài khoản nào',
 'Fetch models':'Tải model','Fetch the model list first.':'Tải danh sách model trước.',
 "Read the model list through this profile\'s own accounts":'Đọc danh sách model qua chính các tài khoản của nhóm này',
+// copies of a provider
+'Copy of {0}':'Bản sao của {0}','Created':'Đã tạo','Move':'Chuyển','To':'Sang','Call it as':'Gọi bằng',
+'A second {0} with its own accounts, rotation and models':'Một {0} thứ hai với tài khoản, xoay vòng và model riêng',
+'Same sign-in and upstream as {0}. Its accounts, rotation and models are its own.':'Đăng nhập và upstream giống {0}. Tài khoản, xoay vòng và model là của riêng nó.',
+'Delete this copy. Move or delete its accounts first.':'Xoá bản sao này. Chuyển hoặc xoá tài khoản của nó trước.',
+'Move this account to another provider of the {0} family':'Chuyển tài khoản này sang provider khác cùng họ {0}',
+'Move {0}':'Chuyển {0}','Moved to {0}':'Đã chuyển sang {0}',
+'The account keeps its sign-in. Calls to {0} stop using it.':'Tài khoản giữ nguyên đăng nhập. Call tới {0} sẽ không dùng nó nữa.',
 // menu, frame
 'Endpoint':'Endpoint','Providers':'Nhà cung cấp','Blacklist':'Blacklist','Drift':'Drift','Docs':'Tài liệu','Quota':'Hạn mức','Usage':'Sử dụng',
 'Sign out':'Đăng xuất','Not available':'Chưa dùng được','Valid from':'Hiệu lực từ','Expires':'Hết hạn','Next available':'Lượt tiếp theo','extra usage':'mức dùng thêm','now':'ngay bây giờ','in {0}':'sau {0}','1 per week':'1 lần/tuần','Clears':'Xoá giới hạn','{0} window':'khung {0}','5-hour limit reset':'Reset giới hạn 5 giờ','Available once you hit the 5-hour limit':'Dùng được khi bạn chạm giới hạn 5 giờ','Not offered to this client':'Không áp dụng cho client này','Needs a newer Claude Code version in intact':'Cần intact dùng Claude Code bản mới hơn','Available once you hit the limit':'Dùng được khi bạn chạm giới hạn','Already used':'Đã dùng','Cooling down':'Đang chờ hồi','Paused':'Tạm dừng','Not started yet':'Chưa bắt đầu','Expired':'Hết hạn','Not available ({0})':'Chưa dùng được ({0})','Collapse':'Thu gọn','Collapse menu':'Thu gọn menu','Expand menu':'Mở rộng menu','credential proxy':'proxy tài khoản LLM','intact home':'Trang chủ intact','Close':'Đóng',
@@ -722,19 +730,24 @@ const CATALOG={
 function pinfo(id){
   if(CATALOG[id])return CATALOG[id];
   const x=infoOf(id);
+  if(x.of)return {name:x.name||id,color:(CATALOG[x.of]||{}).color||'#52525b'};
   if(x.declared)return {name:x.name||id,color:x.color||'#52525b',api:x.api};
   if(id.startsWith('openai-compatible'))return {name:'OpenAI compatible',color:'#52525b'};
   return {name:id,color:'#52525b'};
 }
 const pname=id=>pinfo(id).name;
 const infoOf=p=>S.providers.find(x=>x.id===p)||{};
+// A copy: a built-in provider's upstream and sign-in under its own id, with its own accounts.
+const baseOf=p=>infoOf(p).of||p;
+const isCopy=p=>!!infoOf(p).of;
+const familyOf=p=>S.providers.map(x=>x.id).filter(id=>baseOf(id)===baseOf(p));
 // OAuth: an account that signs in as a real tool; API key: a documented API.
 const authOf=p=>infoOf(p).auth||'apikey';
 function authTag(p){
   return authOf(p)==='oauth'?el('span',{class:'badge accent',title:'Signs in as the real tool (OAuth)'},'OAuth'):el('span',{class:'badge',title:'Documented API with a key'},'API key');
 }
 function avatar(id,sm){
-  if(infoOf(id).icon)return el('span',{class:'av logo'+(sm?' sm':''),'aria-hidden':'true'},el('img',{src:'/icons/'+id+'.png',alt:''}));
+  if(infoOf(id).icon)return el('span',{class:'av logo'+(sm?' sm':''),'aria-hidden':'true'},el('img',{src:'/icons/'+baseOf(id)+'.png',alt:''}));
   if(infoOf(id).iconUrl)return el('span',{class:'av logo'+(sm?' sm':''),'aria-hidden':'true'},el('img',{src:infoOf(id).iconUrl,alt:'',referrerpolicy:'no-referrer'}));
   const n=pname(id).replace(/[^A-Za-z0-9 ]/g,'').split(' ').filter(Boolean);
   const t=(n.length>1?n[0][0]+n[1][0]:(n[0]||'?').slice(0,2)).toUpperCase();
@@ -976,29 +989,30 @@ function viewProviders(v){
   const q=el('input',{name:'provider-search',placeholder:'Search providers…',autocomplete:'off','aria-label':'Search providers'});
   header('Providers',null,el('div',{class:'search'},svg(ICON.search),q));
   const ids=[...new Set([...S.providers.map(x=>x.id),...S.accounts.map(a=>a.provider)])];
-  const byName=(a,b)=>pname(a).localeCompare(pname(b));
+  const byName=(a,b)=>pname(baseOf(a)).localeCompare(pname(baseOf(b)))||isCopy(a)-isCopy(b)||pname(a).localeCompare(pname(b));
   const oauthAll=S.providers.filter(x=>x.auth==='oauth').map(x=>x.id).sort(byName);
   const keyAll=S.providers.filter(x=>x.auth!=='oauth').map(x=>x.id).sort(byName);
-  const declared=S.providers.filter(x=>x.declared).map(x=>x.id).sort(byName);
+  const declared=S.providers.filter(x=>x.declared&&!x.of).map(x=>x.id).sort(byName);
   const card=p=>{
     const n=accountsOf(p).length,act=activeOf(p).length;
-    const api=isDeclared(p)?infoOf(p).api||'openai':'';
+    const api=isDeclared(p)&&!isCopy(p)?infoOf(p).api||'openai':'';
     return el('a',{class:'pcard'+(wired(p)?'':' dim'),href:'#/providers/'+encodeURIComponent(p),'data-q':(p+' '+pname(p)).toLowerCase()},
       avatar(p),
       el('div',{style:'min-width:0'},
         el('div',{class:'nm',text:pname(p)}),
         el('div',{style:'display:flex;gap:.45rem;align-items:center;flex-wrap:wrap'},
           el('span',{class:'status'+(act?' on':''),text:n?t('{0} connected',act)+(act<n?' · '+t('{0} off',n-act):''):'No connections'}),
-          api?el('span',{class:'badge',text:{openai:'OpenAI',anthropic:'Anthropic',responses:'Responses',typesafe:'TypeSafe'}[api]||api}):null)));
+          api?el('span',{class:'badge',text:{openai:'OpenAI',anthropic:'Anthropic',responses:'Responses',typesafe:'TypeSafe'}[api]||api}):null,
+          isCopy(p)?el('span',{class:'badge',text:t('Copy of {0}',pname(baseOf(p)))}):null)));
   };
   const group=(title,list,addLabel,onAdd,empty)=>el('div',{class:'sec'},
     el('div',{class:'sech'},el('h2',{class:'grow'},title),
       el('button',{class:'primary',type:'button',onclick:onAdd},svg(ICON.plus),addLabel)),
     list.length?el('div',{class:'pgrid'},list.map(card)):el('div',{class:'card empty',style:'padding:1.25rem'},empty));
   const body=el('div',{style:'display:grid;gap:1.75rem'},
-    group('OAuth',oauthAll.filter(p=>accountsOf(p).length&&!isDeclared(p)),'Sign in',
+    group('OAuth',oauthAll.filter(p=>(accountsOf(p).length||isCopy(p))&&(!isDeclared(p)||isCopy(p))),'Sign in',
       ()=>chooseProvider('Sign in with',oauthAll,p=>startLogin(p)),'No account signed in yet.'),
-    group('API providers',keyAll.filter(p=>accountsOf(p).length&&!isDeclared(p)),'Add API key',
+    group('API providers',keyAll.filter(p=>(accountsOf(p).length||isCopy(p))&&(!isDeclared(p)||isCopy(p))),'Add API key',
       ()=>chooseProvider('Add an API key for',keyAll,p=>addAccount(p)),'No API provider connected yet.'),
     group('Declared providers',declared,'Declare a provider',
       ()=>declareProvider(null),'No declared provider yet. Declare one with its URL and sign-in, and it works like a built-in one.'),
@@ -1217,14 +1231,17 @@ async function viewProvider(v,p,tab){
           el('b',{text:t('Profile {0}',prof.name)}),
           el('span',{class:'faint small',text:t(list.length===1?'{0} account':'{0} accounts',list.length)}),
           el('a',{class:'small',href:'#/providers/'+encodeURIComponent(p),text:t('See all {0} accounts',all.length)}))
-      : t(list.length===1?'{0} connection':'{0} connections',list.length));
-  if(!ok)v.append(el('div',{class:'notice'},t('intact cannot call "{0}" yet, so these accounts are stored but not used.',pname(p))));
+      : el('span',{style:'display:inline-flex;gap:.5rem;align-items:center;flex-wrap:wrap'},
+          t(list.length===1?'{0} connection':'{0} connections',list.length),
+          !isDeclared(p)&&ok?el('button',{class:'ghost',type:'button',title:t('A second {0} with its own accounts, rotation and models',pname(p)),onclick:()=>copyProvider(p)},svg(ICON.layers),'Copy'):null);
+  if(!ok)v.append(el('div',{class:'notice'},t('intact cannot call \"{0}\" yet, so these accounts are stored but not used.',pname(p))));
   if(setupOf(p)==='account'&&list.some(a=>!a.baseUrl))v.append(el('div',{class:'notice'},'A connection without an account ID cannot be used. Delete it and add it again with the account ID.'));
-  if(isDeclared(p))v.append(defCard(p));
+  if(isCopy(p))v.append(copyCard(p));
+  else if(isDeclared(p))v.append(defCard(p));
   if(prof)v.append(el('div',{class:'notice',style:'display:flex;gap:.6rem;align-items:center;flex-wrap:wrap'},
     el('span',{text:t('Viewing profile {0}: only its {1} account(s) are listed here. Callers named {2} reach those accounts alone.',prof.name,list.length,p+'-'+prof.name)}),
     el('a',{href:'#/providers/'+encodeURIComponent(p),text:t('See all {0} accounts of {1}',all.length,pname(p))})));
-  const loginBtn=LOGIN[p]||infoOf(p).flow?el('button',{class:'primary',type:'button',onclick:()=>startLogin(p)},svg(ICON.plus),'Login'):null;
+  const loginBtn=LOGIN[baseOf(p)]||infoOf(p).flow?el('button',{class:'primary',type:'button',onclick:()=>startLogin(p)},svg(ICON.plus),'Login'):null;
   const keyBtn=ok&&setupOf(p)!=='oauth'?el('button',{class:loginBtn?'ghost':'primary',type:'button',onclick:()=>addAccount(p)},svg(ICON.plus),loginBtn?'Add token':'Add'):null;
   // Thêm account khi đang xem một nhóm sẽ không cho account đó vào nhóm,
   // nên nút thêm bị ẩn và chú thích nói rõ điều đó.
@@ -1282,6 +1299,7 @@ async function viewProvider(v,p,tab){
           acctTest(a))),
       ok?acctTestBtn(a):null,
       a.isActive&&list.length>1?stby:null,
+      familyOf(p).length>1?el('button',{class:'ghost',type:'button',title:t('Move this account to another provider of the {0} family',pname(baseOf(p))),onclick:()=>moveAccount(a)},'Move'):null,
       el('button',{class:'danger',type:'button',onclick:()=>deleteAccount(a)},svg(ICON.trash),'Delete'),
       el('label',{class:'switch',title:a.isActive?'Active':'Off'},sw,el('span')));
     }));
@@ -2112,6 +2130,62 @@ function defCard(p){
   return box;
 }
 
+// ---- Copies of a built-in provider
+// A copy reaches the same upstream with the same sign-in, under its own id: its accounts,
+// rotation and models are its own, and a call names it as "<id>/<model>".
+function copyCard(p){
+  const b=baseOf(p);
+  return el('div',{class:'card pad'},
+    el('div',{class:'sech'},
+      el('div',{class:'grow',style:'display:flex;gap:.6rem;align-items:center;min-width:0'},
+        avatar(b,true),el('span',{},t('Copy of {0}',pname(b))),el('code',{class:'small',text:p+'/<model>'})),
+      el('button',{class:'danger',type:'button',title:'Delete this copy. Move or delete its accounts first.',onclick:async()=>{
+        if(!confirm(t('Delete the provider "{0}"?',pname(p))))return;
+        try{await postJSON('/provider-defs/'+encodeURIComponent(p)+'/delete',{});toast('Deleted');await load();location.hash='#/providers'}catch(e){alert(e.message)}}},
+        svg(ICON.trash),'Delete')),
+    el('p',{class:'muted small',style:'margin:.5rem 0 0',text:t('Same sign-in and upstream as {0}. Its accounts, rotation and models are its own.',pname(b))}));
+}
+const slug=s=>s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+function copyProvider(p){
+  $('chTitle').textContent=t('Copy {0}',pname(p));
+  const name=el('input',{placeholder:'Lite',autocomplete:'off','aria-label':'Name'});
+  const call=el('code',{class:'small'});
+  const err=el('div',{class:'err-msg'});
+  const show=()=>{const s=slug(name.value);call.textContent=s?p+'-'+s+'/<model>':''};
+  name.oninput=show;
+  const go=el('button',{class:'primary',type:'button'},'Create');
+  const create=async()=>{const s=slug(name.value);if(!s){name.focus();return}
+    go.disabled=true;err.textContent='';
+    try{const id=p+'-'+s;
+      await postJSON('/provider-defs',{id,name:pname(p)+' '+name.value.trim(),of:p});
+      closeModal('chModal');toast('Created');await load();location.hash='#/providers/'+encodeURIComponent(id)}
+    catch(e){err.textContent=e.message;go.disabled=false}};
+  go.onclick=create;name.onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing&&e.keyCode!==229)create()};
+  $('chBody').replaceChildren(
+    el('p',{class:'muted small',style:'margin:0',text:t('Same sign-in and upstream as {0}. Its accounts, rotation and models are its own.',pname(p))}),
+    el('label',{class:'f'},'Name',name),
+    el('div',{class:'small faint',style:'display:flex;gap:.4rem;align-items:center'},tr('Call it as'),call),err,
+    el('div',{style:'display:flex;justify-content:flex-end;gap:.5rem'},el('button',{class:'ghost',type:'button','data-close':true},'Cancel'),go));
+  openModal('chModal');name.focus();
+}
+function moveAccount(a){
+  const others=familyOf(a.provider).filter(x=>x!==a.provider);
+  $('chTitle').textContent=t('Move {0}',a.label||short(a.id));
+  const sel=el('select',{'aria-label':'Provider'},others.map(x=>el('option',{value:x,text:pname(x)+' ('+accountsOf(x).length+')'})));
+  const err=el('div',{class:'err-msg'});
+  const go=el('button',{class:'primary',type:'button'},'Move');
+  go.onclick=async()=>{go.disabled=true;err.textContent='';
+    try{await postJSON('/accounts/'+a.id+'/provider',{provider:sel.value});
+      closeModal('chModal');delete modelCache[a.provider];delete modelCache[sel.value];
+      toast(t('Moved to {0}',pname(sel.value)));await load()}
+    catch(e){err.textContent=e.message;go.disabled=false}};
+  $('chBody').replaceChildren(
+    el('p',{class:'muted small',style:'margin:0',text:t('The account keeps its sign-in. Calls to {0} stop using it.',pname(a.provider))}),
+    el('label',{class:'f'},'To',sel),err,
+    el('div',{style:'display:flex;justify-content:flex-end;gap:.5rem'},el('button',{class:'ghost',type:'button','data-close':true},'Cancel'),go));
+  openModal('chModal');
+}
+
 // ---- OAuth login
 // Providers whose accounts sign in. "paste": the browser ends on a page the
 // server cannot see, so the person pastes its URL or code; "device": GitHub.
@@ -2161,7 +2235,7 @@ async function runLogin(p,label){
   const go=el('button',{class:'primary',type:'button'},'Sign in');
   $('lBody').replaceChildren(
     el('div',{class:'f'},'1. Open the sign-in page',el('a',{href:r.url,target:'_blank',rel:'noopener',class:'primary',style:'display:inline-flex;justify-content:center;padding:.55rem;border-radius:8px;background:var(--accent-strong);color:#fff;text-decoration:none;font-weight:600'},t('Open {0} sign-in',pname(p)))),
-    el('label',{class:'f'},'2. '+tr((LOGIN[p]||{}).hint||'After signing in, copy the address the browser ends on (it may fail to load), or the code the page shows, and paste it here.'),input),err);
+    el('label',{class:'f'},'2. '+tr((LOGIN[baseOf(p)]||{}).hint||'After signing in, copy the address the browser ends on (it may fail to load), or the code the page shows, and paste it here.'),input),err);
   $('lFoot').replaceChildren(el('button',{class:'ghost',type:'button','data-close':true},'Cancel'),go);
   let busy=false;
   const submit=async()=>{

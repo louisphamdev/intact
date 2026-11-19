@@ -125,6 +125,11 @@ func readLimits(m map[string]any) (context, input, output, compact int64) {
 		pick(&input, l["max_prompt_tokens"])
 		pick(&output, l["max_output_tokens"])
 	}
+	if l, ok := m["limit"].(map[string]any); ok {
+		pick(&context, l["context"])
+		pick(&input, l["input"])
+		pick(&output, l["output"])
+	}
 	if tp, ok := m["top_provider"].(map[string]any); ok {
 		pick(&context, tp["context_length"])
 		pick(&output, tp["max_completion_tokens"])
@@ -218,6 +223,20 @@ func readInfo(m map[string]any) (ModelInfo, bool) {
 		for _, l := range effortOrder {
 			if v, ok := e[l].(map[string]any); ok && v["supported"] == true {
 				addEffort(l)
+			}
+		}
+	}
+	// OpenCode (capabilities.reasoning).
+	if r, ok := caps["reasoning"].(map[string]any); ok {
+		if sup, has := r["supported"].(bool); has {
+			yes(sup)
+		}
+		for _, e := range strs(r["effort"]) {
+			addEffort(e)
+		}
+		if def, ok := r["default"].(map[string]any); ok && str(def["type"]) == "effort" {
+			if v := str(def["value"]); v != "" && info.Default == "" {
+				info.Default = v
 			}
 		}
 	}

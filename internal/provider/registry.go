@@ -104,7 +104,7 @@ func (p Provider) WithAccount(accountID string) string {
 
 // ClaudeCLIVersion is the Claude Code version intact presents. An old version loses models
 // (claude-opus-5-5 needs 2.1.280, 2026-10-01) and quota resets (ineligible:cli_version).
-const ClaudeCLIVersion = "2.1.326"
+const ClaudeCLIVersion = "2.1.330"
 
 // ClaudeInteractiveUserAgent names the interactive Claude Code CLI. Anthropic offers quota
 // resets only to this surface: the "sdk-cli" surface below gets ineligible:surface.
@@ -267,13 +267,13 @@ const (
 // OAuth client is the one intact signs in with, so the pair stays consistent.
 // cl= is the changelist the release binary embeds; it changes with the version.
 const (
-	AntigravityVersion   = "1.5.9"
-	AntigravityUserAgent = "antigravity/cli/" + AntigravityVersion + " (aidev_client; os_type=windows; arch=amd64; cl=1021519450; auth_method=consumer)"
+	AntigravityVersion   = "1.5.14"
+	AntigravityUserAgent = "antigravity/cli/" + AntigravityVersion + " (aidev_client; os_type=windows; arch=amd64; cl=1026970498; auth_method=consumer)"
 )
 
 // CodexCLIVersion is the Codex CLI version intact presents; the backend hides
 // models that need a newer client.
-const CodexCLIVersion = "0.169.0"
+const CodexCLIVersion = "0.172.0"
 
 // Bifrost reports that a caller with this User-Agent is the provider's own
 // client, which reaches its account with only the credential changed.

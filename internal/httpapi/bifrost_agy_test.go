@@ -13,7 +13,7 @@ import (
 	"github.com/louisphamdev/intact/internal/store"
 )
 
-const agyCLIUA = "antigravity/cli/1.5.9 (aidev_client; os_type=windows; arch=amd64; cl=1021519450; auth_method=consumer)"
+const agyCLIUA = "antigravity/cli/1.5.14 (aidev_client; os_type=windows; arch=amd64; cl=1026970498; auth_method=consumer)"
 
 // agyBody is a Code Assist request as the Antigravity CLI writes it, with the
 // model named the way llm-switcher sends it to intact.

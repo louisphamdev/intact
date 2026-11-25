@@ -50,7 +50,7 @@ func TestClaudeCarriesTheIdentityOfTheRealTool(t *testing.T) {
 	// Identity is what names the tool. A caller must never be able to replace it,
 	// because the point of this provider is that the upstream sees Claude Code.
 	for k, want := range map[string]string{
-		"User-Agent": "claude-cli/2.1.326 (external, sdk-cli)",
+		"User-Agent": "claude-cli/2.1.330 (external, sdk-cli)",
 		"X-App":      "cli",
 	} {
 		if p.Identity[k] != want {
@@ -121,23 +121,23 @@ func TestNoBuiltinReplaysReasoning(t *testing.T) {
 // The Codex backend hides models from an old client_version: 0.155.1 did not list gpt-6.1-sol (2026-10-15).
 func TestCodexPresentsTheCurrentCLIVersion(t *testing.T) {
 	p, _ := Lookup("codex")
-	if p.Identity["User-Agent"] != "codex_cli_rs/0.169.0" || p.ModelsQuery != "client_version=0.169.0" {
+	if p.Identity["User-Agent"] != "codex_cli_rs/0.172.0" || p.ModelsQuery != "client_version=0.172.0" {
 		t.Fatalf("codex identity = %q, models query = %q", p.Identity["User-Agent"], p.ModelsQuery)
 	}
 }
 
 // The Antigravity CLI user agent carries the version and the changelist its release binary embeds
-// (1.5.9 embeds "changelist 1021519450", 2026-11-14).
+// (1.5.14 embeds "changelist 1026970498", 2026-11-21).
 func TestAntigravityPresentsTheCurrentCLIVersion(t *testing.T) {
-	want := "antigravity/cli/1.5.9 (aidev_client; os_type=windows; arch=amd64; cl=1021519450; auth_method=consumer)"
+	want := "antigravity/cli/1.5.14 (aidev_client; os_type=windows; arch=amd64; cl=1026970498; auth_method=consumer)"
 	if AntigravityUserAgent != want {
 		t.Fatalf("antigravity UA = %q, want %q", AntigravityUserAgent, want)
 	}
 }
 
-// Anthropic refuses claude-opus-5-5 to older Claude Code; intact presents 2.1.326 (2026-11-17).
+// Anthropic refuses claude-opus-5-5 to older Claude Code; intact presents 2.1.330 (2026-11-21).
 func TestClaudePresentsTheCurrentCLIVersion(t *testing.T) {
-	if ClaudeCLIVersion != "2.1.326" {
-		t.Fatalf("ClaudeCLIVersion = %q, want 2.1.326", ClaudeCLIVersion)
+	if ClaudeCLIVersion != "2.1.330" {
+		t.Fatalf("ClaudeCLIVersion = %q, want 2.1.330", ClaudeCLIVersion)
 	}
 }

@@ -687,7 +687,8 @@ func OpenAIResponseToResponses(body []byte, tools map[string]ToolMeta) ([]byte, 
 	}
 	c := asObj(firstOf(in["choices"]))
 	msg := asObj(c["message"])
-	incomplete := str(c["finish_reason"]) == "length"
+	finish := str(c["finish_reason"])
+	incomplete := finish == "length" || finish == "content_filter"
 	var output []any
 	if t := chatReasoning(msg); t != "" {
 		output = append(output, obj{"id": newID("rs_"), "type": "reasoning", "summary": []any{obj{"type": "summary_text", "text": t}}})
@@ -716,7 +717,11 @@ func OpenAIResponseToResponses(body []byte, tools map[string]ToolMeta) ([]byte, 
 	}
 	status, details := "completed", any(nil)
 	if incomplete {
-		status, details = "incomplete", obj{"reason": "max_output_tokens"}
+		reason := "max_output_tokens"
+		if finish == "content_filter" {
+			reason = "content_filter"
+		}
+		status, details = "incomplete", obj{"reason": reason}
 	}
 	return json.Marshal(obj{
 		"id": "resp_" + strings.TrimPrefix(str(in["id"]), "chatcmpl-"), "object": "response",
@@ -896,7 +901,7 @@ func OpenAIStreamToResponses(dst Flusher, src io.Reader, tools map[string]ToolMe
 		start()
 		closeReasoning()
 		closeMessage()
-		incomplete := finishReason == "length"
+		incomplete := finishReason == "length" || finishReason == "content_filter"
 		if incomplete {
 			for _, t := range toolsByIndex {
 				if !argsComplete(t.args.String()) {
@@ -907,7 +912,11 @@ func OpenAIStreamToResponses(dst Flusher, src io.Reader, tools map[string]ToolMe
 		closeTools()
 		status, details := "completed", any(nil)
 		if incomplete {
-			status, details = "incomplete", obj{"reason": "max_output_tokens"}
+			reason := "max_output_tokens"
+			if finishReason == "content_filter" {
+				reason = "content_filter"
+			}
+			status, details = "incomplete", obj{"reason": reason}
 		}
 		send("response.completed", obj{"response": snapshot(status, obj{"incomplete_details": details, "usage": responsesUsage(usage)})})
 		ended = true
